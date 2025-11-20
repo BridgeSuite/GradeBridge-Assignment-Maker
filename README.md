@@ -1,4 +1,4 @@
-# GradeBridge Lite
+# GradeBridge Lite Assigmnent Maker
 
 A professional, client-side assignment creation tool for educators.
 
