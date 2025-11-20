@@ -1,0 +1,97 @@
+{
+  "id": "e64577cd-d08c-4709-8eee-4485bc074cf0",
+  "courseCode": "ENG6",
+  "title": "Mini-Project 2: Motion Analysis and Plotting Lab Report",
+  "dueDate": "2025-11-15",
+  "dueTime": "00:00",
+  "preamble": "You may submit as many times as you wish up until the deadline. However, late submissions are not accepted. Note: it is a violation of academic integrity to submit code written by someone else or plots produced by someone else or by using another person's code.",
+  "problems": [
+    {
+      "id": "c5b9224b-3d8c-45cb-b343-9ac363320d3f",
+      "name": "Summary of the Project",
+      "description": "",
+      "subsections": [
+        {
+          "id": "567a2321-375e-4a25-b4b4-18a64e3458d6",
+          "name": "",
+          "description": "In your own words, write a short summary of what was done for this project. 4 points",
+          "points": 4,
+          "submissionType": "Text",
+          "maxImages": 1
+        }
+      ]
+    },
+    {
+      "id": "844120a3-b486-441f-9b50-e507c38e735d",
+      "name": "Data Analysis",
+      "description": "",
+      "subsections": [
+        {
+          "id": "8b077b20-2443-43d6-ac64-d95148c79e63",
+          "name": "",
+          "description": "This question refers to your final result at the end of Step 1 in the lab manual. Include below, the annotated plot produced from your own data.",
+          "points": 4,
+          "submissionType": "Image",
+          "maxImages": 1
+        },
+        {
+          "id": "dd00a193-db64-4fb7-9ab6-15238a27b05e",
+          "name": "",
+          "description": "This question refers to Step 2 in the lab manual. Include below, the annotated plot produced from your partner's data",
+          "points": 4,
+          "submissionType": "Image",
+          "maxImages": 1
+        },
+        {
+          "id": "7f6b0ede-2743-4377-88b1-5f9c2c0be30a",
+          "name": "",
+          "description": "Your partner's name",
+          "points": 1,
+          "submissionType": "Text",
+          "maxImages": 1
+        }
+      ]
+    },
+    {
+      "id": "9aef886f-46e5-46b3-b47a-eea57a84c639",
+      "name": "Use of AI",
+      "description": "If you used AI for any aspect of your lab, you must complete a short reflection documenting your AI use. You must also attach a log (either as a text log, or screenshots) of your interaction with AI. Your log does not need to be exhaustive, but should provide a reasonable overview of your interaction with the AI: you should include the important questions you asked but can omit the complete text of the AI's response and minor follow up questions. An example is provided on Canvas. Provide 1-3 sentences in answer to the following questions:",
+      "subsections": [
+        {
+          "id": "90a53916-baa6-440c-9682-4fd978d3e6af",
+          "name": "",
+          "description": "Which AI tool(s) did you use? E.g. cursor, ChatGPT, Gemini, etc.",
+          "points": 2,
+          "submissionType": "Text",
+          "maxImages": 1
+        },
+        {
+          "id": "4be0a4b5-8482-4c13-92b4-6bdd611a7506",
+          "name": "",
+          "description": "Describe how you used AI in your lab. E.g. to help with debugging, to suggest ways to improve efficiency/clarity of your code, etc.",
+          "points": 2,
+          "submissionType": "Text",
+          "maxImages": 1
+        },
+        {
+          "id": "42ab6af9-8d16-4970-9b64-c8b5d30aeb5c",
+          "name": "",
+          "description": "What steps did you take to verify that the responses given to you by the AI were good ones?",
+          "points": 2,
+          "submissionType": "Text",
+          "maxImages": 1
+        },
+        {
+          "id": "64b6ee4b-76cb-4fb9-aa12-048f44cab0bb",
+          "name": "",
+          "description": "Attach chat logs here as image",
+          "points": 4,
+          "submissionType": "Image",
+          "maxImages": 2
+        }
+      ]
+    }
+  ],
+  "createdAt": 1763664661848,
+  "updatedAt": 1763664661848
+}
