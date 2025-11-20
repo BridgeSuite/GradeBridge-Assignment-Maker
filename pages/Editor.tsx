@@ -1,11 +1,11 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { Assignment, Problem, Subsection, SubmissionType } from '../types';
 import { storageService } from '../services/storageService';
-import { Layout, Card, Button, Input, TextArea, Select } from '../components/Common';
-import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical } from 'lucide-react';
+import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview, Select } from '../components/Common';
+import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload } from 'lucide-react';
 
 const emptySubsection = (): Subsection => ({
   id: uuidv4(),
@@ -27,6 +27,7 @@ const Editor: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isEdit = Boolean(id);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [assignment, setAssignment] = useState<Assignment>({
     id: uuidv4(),
@@ -111,6 +112,57 @@ const Editor: React.FC = () => {
     setAssignment({ ...assignment, problems: newProblems });
   };
 
+  const handleLoadTemplate = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = e.target?.result as string;
+        const loadedAssignment = JSON.parse(json) as Assignment;
+
+        // Basic validation
+        if (!loadedAssignment.title || !Array.isArray(loadedAssignment.problems)) {
+          throw new Error("Invalid assignment format.");
+        }
+
+        // Generate new IDs for everything
+        const newAssignment = {
+          ...loadedAssignment,
+          id: uuidv4(),
+          title: loadedAssignment.title + ' (Template)',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          problems: loadedAssignment.problems.map(p => ({
+            ...p,
+            id: uuidv4(),
+            subsections: p.subsections.map(s => ({
+              ...s,
+              id: uuidv4()
+            }))
+          }))
+        };
+
+        setAssignment(newAssignment);
+        alert("Template loaded! You can now edit and save it as a new assignment.");
+      } catch (error) {
+        console.error(error);
+        alert("Failed to load template. Please ensure the file is a valid assignment JSON.");
+      }
+
+      // Reset input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
   // Move Problem logic
   const moveProblem = (index: number, direction: 'up' | 'down') => {
       if ((direction === 'up' && index === 0) || (direction === 'down' && index === assignment.problems.length - 1)) return;
@@ -121,10 +173,23 @@ const Editor: React.FC = () => {
   };
 
   return (
-    <Layout 
+    <Layout
       title={isEdit ? "Edit Assignment" : "Create Assignment"}
       action={
         <div className="flex gap-2">
+          <input
+            type="file"
+            accept=".json"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+          {!isEdit && (
+            <Button variant="secondary" onClick={handleLoadTemplate}>
+              <Upload className="w-4 h-4 mr-2" />
+              Load Template
+            </Button>
+          )}
           {isEdit && (
             <Button variant="danger" onClick={handleDeleteAssignment} className="mr-2">
               <Trash2 className="w-4 h-4 mr-2" />
@@ -168,8 +233,8 @@ const Editor: React.FC = () => {
               onChange={e => setAssignment({...assignment, dueTime: e.target.value})} 
             />
             <div className="md:col-span-2">
-              <TextArea 
-                label="Preamble / Instructions (LaTeX supported with $...$)" 
+              <TextAreaWithPreview
+                label="Preamble / Instructions (LaTeX supported with $...$)"
                 rows={3}
                 placeholder="Enter general instructions for the assignment here..."
                 value={assignment.preamble}
@@ -199,7 +264,7 @@ const Editor: React.FC = () => {
                  </div>
                  <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-4">
                     <div className="md:col-span-4">
-                       <Input 
+                       <InputWithPreview
                           placeholder="Problem Name (e.g. Binary Search)"
                           value={problem.name}
                           onChange={e => updateProblem(pIndex, { name: e.target.value })}
@@ -207,8 +272,8 @@ const Editor: React.FC = () => {
                        />
                     </div>
                     <div className="md:col-span-8">
-                       <Input 
-                          placeholder="Problem Description (Optional)"
+                       <InputWithPreview
+                          placeholder="Problem Description (Optional, LaTeX supported)"
                           value={problem.description}
                           onChange={e => updateProblem(pIndex, { description: e.target.value })}
                        />
@@ -227,16 +292,16 @@ const Editor: React.FC = () => {
                       
                       <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
                          <div className="md:col-span-3">
-                           <Input 
-                              placeholder="Subsection Name" 
+                           <InputWithPreview
+                              placeholder="Subsection Name"
                               value={sub.name}
                               onChange={e => updateSubsection(pIndex, sIndex, { name: e.target.value })}
                               className="text-sm"
                            />
                          </div>
                          <div className="md:col-span-4">
-                           <Input 
-                              placeholder="Description" 
+                           <InputWithPreview
+                              placeholder="Description (LaTeX supported)"
                               value={sub.description}
                               onChange={e => updateSubsection(pIndex, sIndex, { description: e.target.value })}
                               className="text-sm"

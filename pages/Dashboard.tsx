@@ -6,7 +6,7 @@ import { Assignment } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService } from '../services/exportService';
 import { Layout, Card, Button } from '../components/Common';
-import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload } from 'lucide-react';
+import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy } from 'lucide-react';
 
 const Dashboard: React.FC = () => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -71,7 +71,7 @@ const Dashboard: React.FC = () => {
           const shouldOverwrite = window.confirm(
             `Assignment "${importedAssignment.title}" already exists.\n\nClick OK to OVERWRITE the existing assignment.\nClick Cancel to create a NEW COPY.`
           );
-          
+
           if (!shouldOverwrite) {
             importedAssignment.id = uuidv4();
             importedAssignment.title = `${importedAssignment.title} (Copy)`;
@@ -85,13 +85,39 @@ const Dashboard: React.FC = () => {
         console.error(error);
         alert("Failed to import assignment. Please ensure the file is a valid assignment JSON.");
       }
-      
+
       // Reset input so the same file can be selected again if needed
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleDuplicate = (e: React.MouseEvent, assignment: Assignment) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Create a deep copy with new ID and modified title
+    const duplicated: Assignment = {
+      ...assignment,
+      id: uuidv4(),
+      title: `${assignment.title} (Copy)`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      // Deep copy problems and subsections
+      problems: assignment.problems.map(p => ({
+        ...p,
+        id: uuidv4(),
+        subsections: p.subsections.map(s => ({
+          ...s,
+          id: uuidv4()
+        }))
+      }))
+    };
+
+    storageService.save(duplicated);
+    navigate(`/edit/${duplicated.id}`);
   };
 
   return (
@@ -167,6 +193,14 @@ const Dashboard: React.FC = () => {
                     <span className="hidden sm:inline">Edit</span>
                   </Button>
                 </Link>
+                <Button
+                  variant="secondary"
+                  onClick={(e) => handleDuplicate(e, assignment)}
+                  title="Duplicate - Create a copy to edit"
+                >
+                  <Copy className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Copy</span>
+                </Button>
                 <Button variant="secondary" onClick={() => handleExport(assignment)} title="Export ZIP">
                   <Download className="w-4 h-4 sm:mr-2" />
                   <span className="hidden sm:inline">Export</span>

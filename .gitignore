@@ -40,3 +40,8 @@ coverage/
 
 # Claude Code
 .claude/
+
+# Test files and exports
+*_Export.zip
+*_Export/
+TestAssignmentInput.txt
