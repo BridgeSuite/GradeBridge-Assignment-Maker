@@ -2,6 +2,8 @@
 
 A professional, client-side assignment creation tool for educators. Built with BridgeSuite branding.
 
+**🚀 [Live Demo](https://andreknoesen.github.io/GradeBridge-Assignment-Maker/)** - Try the app now!
+
 ## Features
 
 ### Core Functionality
@@ -56,6 +58,12 @@ An example assignment is included in the `example_assignment/` folder:
    npm run build
    ```
    This will create a `dist` folder with static files you can host anywhere.
+
+4. **Deploy to GitHub Pages**
+   ```bash
+   npm run deploy
+   ```
+   This will automatically build and deploy the app to GitHub Pages.
 
 ## Tech Stack
 - **React 19** + TypeScript
