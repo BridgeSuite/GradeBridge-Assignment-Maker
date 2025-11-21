@@ -9,6 +9,12 @@ A professional, client-side assignment creation tool for educators to create str
 
 ## Overview
 
+**GradeBridge Assignment Maker** is a React-based web application that enables instructors to create professional assignments with structured problems, subsections, and multiple submission types. 
+
+100% Local: All processing happens entirely in your browser. No server is required, and no student data is ever transmitted over the internet.
+
+Open Source: This is a free, community-supported tool maintained by the BridgeSuite Open Source Project.
+
 **GradeBridge Assignment Maker** is a React-based web application that enables instructors to create professional assignments with structured problems, subsections, and multiple submission types. All processing happens **entirely in the browser** - no server required, no data transmitted anywhere.
 
 ### Key Features
