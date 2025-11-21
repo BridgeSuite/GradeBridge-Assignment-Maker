@@ -1,0 +1,625 @@
+# GradeBridge Assignment Maker - AI Context
+
+## Project Overview
+
+**Name**: GradeBridge Assignment Maker
+**Purpose**: Client-side web application for educators to create structured assignments with professional PDF templates for Gradescope
+**Organization**: BridgeSuite (Open Source Educational Tools)
+**Repository**: https://github.com/BridgeSuite/GradeBridge-Assignment-Maker
+**Live App**: https://bridgesuite.github.io/GradeBridge-Assignment-Maker/
+**License**: MIT
+
+**Key Philosophy**: 100% client-side, privacy-first, no server required, educator-friendly interface
+
+---
+
+## Architecture
+
+### Tech Stack
+- **React 18.2** with **TypeScript** (strict mode)
+- **Vite 5.1** for build and dev server
+- **Tailwind CSS** for styling
+- **No backend** - purely client-side application
+- **LocalStorage** for data persistence
+- **Key libraries**:
+  - KaTeX (LaTeX math rendering)
+  - jsPDF (PDF generation)
+  - JSZip (ZIP archive creation)
+  - file-saver (file download)
+  - uuid (unique identifiers)
+- **Lucide React** for icons
+- **React Router** for navigation
+
+### Build Configuration
+```typescript
+// vite.config.ts
+base: '/GradeBridge-Assignment-Maker/'  // CRITICAL for GitHub Pages
+server: { port: 3000 }
+```
+
+### Deployment
+- **Platform**: GitHub Pages
+- **Branch**: `gh-pages` (auto-created by gh-pages package)
+- **Deploy command**: `npm run deploy`
+- **Important files**:
+  - `public/.nojekyll` - Prevents Jekyll processing (required for _assets folder)
+  - Deploy script uses `--dotfiles` flag to include .nojekyll
+
+### GitHub Pages Setup Requirements
+1. Vite base path must match repo name
+2. `.nojekyll` file in public/ directory
+3. gh-pages package with `--dotfiles` flag
+4. GitHub Pages settings: Deploy from `gh-pages` branch (NOT main)
+5. Script paths must be relative (`./index.tsx` not `/index.tsx`)
+6. NO importmaps - let Vite bundle dependencies
+
+---
+
+## Critical Requirements
+
+### Privacy & Data
+- **NO external API calls** (except CDN for libraries)
+- **NO analytics or tracking**
+- **NO cookies**
+- **LocalStorage only** for persistence (key: `gradebridge_assignment`)
+- All processing happens in browser
+- Assignment data never leaves educator's device (unless they export)
+
+### Gradescope Compatibility
+- **Generate template PDFs** that Gradescope can use for region definition
+- **One page per subsection** in template PDFs
+- **Consistent headers** on all pages (course code, assignment title, problem number)
+- **Page breaks** enforced between subsections
+- **Problem numbering** must match Student Submission app PDFs
+- Template PDFs have placeholder boxes for student answers
+- **JSON export** must be compatible with Student Submission app
+
+### Integration with Student Submission App
+- **JSON schema** must match exactly what Student Submission app expects
+- **Problem numbering** must align
+- **Submission types** must be consistent:
+  - "Answer as text" → Text/LaTeX input
+  - "Answer as image" → Image uploads
+  - "AI Reflective" → AI usage documentation
+- **Points** structure must be preserved
+- **Images** embedded as base64 in JSON
+
+---
+
+## File Structure
+
+```
+gradebridge-assignment-maker/
+├── App.tsx                    # Main app component, routing
+├── index.tsx                  # Entry point, renders App
+├── types.ts                   # TypeScript interfaces (Assignment, Problem, Subsection)
+├── components/
+│   ├── Common.tsx             # Shared UI components (buttons, inputs, labels)
+│   ├── FormattedText.tsx      # LaTeX text rendering with KaTeX
+│   ├── Preview.tsx            # Assignment preview component
+│   └── PrivacyNotice.tsx      # Privacy modal (shown on first use)
+├── logos/
+│   └── BridgeSuite-logo.png       # BridgeSuite branding for PDFs
+├── public/
+│   └── .nojekyll              # CRITICAL: Prevents GitHub Pages Jekyll processing
+├── index.html                 # HTML entry point
+├── vite.config.ts             # Vite config with base path
+├── tailwind.config.js         # Tailwind CSS configuration
+├── postcss.config.js          # PostCSS configuration
+├── package.json               # Dependencies and deploy scripts
+├── .github/                   # Contribution templates
+│   ├── CONTRIBUTING.md
+│   ├── ISSUE_TEMPLATE/
+│   └── PULL_REQUEST_TEMPLATE.md
+└── README.md                  # Comprehensive user guide
+```
+
+---
+
+## Key Components
+
+### App.tsx
+- Main routing with React Router
+- State management for assignment creation
+- Load/save assignment to localStorage
+- PDF generation orchestration
+- JSON export with validation
+- ZIP package creation (JSON + PDF + images)
+
+### Common.tsx
+- Reusable UI components:
+  - `Button` - Styled buttons with variants
+  - `Input` - Text input fields
+  - `Textarea` - Multi-line text areas
+  - `Label` - Form labels
+  - `Select` - Dropdown selects
+  - `Card` - Container components
+- Consistent styling across app
+- Tailwind CSS utility classes
+
+### FormattedText.tsx
+- Renders text with LaTeX math using KaTeX
+- Parses `$...$` (inline) and `$$...$$` (display) math
+- Error handling for malformed LaTeX
+- Used in preview and PDF generation
+- Real-time rendering as user types
+
+### Preview.tsx
+- Shows assignment preview as students would see it
+- Renders all problems and subsections
+- Displays LaTeX math
+- Shows embedded images
+- Mimics Student Submission app appearance
+
+### PrivacyNotice.tsx
+- Modal shown on first app load
+- Explains data storage and privacy
+- "I Understand" button sets localStorage flag
+- Only shows once per browser
+
+---
+
+## Data Flow
+
+### 1. Create Assignment
+```
+User creates new assignment
+  → Initialize empty assignment object
+  → User enters metadata (title, course code, etc.)
+  → User adds problems
+  → User adds subsections
+  → User configures submission types
+  → Auto-save to localStorage
+```
+
+### 2. Add Problem/Subsection
+```
+User clicks "Add Problem"
+  → Generate unique ID (uuid)
+  → Add empty problem to state
+  → User enters problem statement
+  → User uploads problem image (optional)
+  → User adds subsections
+  → Each subsection has:
+    - Statement text
+    - Points value
+    - Submission types (checkboxes)
+    - Max images allowed (for image submissions)
+  → Auto-save
+```
+
+### 3. Generate Template PDF
+```
+User clicks "Generate Template PDF"
+  → Validate assignment (all required fields)
+  → Create jsPDF instance
+  → For each subsection:
+    - Add page with header (course code, problem number)
+    - Render problem statement with LaTeX
+    - Add placeholder box for student answer
+    - Add footer with points
+    - Page break
+  → Generate PDF blob
+  → Download PDF file
+```
+
+### 4. Export Assignment
+```
+User clicks "Export Assignment"
+  → Validate assignment structure
+  → Convert problem images to base64
+  → Create JSON object matching Student Submission schema
+  → Download JSON file
+  → Optionally create ZIP with JSON + PDF + images
+```
+
+### 5. Load Template
+```
+User clicks "Load Template"
+  → Select JSON file
+  → FileReader reads file
+  → Validate JSON structure
+  → Parse assignment object
+  → Update state
+  → Auto-save to localStorage
+```
+
+---
+
+## Assignment JSON Format
+
+The JSON format exported by this app is consumed by the Student Submission app.
+
+```json
+{
+  "assignment_title": "Mini-Project 1",
+  "course_code": "ECE416",
+  "course_name": "Digital Control Systems",
+  "preamble": "General instructions for the entire assignment...",
+  "total_points": 50,
+  "problems": [
+    {
+      "problem_statement": "Analyze the following control system...",
+      "points": 10,
+      "problem_image": {
+        "data": "data:image/png;base64,iVBORw0KG...",
+        "content_type": "image/png",
+        "filename": "system_diagram.png"
+      },
+      "subsections": [
+        {
+          "subsection_statement": "Derive the transfer function H(z)",
+          "points": 5,
+          "submission_elements": ["Answer as text"],
+          "max_images_allowed": 0
+        },
+        {
+          "subsection_statement": "Plot the step response",
+          "points": 5,
+          "submission_elements": ["Answer as image"],
+          "max_images_allowed": 2
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Critical Fields**:
+- `submission_elements`: Array of allowed answer types (MUST match Student Submission app)
+  - `"Answer as text"` → Text/LaTeX input
+  - `"Answer as image"` → Image uploads
+  - `"AI Reflective"` → AI usage documentation
+- `max_images_allowed`: Maximum images for image-based answers (integer)
+- `problem_image`: Optional base64-encoded image
+  - `data`: Base64 string with data URI prefix
+  - `content_type`: MIME type (image/png, image/jpeg)
+  - `filename`: Original filename
+- `subsections`: Array of sub-parts (optional, but common)
+- `points`: Integer points for each problem/subsection
+
+---
+
+## Common Tasks
+
+### Add a New Submission Type
+1. Update `types.ts` → Add to `SubmissionElement` type
+2. Update UI → Add checkbox for new type in subsection form
+3. Update `Preview.tsx` → Show new type in preview
+4. Update PDF generation → Add placeholder for new type
+5. **Coordinate with Student Submission app** - they must support it too
+6. Update README and documentation
+
+### Modify PDF Template Layout
+1. Edit PDF generation logic in `App.tsx` or dedicated PDF component
+2. Adjust jsPDF settings (margins, fonts, spacing)
+3. Test with multi-problem assignments
+4. Verify headers/footers match Gradescope requirements
+5. Test page breaks with various content lengths
+6. Export sample PDFs and test upload to Gradescope
+
+### Change Styling/Branding
+1. Update Tailwind classes in components
+2. Replace BridgeSuite logo in `logos/` directory
+3. Update colors in `tailwind.config.js`
+4. Test across all pages and components
+5. Verify PDF branding looks professional
+
+### Add Validation Rules
+1. Identify what needs validation (e.g., required fields)
+2. Add validation functions in `App.tsx` or separate utility file
+3. Display error messages to user (use toast or inline errors)
+4. Prevent export/PDF generation if validation fails
+5. Add helpful error messages guiding educators
+
+### Update Dependencies
+```bash
+npm update              # Update to latest compatible versions
+npm run build           # Test build succeeds
+npm run preview         # Test production build
+npm run deploy          # Deploy to GitHub Pages
+```
+
+---
+
+## Testing Workflows
+
+### Manual Testing Checklist
+- [ ] Create new assignment from scratch
+- [ ] Enter assignment metadata (title, course, preamble)
+- [ ] Add multiple problems (3+)
+- [ ] Add subsections to problems
+- [ ] Upload problem images (PNG, JPEG)
+- [ ] Configure submission types (text, image, AI)
+- [ ] Set points for problems and subsections
+- [ ] Preview assignment
+- [ ] Generate template PDF
+- [ ] Export assignment JSON
+- [ ] Load template (import JSON)
+- [ ] Verify all data persists after reload
+- [ ] Export ZIP package
+- [ ] Test on multiple browsers (Chrome, Firefox, Safari, Edge)
+
+### Test Assignments
+Create test assignments with:
+- 1 problem, 1 subsection (minimal)
+- 10 problems, 20 subsections (large)
+- Problems with and without images
+- All submission types
+- Long text with LaTeX
+- Various point values
+
+### Integration Testing with Student Submission App
+1. Create assignment in Assignment Maker
+2. Export JSON
+3. Load JSON in Student Submission app
+4. Verify all problems/subsections appear correctly
+5. Test all submission types work
+6. Generate student PDF
+7. Compare problem numbering and structure
+8. Upload both PDFs to Gradescope and verify alignment
+
+### Browser Compatibility
+- Chrome 90+ ✅
+- Firefox 88+ ✅
+- Safari 14+ ✅
+- Edge 90+ ✅
+- IE 11 ❌ (not supported)
+
+---
+
+## Deployment Process
+
+### Step-by-Step
+```bash
+# 1. Make changes locally
+npm run dev              # Test in development (port 3000)
+
+# 2. Build for production
+npm run build            # Runs TypeScript compiler + Vite build
+                         # Creates dist/ folder
+
+# 3. Preview production build
+npm run preview          # Test at http://localhost:4173
+
+# 4. Deploy to GitHub Pages
+npm run deploy           # Pushes dist/ to gh-pages branch
+
+# 5. Verify deployment
+# Go to: https://bridgesuite.github.io/GradeBridge-Assignment-Maker/
+# Hard refresh (Ctrl+Shift+R) to bypass cache
+```
+
+### Troubleshooting Deployment
+
+**Blank page after deployment:**
+- Check GitHub Pages settings: Should deploy from `gh-pages` branch
+- Verify `base` in vite.config.ts matches repo name
+- Check `.nojekyll` exists in dist/ folder (use `--dotfiles` flag)
+- Look for console errors in browser DevTools
+- Hard refresh or try incognito mode
+
+**Assets not loading (404):**
+- Verify base path in vite.config.ts
+- Check script paths are relative (`./index.tsx` not `/index.tsx`)
+- Ensure no importmaps (use bundled dependencies)
+- Check Vite build output for warnings
+
+**PDF generation fails:**
+- Check console for jsPDF errors
+- Verify logo images load correctly
+- Test with simpler assignments first
+- Check for LaTeX rendering errors
+
+**Tailwind styles not working:**
+- Verify postcss.config.js is correct
+- Check tailwind.config.js content paths
+- Run `npm run build` and check for errors
+- Clear cache and rebuild
+
+---
+
+## Code Style & Patterns
+
+### TypeScript
+- Use **strict mode** (no `any` types unless absolutely necessary)
+- Define interfaces in `types.ts`
+- Use **const** by default, **let** only for reassignment
+- Prefer functional components with hooks
+
+### React Patterns
+- Functional components with **React.FC**
+- **useState** for component state
+- **useEffect** for side effects (auto-save, localStorage)
+- **useCallback** for event handlers passed as props
+- Custom hooks for reusable logic (if needed)
+
+### Tailwind CSS
+- Use utility classes directly in JSX
+- Extract common patterns to `Common.tsx` components
+- Responsive design: `sm:`, `md:`, `lg:` breakpoints
+- Dark mode: Consider adding `dark:` variants
+
+### Naming Conventions
+- **Components**: PascalCase (`FormattedText.tsx`)
+- **Files**: PascalCase for components, camelCase for utilities
+- **Variables**: camelCase (`assignmentTitle`, `maxImagesAllowed`)
+- **Constants**: UPPER_SNAKE_CASE if truly constant
+
+### Comments
+- Explain **why**, not **what**
+- Document integration points with Student Submission app
+- Document Gradescope requirements and constraints
+- JSDoc for exported functions/components
+
+### Example
+```typescript
+interface SubsectionProps {
+  subsection: Subsection;
+  problemNumber: number;
+  subsectionNumber: number;
+}
+
+/**
+ * Renders a subsection with its statement, submission type checkboxes,
+ * and points input. Must maintain exact schema compatibility with
+ * Student Submission app for JSON export.
+ */
+export const SubsectionForm: React.FC<SubsectionProps> = ({
+  subsection,
+  problemNumber,
+  subsectionNumber,
+}) => {
+  // Component logic
+  return <div className="space-y-4">...</div>;
+};
+```
+
+---
+
+## Integration with Student Submission App
+
+This app **produces** JSON files consumed by **GradeBridge Student Submission**.
+
+### Schema Compatibility Requirements
+- JSON structure must match EXACTLY
+- Field names must be identical (case-sensitive)
+- Data types must match (strings, numbers, arrays, objects)
+- Required vs optional fields must align
+- Base64 image encoding must be consistent
+
+### Coordination Checklist
+When making changes:
+- [ ] Does this change the JSON schema?
+- [ ] Will Student Submission app still parse it?
+- [ ] Do we need to update Student Submission app too?
+- [ ] Should we version the schema?
+- [ ] Have we tested end-to-end workflow?
+
+### Breaking Changes
+If you must change the JSON format:
+1. **Version the schema** (add `schema_version` field)
+2. Update Assignment Maker export
+3. Update Student Submission import
+4. Support backward compatibility if possible
+5. Document migration path
+6. Update both READMEs
+7. Coordinate releases
+
+### Testing Integration
+```bash
+# Terminal 1: Run Assignment Maker
+cd gradebridge-assignment-maker
+npm run dev
+
+# Terminal 2: Run Student Submission
+cd GradeBridge-Lite
+npm run dev
+
+# Test workflow:
+# 1. Create assignment in Assignment Maker (port 3000)
+# 2. Export JSON
+# 3. Load JSON in Student Submission (port 3001)
+# 4. Complete assignment
+# 5. Generate PDF
+# 6. Verify structure matches template PDF
+```
+
+---
+
+## Known Issues & Limitations
+
+1. **Large assignments**: Very large assignments (50+ problems) may slow down browser
+2. **Image size**: Large images (>2MB each) increase JSON file size significantly
+3. **PDF generation**: Complex layouts with many images may take 10-20 seconds
+4. **LocalStorage limits**: Browsers typically limit to 5-10MB (watch total size)
+5. **Browser cache**: GitHub Pages CDN can be stubborn (hard refresh needed)
+6. **LaTeX errors**: Malformed LaTeX can break rendering (add better error handling)
+
+---
+
+## Educational Context
+
+### User Base
+- **Educators**: Create assignments, define problems, set grading criteria
+- **Instructional Designers**: Template creation for course materials
+- **Audience**: University-level engineering/math courses
+
+### Privacy Requirements
+- Educators may work with FERPA-protected materials
+- No data collection or transmission is critical
+- Transparency about data storage builds trust
+- No tracking of what assignments are created
+
+### Academic Integrity
+- Tool supports structured assignments with clear expectations
+- AI Reflective option promotes responsible AI use
+- Point allocation encourages balanced assessment design
+
+### Accessibility
+- Consider educators with disabilities
+- Keyboard navigation
+- Screen reader compatibility
+- Color contrast for readability
+- Clear labels and error messages
+
+---
+
+## Contact & Resources
+
+- **GitHub Org**: https://github.com/BridgeSuite
+- **Repository**: https://github.com/BridgeSuite/GradeBridge-Assignment-Maker
+- **Live App**: https://bridgesuite.github.io/GradeBridge-Assignment-Maker/
+- **Issues**: https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/issues
+- **Contributing**: See .github/CONTRIBUTING.md
+- **Related App**: GradeBridge Student Submission (consumes assignment JSONs)
+
+---
+
+## Quick Reference Commands
+
+```bash
+# Development
+npm install              # Install dependencies
+npm run dev              # Start dev server (port 3000)
+npm run build            # Build for production (TypeScript + Vite)
+npm run preview          # Preview production build
+
+# Deployment
+npm run deploy           # Deploy to GitHub Pages
+
+# Git
+git checkout -b feature/name   # Create feature branch
+git add .                      # Stage changes
+git commit -m "message"        # Commit with message
+git push origin feature/name   # Push branch
+```
+
+---
+
+## Version History
+
+- **v1.0.0** (Current): Full-featured assignment creation with PDF and JSON export
+- **v0.9.x**: Beta releases with core functionality
+- **v0.1.x**: Initial prototypes
+
+---
+
+## Future Enhancements
+
+Potential improvements:
+- [ ] Assignment templates library (common patterns)
+- [ ] Duplicate problem/subsection
+- [ ] Reorder problems via drag-and-drop
+- [ ] Rubric generation
+- [ ] Import from CSV/Excel
+- [ ] Better image compression
+- [ ] Dark mode
+- [ ] Collaborative editing (requires backend)
+- [ ] Assignment versioning
+- [ ] Analytics on assignment complexity
+
+---
+
+**Last Updated**: 2025-01-20
+**Maintainer**: BridgeSuite Open Source Project
