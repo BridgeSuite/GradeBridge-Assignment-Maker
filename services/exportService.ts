@@ -4,6 +4,103 @@ import jsPDF from 'jspdf';
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
 
+// =====================================================
+// FORMAT CONVERSION: Assignment Maker → Student Submission
+// =====================================================
+// The Student Submission app expects a different JSON format.
+// This function converts our internal format to their expected format.
+
+interface StudentSubmissionSubsection {
+  subsection_statement: string;
+  points: number;
+  submission_elements: string[];
+  max_images_allowed?: number;
+}
+
+interface StudentSubmissionProblem {
+  problem_statement: string;
+  points: number;
+  subsections: StudentSubmissionSubsection[];
+}
+
+interface StudentSubmissionAssignment {
+  assignment_title: string;
+  course_code: string;
+  preamble?: string;
+  total_points: number;
+  problems: StudentSubmissionProblem[];
+}
+
+const convertSubmissionType = (type: SubmissionType): string[] => {
+  switch (type) {
+    case SubmissionType.TEXT:
+      return ['Answer as text'];
+    case SubmissionType.IMAGE:
+      return ['Answer as image'];
+    case SubmissionType.AI_REFLECTIVE:
+      return ['AI Reflective'];
+    case SubmissionType.CODE:
+      return ['Answer as text']; // Code submissions render as text
+    case SubmissionType.FILE_UPLOAD:
+      return ['Answer as image']; // File uploads treated as images
+    default:
+      return ['Answer as text'];
+  }
+};
+
+const convertToStudentSubmissionFormat = (assignment: Assignment): StudentSubmissionAssignment => {
+  const problems: StudentSubmissionProblem[] = assignment.problems.map(prob => {
+    const subsections: StudentSubmissionSubsection[] = prob.subsections.map(sub => {
+      // Combine name and description for subsection_statement
+      let statement = '';
+      if (sub.name && sub.description) {
+        statement = `${sub.name}\n\n${sub.description}`;
+      } else if (sub.name) {
+        statement = sub.name;
+      } else if (sub.description) {
+        statement = sub.description;
+      }
+
+      return {
+        subsection_statement: statement,
+        points: sub.points,
+        submission_elements: convertSubmissionType(sub.submissionType),
+        max_images_allowed: sub.maxImages || 1
+      };
+    });
+
+    // Calculate problem points as sum of subsection points
+    const problemPoints = subsections.reduce((sum, sub) => sum + sub.points, 0);
+
+    // Combine name and description for problem_statement
+    let problemStatement = '';
+    if (prob.name && prob.description) {
+      problemStatement = `${prob.name}\n\n${prob.description}`;
+    } else if (prob.name) {
+      problemStatement = prob.name;
+    } else if (prob.description) {
+      problemStatement = prob.description;
+    }
+
+    return {
+      problem_statement: problemStatement,
+      points: problemPoints,
+      subsections
+    };
+  });
+
+  // Calculate total points
+  const totalPoints = problems.reduce((sum, prob) => sum + prob.points, 0);
+
+  return {
+    assignment_title: assignment.title,
+    course_code: assignment.courseCode,
+    preamble: assignment.preamble || undefined,
+    total_points: totalPoints,
+    problems
+  };
+};
+
 // Helper to add text with automatic page wrapping
 const addWrappedText = (doc: jsPDF, text: string, x: number, y: number, maxWidth: number, lineHeight: number, margin: number): number => {
   const lines = doc.splitTextToSize(text, maxWidth);
@@ -217,9 +314,13 @@ h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
 export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
     const zip = new JSZip();
-    
-    // 1. Spec JSON
-    zip.file('assignment_spec.json', JSON.stringify(assignment, null, 2));
+
+    // 1. Spec JSON - Convert to Student Submission format
+    const studentSubmissionFormat = convertToStudentSubmissionFormat(assignment);
+    zip.file('assignment_spec.json', JSON.stringify(studentSubmissionFormat, null, 2));
+
+    // Also include the original Assignment Maker format for backup/editing
+    zip.file('assignment_maker_backup.json', JSON.stringify(assignment, null, 2));
     
     // 2. Student PDF
     const studentPdf = createPDF(assignment, 'student');
