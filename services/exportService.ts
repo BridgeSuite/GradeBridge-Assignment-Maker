@@ -315,12 +315,9 @@ export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
     const zip = new JSZip();
 
-    // 1. Spec JSON - Convert to Student Submission format
-    const studentSubmissionFormat = convertToStudentSubmissionFormat(assignment);
-    zip.file('assignment_spec.json', JSON.stringify(studentSubmissionFormat, null, 2));
-
-    // Also include the original Assignment Maker format for backup/editing
-    zip.file('assignment_maker_backup.json', JSON.stringify(assignment, null, 2));
+    // 1. Spec JSON - Export Assignment Maker's canonical format
+    // Student Submission app accepts this format directly
+    zip.file('assignment_spec.json', JSON.stringify(assignment, null, 2));
     
     // 2. Student PDF
     const studentPdf = createPDF(assignment, 'student');
