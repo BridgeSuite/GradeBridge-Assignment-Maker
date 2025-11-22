@@ -36,6 +36,8 @@ Open Source: This is a free, community-supported tool maintained by the BridgeSu
 - **100% Client-Side Processing**: All work is stored locally in your browser
 - **Structured Assignment Creation**: Create assignments with multiple problems and subsections
 - **LaTeX Math Support**: Write mathematical expressions with live preview using KaTeX
+- **LaTeX Help Cheatsheet**: Built-in reference guide accessible from the header (fractions, integrals, Greek letters, matrices)
+- **Load Example Assignment**: One-click example to explore all features instantly
 - **Multiple Submission Types**: Support for text, image, and AI reflective answers
 - **Professional PDF Generation**: Export Gradescope-compatible template PDFs
 - **JSON Export**: Generate assignment specifications for the Student Submission app
@@ -106,7 +108,27 @@ This will automatically build and deploy the app to GitHub Pages.
 
 When you first open GradeBridge Assignment Maker, you'll see a **privacy notice** explaining that all data is stored locally in your browser. Click "I Understand" to proceed.
 
-### 2. Create a New Assignment
+### 2. Try the Example (Recommended for New Users)
+
+Click **"Load Example"** on the dashboard to instantly load a sample lab report assignment featuring:
+- Summary/reflection questions (text answers)
+- Data analysis with image uploads
+- AI usage documentation section
+- LaTeX math examples
+
+This helps you understand how assignments are structured before creating your own.
+
+### 3. LaTeX Help
+
+Click the **"LaTeX Help"** button in the header to open a comprehensive cheatsheet with:
+- **Basics**: Fractions, exponents, square roots, parentheses
+- **Symbols**: Greek letters, comparison operators, arrows, set notation
+- **Calculus**: Derivatives, integrals, limits, summations
+- **Matrices**: Matrix syntax, bracket types, vectors
+
+Each example shows the code to type and the rendered result.
+
+### 4. Create a New Assignment
 
 1. Click **"Create New Assignment"**
 2. Enter assignment details:
@@ -116,7 +138,7 @@ When you first open GradeBridge Assignment Maker, you'll see a **privacy notice*
    - **Preamble** (optional): General instructions for students
    - **Total Points**: Sum of all problem points
 
-### 3. Add Problems
+### 5. Add Problems
 
 For each problem:
 
@@ -130,7 +152,7 @@ For each problem:
    - **Direct Submission**: Students submit at the problem level
    - **Subsections**: Break the problem into parts (a, b, c, etc.)
 
-### 4. Configure Subsections (if applicable)
+### 6. Configure Subsections (if applicable)
 
 For each subsection:
 
@@ -147,7 +169,7 @@ For each subsection:
    - Set **Max Images Allowed** (e.g., 1, 2, 3)
    - Each image gets a dedicated page in the PDF
 
-### 5. LaTeX Support
+### 7. LaTeX in Questions
 
 Use LaTeX for mathematical notation:
 
@@ -156,7 +178,7 @@ Use LaTeX for mathematical notation:
 
 The preview updates in real-time as you type!
 
-### 6. Export Your Assignment
+### 8. Export Your Assignment
 
 #### Export JSON (for Students)
 1. Click **"Export JSON"**
@@ -173,7 +195,7 @@ The preview updates in real-time as you type!
 2. Contains both JSON and PDF files
 3. Useful for archiving or sharing complete assignments
 
-### 7. Load an Existing Assignment
+### 9. Load an Existing Assignment
 
 1. Click **"Load Template"**
 2. Select a previously exported JSON file
