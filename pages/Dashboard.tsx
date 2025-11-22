@@ -6,16 +6,26 @@ import { Assignment } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService } from '../services/exportService';
 import { Layout, Card, Button } from '../components/Common';
-import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy } from 'lucide-react';
+import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles } from 'lucide-react';
+import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
 
 const Dashboard: React.FC = () => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [statusMessage, setStatusMessage] = useState('');
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadAssignments();
   }, []);
+
+  const handleLoadExample = () => {
+    const example = createExampleAssignment();
+    storageService.save(example);
+    loadAssignments();
+    setStatusMessage(EXAMPLE_LOADED_MESSAGE);
+    setTimeout(() => setStatusMessage(''), 5000);
+  };
 
   const loadAssignments = () => {
     setAssignments(storageService.getAll());
@@ -132,6 +142,10 @@ const Dashboard: React.FC = () => {
             className="hidden" 
             onChange={handleFileUpload} 
           />
+          <Button variant="secondary" onClick={handleLoadExample}>
+            <Sparkles className="w-4 h-4 mr-2" />
+            Load Example
+          </Button>
           <Button variant="secondary" onClick={handleImportClick}>
             <Upload className="w-4 h-4 mr-2" />
             Import JSON
@@ -152,13 +166,28 @@ const Dashboard: React.FC = () => {
           </div>
           <h3 className="text-lg font-medium text-academic-900">No assignments yet</h3>
           <p className="mt-2 text-academic-500 max-w-sm mx-auto">
-            Create your first assignment to get started, or import an existing JSON specification.
+            Create your first assignment to get started, or try our example to explore the features.
           </p>
-          <div className="mt-6 flex gap-4 justify-center">
+          <div className="mt-6 flex flex-col sm:flex-row gap-4 justify-center items-center">
             <Link to="/create">
               <Button>Create Assignment</Button>
             </Link>
             <Button variant="secondary" onClick={handleImportClick}>Import JSON</Button>
+          </div>
+
+          {/* Example Assignment CTA */}
+          <div className="mt-8 pt-8 border-t border-academic-100">
+            <p className="text-sm text-academic-500 mb-3">New here? Try an example first:</p>
+            <button
+              onClick={handleLoadExample}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-lg shadow-lg transition-all font-medium"
+            >
+              <Sparkles className="w-5 h-5" />
+              Load Example Assignment
+            </button>
+            <p className="text-xs text-academic-400 mt-2 max-w-xs mx-auto">
+              Explore a real lab report assignment with multiple question types
+            </p>
           </div>
         </Card>
       ) : (

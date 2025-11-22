@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { HelpCircle } from 'lucide-react';
 import { FormattedText } from './FormattedText';
+import { LaTeXCheatsheet } from './LaTeXCheatsheet';
 
 export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' }> = ({ variant = 'primary', className = '', ...props }) => {
   const baseStyle = "inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors";
@@ -45,33 +47,59 @@ export const Card: React.FC<{ children: React.ReactNode; className?: string }> =
   </div>
 );
 
-export const Layout: React.FC<{ children: React.ReactNode; title?: string; action?: React.ReactNode }> = ({ children, title, action }) => (
-  <div className="min-h-screen bg-academic-50 flex flex-col">
-    <header className="bg-white border-b border-academic-200 sticky top-0 z-10">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-        <div className="flex items-center">
-          <Link to="/" className="flex items-center gap-3">
-            <img src="/logos/BridgeSuite.png" alt="BridgeSuite" className="w-8 h-8 object-contain" />
-            <div className="flex flex-col">
-              <h1 className="text-lg font-bold text-academic-900">Veri<span className="text-[#00A4E4]">Q</span>Ai</h1>
-              <span className="text-xs text-academic-500">Assignment Manager</span>
-            </div>
-          </Link>
+export const Layout: React.FC<{ children: React.ReactNode; title?: string; action?: React.ReactNode }> = ({ children, title, action }) => {
+  const [showLatexHelp, setShowLatexHelp] = useState(false);
+
+  return (
+    <div className="min-h-screen bg-academic-50 flex flex-col">
+      <header className="bg-white border-b border-academic-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <Link to="/" className="flex items-center gap-3">
+              <img src="/logos/BridgeSuite.png" alt="BridgeSuite" className="w-8 h-8 object-contain" />
+              <div className="flex flex-col">
+                <h1 className="text-lg font-bold text-academic-900">Veri<span className="text-[#00A4E4]">Q</span>Ai</h1>
+                <span className="text-xs text-academic-500">Assignment Manager</span>
+              </div>
+            </Link>
+            {/* LaTeX Help Button */}
+            <button
+              onClick={() => setShowLatexHelp(true)}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-sm text-academic-600 hover:text-academic-900 hover:bg-academic-100 rounded-md transition-colors"
+              title="LaTeX Math Help"
+            >
+              <HelpCircle className="w-4 h-4" />
+              <span>LaTeX Help</span>
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Mobile LaTeX Help Button */}
+            <button
+              onClick={() => setShowLatexHelp(true)}
+              className="sm:hidden p-2 text-academic-600 hover:text-academic-900 hover:bg-academic-100 rounded-md transition-colors"
+              title="LaTeX Math Help"
+            >
+              <HelpCircle className="w-5 h-5" />
+            </button>
+            {action && <div>{action}</div>}
+          </div>
         </div>
-        {action && <div>{action}</div>}
-      </div>
-    </header>
-    <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-      {title && <h2 className="text-2xl font-bold text-academic-900 mb-6 font-serif">{title}</h2>}
-      {children}
-    </main>
-    <footer className="bg-academic-800 text-academic-300 py-8 border-t border-academic-700">
-      <div className="max-w-7xl mx-auto px-4 text-center text-sm">
-        <p>&copy; {new Date().getFullYear()} GradeBridge Lite. Client-side Assignment Management.</p>
-      </div>
-    </footer>
-  </div>
-);
+      </header>
+      <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+        {title && <h2 className="text-2xl font-bold text-academic-900 mb-6 font-serif">{title}</h2>}
+        {children}
+      </main>
+      <footer className="bg-academic-800 text-academic-300 py-8 border-t border-academic-700">
+        <div className="max-w-7xl mx-auto px-4 text-center text-sm">
+          <p>&copy; {new Date().getFullYear()} GradeBridge Lite. Client-side Assignment Management.</p>
+        </div>
+      </footer>
+
+      {/* LaTeX Cheatsheet Modal */}
+      <LaTeXCheatsheet isOpen={showLatexHelp} onClose={() => setShowLatexHelp(false)} />
+    </div>
+  );
+};
 
 // TextArea with LaTeX Preview
 export const TextAreaWithPreview: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string }> = ({ label, className = '', value, ...props }) => {
