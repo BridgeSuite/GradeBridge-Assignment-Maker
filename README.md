@@ -7,6 +7,20 @@ A professional, client-side assignment creation tool for educators to create str
 
 **🚀 [Live Demo](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)** - Try the app now!
 
+
+## The Problem This Solves
+
+**Traditional assignment creation:** 3+ hours of fighting with Word formatting, equation editors, and inconsistent student submissions.
+
+**GradeBridge workflow:** 15 minutes to create professional assignments that auto-generate perfectly formatted student submissions.
+
+This is **Part 1** of the complete GradeBridge workflow:
+1. **Assignment Maker** (this app) - Create structured assignments with LaTeX support
+2. **[Student Submission](https://github.com/BridgeSuite/GradeBridge-Student-Submission)** - Students complete work and generate grading-ready PDFs
+
+📖 **[See the complete workflow explanation →](https://github.com/BridgeSuite/.github/blob/main/profile/WORKFLOW_MOTIVATION.md)**
+
+---
 ## Overview
 
 **GradeBridge Assignment Maker** is a React-based web application that enables instructors to create professional assignments with structured problems, subsections, and multiple submission types. 
