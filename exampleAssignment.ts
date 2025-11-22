@@ -118,11 +118,14 @@ Provide 1-3 sentences in answer to each question below:`,
       {
         id: uuidv4(),
         name: 'Mathematical Analysis (Bonus Example)',
-        description: `This section demonstrates LaTeX support in questions. You can use LaTeX notation like $E = mc^2$ for inline math or display equations like:
+        description: `This section demonstrates LaTeX support in questions. You can use LaTeX notation for math expressions.
 
-$$\\frac{d}{dt}\\left(\\frac{\\partial L}{\\partial \\dot{q}}\\right) - \\frac{\\partial L}{\\partial q} = 0$$
+LaTeX Examples - try typing these in your questions (with dollar signs around them):
+- Inline math: E = mc^2
+- Fractions: \\frac{d}{dt}\\left(\\frac{\\partial L}{\\partial \\dot{q}}\\right)
+- Display equations: Use double dollar signs for centered equations
 
-Try typing LaTeX in your assignment questions!`,
+Tip: Check out the LaTeX Help button in the header for more examples!`,
         subsections: [
           {
             id: uuidv4(),
@@ -130,7 +133,7 @@ Try typing LaTeX in your assignment questions!`,
             description: `Derive the equation of motion for the system. Your answer should include:
 
 - The kinematic equations used
-- Show that $v = v_0 + at$ leads to $x = x_0 + v_0 t + \\frac{1}{2}at^2$
+- Show that v = v_0 + at leads to x = x_0 + v_0 t + \\frac{1}{2}at^2 (type with dollar signs)
 - Explain each step clearly`,
             points: 5,
             submissionType: SubmissionType.TEXT,
