@@ -41,6 +41,11 @@ coverage/
 # Claude Code
 .claude/
 
+# AI/LLM development context files
+.aicontext
+context_for_ai.md
+session_notes.md
+
 # Test files and exports
 *_Export.zip
 *_Export/
