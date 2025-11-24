@@ -27,7 +27,7 @@ Create professional, structured assignments with LaTeX support and Gradescope in
 - **Structured Assignments** - Problems with subsections, points, and multiple submission types
 - **LaTeX Math Support** - Live preview with built-in cheatsheet (fractions, integrals, Greek letters, matrices)
 - **Multiple Submission Types** - Text, image uploads, and AI reflective documentation
-- **Export Options** - JSON (for students), PDF (for Gradescope), or complete ZIP package
+- **Rich Export Options** - JSON, PDF, HTML, and **editable LaTeX** source files
 - **Load Example** - One-click sample assignment to explore features instantly
 
 ---
@@ -54,6 +54,49 @@ cd GradeBridge-Assignment-Maker
 npm install
 npm run dev
 ```
+
+---
+
+## Export Formats
+
+The ZIP export includes **five files**, each useful for different workflows:
+
+| File | Format | Purpose |
+|------|--------|---------|
+| `assignment_spec.json` | JSON | For [Student Submission app](https://bridgesuite.github.io/GradeBridge-Student-Submission/) |
+| `assignment.pdf` | PDF | Student-facing assignment document |
+| `template.pdf` | PDF | Gradescope template with answer regions |
+| `assignment.html` | HTML | Web-viewable with MathJax rendering |
+| `assignment.tex` | **LaTeX** | **Editable source for customization** |
+
+### Standalone Value for Conventional Gradescope Workflows
+
+**You don't need the Student Submission app to benefit from Assignment Maker.** The auxiliary exports are valuable on their own:
+
+- **`template.pdf`** - Upload directly to Gradescope as your assignment template
+- **`assignment.pdf`** - Distribute to students as the assignment handout
+- **`assignment.tex`** - Edit in your LaTeX editor (Overleaf, TeXShop, etc.) for full customization before finalizing
+
+This makes Assignment Maker a **rapid prototyping tool** for creating traditional Gradescope assignments - even if students submit handwritten work or use their own PDF workflow.
+
+### LaTeX Export Details
+
+The `.tex` file is a complete, compilable document:
+
+```latex
+\documentclass[11pt,letterpaper]{article}
+\usepackage{amsmath,amssymb,amsthm}  % Full math support
+\usepackage{fancyhdr}                 % Professional headers
+\usepackage{geometry}                 % 1-inch margins
+...
+\section*{Problem 1: Derivatives \hfill (10 points)}
+Find the derivative of $f(x) = x^2 + 3x$.
+```
+
+- Compile with `pdflatex` - no additional setup needed
+- Math notation preserved exactly as entered
+- Professional academic formatting out of the box
+- Customize fonts, spacing, or add your institution's branding
 
 ---
 
