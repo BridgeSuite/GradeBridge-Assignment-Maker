@@ -56,7 +56,6 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <div className="flex items-center gap-4">
             <Link to="/" className="flex items-center gap-3">
-              <img src="/logos/BridgeSuite.png" alt="BridgeSuite" className="w-8 h-8 object-contain" />
               <div className="flex flex-col">
                 <h1 className="text-lg font-bold text-academic-900">Veri<span className="text-[#00A4E4]">Q</span>Ai</h1>
                 <span className="text-xs text-academic-500">Assignment Manager</span>
