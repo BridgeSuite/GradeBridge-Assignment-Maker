@@ -68,6 +68,18 @@ Submission types available:
 
 > **Tip:** Use Claude Code (CC) to generate the `.md` file from your lab manual — see [CC Prompt](#cc-prompt-generate-md-from-a-lab-manual) below.
 
+### Option C — Iterating with Claude Code (CC)
+
+The `.md` format enables a tight CC iteration loop so you never need to manually explain changes:
+
+1. CC generates `EEC1_Lab1_InLab.md` from your lab manual
+2. Click **Import Markdown** → assignment opens in the editor
+3. Make changes in the UI (adjust points, tweak descriptions, add rubrics, reorder problems)
+4. Click **Export .md** (top-right of editor) → downloads the updated `.md` with all your changes reflected
+5. Next CC session: *"read EEC1_Lab1_InLab.md"* — CC sees exactly the current state, no explanation needed
+
+This keeps the `.md` file as the single source of truth across both the app and CC.
+
 ---
 
 ## Markdown Assignment Format
