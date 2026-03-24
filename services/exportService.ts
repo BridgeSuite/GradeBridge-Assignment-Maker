@@ -527,6 +527,76 @@ const generateGradingRubric = (assignment: Assignment): object => {
   };
 };
 
+// =====================================================
+// MARKDOWN EXPORT — Assignment → .md (round-trip)
+// =====================================================
+
+const TYPE_TAG: Partial<Record<SubmissionType, string>> = {
+  [SubmissionType.TEXT]:          'text',
+  [SubmissionType.IMAGE]:         'image',
+  [SubmissionType.AI_REFLECTIVE]: 'ai-reflective',
+  [SubmissionType.TRUE_FALSE]:    'true-false',
+};
+
+const assignmentToMd = (assignment: Assignment): string => {
+  const lines: string[] = [];
+
+  // Header
+  lines.push(`# ${assignment.courseCode}: ${assignment.title}`);
+  lines.push('');
+  lines.push(`**Due:** ${assignment.dueDate || 'YYYY-MM-DD'} at ${assignment.dueTime || '23:59'}`);
+  if (assignment.preamble) {
+    lines.push(`**Preamble:** ${assignment.preamble}`);
+  }
+
+  assignment.problems.forEach((prob, pIdx) => {
+    lines.push('');
+    lines.push(`## Problem ${pIdx + 1}: ${prob.name}`);
+    if (prob.description) {
+      lines.push('');
+      lines.push(prob.description);
+    }
+
+    prob.subsections.forEach((sub, sIdx) => {
+      const letter = String.fromCharCode(97 + sIdx);
+      const isImage = sub.submissionType === SubmissionType.IMAGE;
+      const typeTag = isImage && sub.maxImages && sub.maxImages > 1
+        ? `image:${sub.maxImages}`
+        : (TYPE_TAG[sub.submissionType as SubmissionType] ?? 'text');
+
+      lines.push('');
+      lines.push(`### (${letter}) ${sub.name} [${sub.points} pts] [${typeTag}]`);
+
+      if (sub.description) {
+        lines.push(sub.description);
+      }
+
+      if (sub.submissionType === SubmissionType.AI_REFLECTIVE && sub.aiGradingPrompt) {
+        lines.push('');
+        // Wrap grading prompt as blockquote continuation lines
+        const words = sub.aiGradingPrompt;
+        // Split on sentence boundaries to keep lines readable
+        const sentences = words.split(/(?<=\.)\s+/);
+        sentences.forEach((sentence, i) => {
+          if (i === 0) {
+            lines.push(`> grading_prompt: ${sentence.trim()}`);
+          } else {
+            lines.push(`> ${sentence.trim()}`);
+          }
+        });
+      }
+
+      if (sub.submissionType === SubmissionType.TRUE_FALSE) {
+        lines.push('');
+        lines.push(`> correct_answer: ${sub.config || 'true'}`);
+      }
+    });
+  });
+
+  lines.push('');
+  return lines.join('\n');
+};
+
 export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
     const zip = new JSZip();
@@ -560,5 +630,16 @@ export const exportService = {
     // Handle file-saver import differences (default export vs named export property)
     const save = (FileSaver as any).saveAs || FileSaver;
     save(content, `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_Export.zip`);
+  },
+
+  downloadMd: (assignment: Assignment) => {
+    const md = assignmentToMd(assignment);
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 };

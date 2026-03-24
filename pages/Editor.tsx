@@ -4,8 +4,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { Assignment, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
 import { storageService } from '../services/storageService';
+import { exportService } from '../services/exportService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview, Select } from '../components/Common';
-import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload } from 'lucide-react';
+import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown } from 'lucide-react';
 
 const DEFAULT_AI_GRADING_CONFIG: AiGradingConfig = { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 };
 
@@ -204,6 +205,10 @@ const Editor: React.FC = () => {
               Delete
             </Button>
           )}
+          <Button variant="secondary" onClick={() => exportService.downloadMd(assignment)}>
+            <FileDown className="w-4 h-4 mr-2" />
+            Export .md
+          </Button>
           <Button variant="secondary" onClick={() => navigate('/')}>Cancel</Button>
           <Button onClick={handleSave}>
             <Save className="w-4 h-4 mr-2" />
