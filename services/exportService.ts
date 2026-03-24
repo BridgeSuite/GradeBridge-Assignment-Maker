@@ -492,14 +492,22 @@ const generateGradingRubric = (assignment: Assignment): object => {
       const subsectionId = `p${pIndex}s${sIndex}`;
       const isAi = sub.submissionType === SubmissionType.AI_REFLECTIVE;
       const isTrueFalse = sub.submissionType === SubmissionType.TRUE_FALSE;
+      const isImage = sub.submissionType === SubmissionType.IMAGE;
+      const subsectionLetter = String.fromCharCode(97 + sIndex);
 
       rubrics[subsectionId] = {
         subsection_id: subsectionId,
+        problem_number: pIndex + 1,
+        problem_name: prob.name,
+        subsection_letter: subsectionLetter,
+        subsection_name: sub.name,
+        display_name: `Problem ${pIndex + 1}(${subsectionLetter}): ${sub.name}`,
         max_points: sub.points,
+        grading_type: isAi ? 'ai' : isTrueFalse ? 'true_false' : isImage ? 'human_image' : 'human',
         grading_prompt: isAi ? (sub.aiGradingPrompt || '') : '',
-        grading_type: isAi ? 'ai' : isTrueFalse ? 'true_false' : 'human',
         ...(isAi && { min_words: sub.minWords ?? 250 }),
-        ...(isTrueFalse && { correct_answer: sub.config || 'true' })
+        ...(isTrueFalse && { correct_answer: sub.config || 'true' }),
+        ...(isImage && { max_images: sub.maxImages ?? 1 })
       };
     });
   });
@@ -513,7 +521,7 @@ const generateGradingRubric = (assignment: Assignment): object => {
     ai_grading_config: {
       model: assignment.aiGradingConfig?.model || 'claude-haiku-4-5-20251001',
       temperature: assignment.aiGradingConfig?.temperature ?? 0.1,
-      max_tokens: assignment.aiGradingConfig?.maxTokens || 512
+      max_tokens: assignment.aiGradingConfig?.maxTokens || 1024
     },
     rubrics
   };
