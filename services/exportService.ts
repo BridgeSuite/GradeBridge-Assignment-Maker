@@ -1,5 +1,5 @@
 
-import { Assignment, Problem, Subsection, SubmissionType } from '../types';
+import { Assignment, SubmissionType } from '../types';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
@@ -484,13 +484,53 @@ const generateLaTeX = (assignment: Assignment): string => {
   return latex;
 };
 
+const generateGradingRubric = (assignment: Assignment): object => {
+  const rubrics: Record<string, object> = {};
+
+  assignment.problems.forEach((prob, pIndex) => {
+    prob.subsections.forEach((sub, sIndex) => {
+      const subsectionId = `p${pIndex}s${sIndex}`;
+      const isAi = sub.submissionType === SubmissionType.AI_REFLECTIVE;
+      rubrics[subsectionId] = {
+        subsection_id: subsectionId,
+        max_points: sub.points,
+        grading_prompt: isAi ? (sub.aiGradingPrompt || '') : '',
+        grading_type: isAi ? 'ai' : 'human'
+      };
+    });
+  });
+
+  const assignmentId = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}`;
+
+  return {
+    assignment_id: assignmentId,
+    course_code: assignment.courseCode,
+    assignment_title: assignment.title,
+    ai_grading_config: {
+      model: assignment.aiGradingConfig?.model || 'claude-haiku-4-5-20251001',
+      temperature: assignment.aiGradingConfig?.temperature ?? 0.1,
+      max_tokens: assignment.aiGradingConfig?.maxTokens || 512
+    },
+    rubrics
+  };
+};
+
 export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
     const zip = new JSZip();
 
-    // 1. Spec JSON - Export Assignment Maker's canonical format
-    // Student Submission app accepts this format directly
-    zip.file('assignment_spec.json', JSON.stringify(assignment, null, 2));
+    // 1. Public Spec JSON - strip private grading prompts before export
+    const publicAssignment = {
+      ...assignment,
+      problems: assignment.problems.map(prob => ({
+        ...prob,
+        subsections: prob.subsections.map(sub => {
+          const { aiGradingPrompt: _, ...rest } = sub;
+          return rest;
+        })
+      }))
+    };
+    zip.file('assignment_spec.json', JSON.stringify(publicAssignment, null, 2));
 
     // 2. Student PDF
     const studentPdf = createPDF(assignment, 'student');
@@ -507,6 +547,11 @@ export const exportService = {
     // 5. LaTeX (editable source file for instructors)
     const latex = generateLaTeX(assignment);
     zip.file('assignment.tex', latex);
+
+    // 6. Grading Rubric JSON (private — for autograder only)
+    const rubric = generateGradingRubric(assignment);
+    const rubricFilename = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_grading_rubric.json`;
+    zip.file(rubricFilename, JSON.stringify(rubric, null, 2));
 
     const content = await zip.generateAsync({ type: 'blob' });
 

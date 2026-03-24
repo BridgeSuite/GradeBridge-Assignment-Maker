@@ -8,6 +8,12 @@ export enum SubmissionType {
   FILE_UPLOAD = 'File Upload'
 }
 
+export interface AiGradingConfig {
+  model: string;
+  temperature: number;
+  maxTokens: number;
+}
+
 export interface Subsection {
   id: string;
   name: string;
@@ -16,6 +22,7 @@ export interface Subsection {
   submissionType: SubmissionType;
   maxImages?: number; // Specific for Image submission types
   config?: string; // For extra data like prompts or IDs
+  aiGradingPrompt?: string;
 }
 
 export interface Problem {
@@ -33,6 +40,7 @@ export interface Assignment {
   dueTime: string; // HH:MM
   preamble: string;
   problems: Problem[];
+  aiGradingConfig: AiGradingConfig;
   createdAt: number;
   updatedAt: number;
 }

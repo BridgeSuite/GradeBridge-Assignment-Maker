@@ -142,6 +142,7 @@ Tip: Check out the LaTeX Help button in the header for more examples!`,
         ]
       }
     ],
+    aiGradingConfig: { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 },
     createdAt: now,
     updatedAt: now
   };

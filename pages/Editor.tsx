@@ -2,10 +2,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { Assignment, Problem, Subsection, SubmissionType } from '../types';
+import { Assignment, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
 import { storageService } from '../services/storageService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview, Select } from '../components/Common';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload } from 'lucide-react';
+
+const DEFAULT_AI_GRADING_CONFIG: AiGradingConfig = { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 };
 
 const emptySubsection = (): Subsection => ({
   id: uuidv4(),
@@ -13,7 +15,8 @@ const emptySubsection = (): Subsection => ({
   description: '',
   points: 0,
   submissionType: SubmissionType.TEXT,
-  maxImages: 1
+  maxImages: 1,
+  aiGradingPrompt: ''
 });
 
 const emptyProblem = (): Problem => ({
@@ -37,6 +40,7 @@ const Editor: React.FC = () => {
     dueTime: '23:59',
     preamble: '',
     problems: [emptyProblem()],
+    aiGradingConfig: DEFAULT_AI_GRADING_CONFIG,
     createdAt: Date.now(),
     updatedAt: Date.now()
   });
@@ -48,11 +52,13 @@ const Editor: React.FC = () => {
         // Ensure new fields exist on loaded data
         const sanitized = {
           ...loaded,
+          aiGradingConfig: loaded.aiGradingConfig || DEFAULT_AI_GRADING_CONFIG,
           problems: loaded.problems.map(p => ({
             ...p,
             subsections: p.subsections.map(s => ({
               ...s,
-              maxImages: s.maxImages || 1
+              maxImages: s.maxImages || 1,
+              aiGradingPrompt: s.aiGradingPrompt || ''
             }))
           }))
         };
@@ -138,12 +144,14 @@ const Editor: React.FC = () => {
           title: loadedAssignment.title + ' (Template)',
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          aiGradingConfig: loadedAssignment.aiGradingConfig || DEFAULT_AI_GRADING_CONFIG,
           problems: loadedAssignment.problems.map(p => ({
             ...p,
             id: uuidv4(),
             subsections: p.subsections.map(s => ({
               ...s,
-              id: uuidv4()
+              id: uuidv4(),
+              aiGradingPrompt: s.aiGradingPrompt || ''
             }))
           }))
         };
@@ -287,9 +295,10 @@ const Editor: React.FC = () => {
               {/* Subsections */}
               <div className="p-4 space-y-4 bg-white">
                 {problem.subsections.map((sub, sIndex) => (
-                   <div key={sub.id} className="flex flex-col md:flex-row gap-4 items-start md:items-center bg-academic-50/50 p-3 rounded border border-dashed border-academic-200 ml-8 relative">
+                   <React.Fragment key={sub.id}>
+                   <div className="flex flex-col md:flex-row gap-4 items-start md:items-center bg-academic-50/50 p-3 rounded border border-dashed border-academic-200 ml-8 relative">
                       <div className="absolute -left-8 top-3 font-mono font-bold text-academic-500">{String.fromCharCode(97 + sIndex)}.</div>
-                      
+
                       <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
                          <div className="md:col-span-3">
                            <InputWithPreview
@@ -308,7 +317,7 @@ const Editor: React.FC = () => {
                            />
                          </div>
                          <div className="md:col-span-1">
-                           <Input 
+                           <Input
                               type="number"
                               placeholder="Pts"
                               value={sub.points}
@@ -344,13 +353,26 @@ const Editor: React.FC = () => {
                          )}
                       </div>
 
-                      <button 
+                      <button
                         onClick={() => removeSubsection(pIndex, sIndex)}
                         className="text-academic-400 hover:text-red-500 transition-colors p-1"
                       >
                          <Trash2 className="w-4 h-4" />
                       </button>
                    </div>
+                   {sub.submissionType === SubmissionType.AI_REFLECTIVE && (
+                     <div className="ml-8 mt-1 mb-2 px-3">
+                       <TextArea
+                         label="AI Grading Rubric (private — not shown to students)"
+                         rows={4}
+                         placeholder="Describe how to grade this question. Include criteria, point breakdown, and what constitutes a strong vs weak response..."
+                         value={sub.aiGradingPrompt || ''}
+                         onChange={e => updateSubsection(pIndex, sIndex, { aiGradingPrompt: e.target.value })}
+                         className="text-sm"
+                       />
+                     </div>
+                   )}
+                   </React.Fragment>
                 ))}
                 <div className="ml-8">
                    <Button variant="ghost" onClick={() => addSubsection(pIndex)} className="text-xs">
