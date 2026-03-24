@@ -367,12 +367,39 @@ const Editor: React.FC = () => {
                          )}
                       </div>
 
-                      <button
+                         <button
                         onClick={() => removeSubsection(pIndex, sIndex)}
                         className="text-academic-400 hover:text-red-500 transition-colors p-1"
                       >
                          <Trash2 className="w-4 h-4" />
                       </button>
+                   </div>
+                   {/* Grading Mode Toggles */}
+                   <div className="ml-8 mt-1 flex flex-wrap items-center gap-2">
+                     <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Grading:</span>
+                     {([
+                       { label: 'Completion Auto', pts: 1, type: sub.submissionType === SubmissionType.AI_REFLECTIVE ? SubmissionType.TEXT : sub.submissionType },
+                       { label: 'Completion Human', pts: 3, type: sub.submissionType === SubmissionType.AI_REFLECTIVE ? SubmissionType.TEXT : sub.submissionType },
+                       { label: 'AI Reflective', pts: 100, type: SubmissionType.AI_REFLECTIVE },
+                     ] as { label: string; pts: number; type: SubmissionType }[]).map(({ label, pts, type }) => {
+                       const isActive = type === SubmissionType.AI_REFLECTIVE
+                         ? sub.submissionType === SubmissionType.AI_REFLECTIVE
+                         : sub.submissionType !== SubmissionType.AI_REFLECTIVE && sub.points === pts;
+                       return (
+                         <button
+                           key={label}
+                           type="button"
+                           onClick={() => updateSubsection(pIndex, sIndex, { submissionType: type, points: pts })}
+                           className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
+                             isActive
+                               ? 'bg-academic-700 text-white border-academic-700'
+                               : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                           }`}
+                         >
+                           {label} ({pts}pt{pts !== 1 ? 's' : ''})
+                         </button>
+                       );
+                     })}
                    </div>
                    {sub.submissionType === SubmissionType.AI_REFLECTIVE && (
                      <div className="ml-8 mt-1 mb-2 px-3 space-y-3">
