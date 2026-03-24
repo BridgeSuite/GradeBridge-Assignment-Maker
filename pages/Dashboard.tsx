@@ -6,14 +6,16 @@ import { Assignment } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService } from '../services/exportService';
 import { Layout, Card, Button } from '../components/Common';
-import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles } from 'lucide-react';
+import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
+import { parseMdToAssignment } from '../services/mdParserService';
 
 const Dashboard: React.FC = () => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [statusMessage, setStatusMessage] = useState('');
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mdFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadAssignments();
@@ -104,6 +106,30 @@ const Dashboard: React.FC = () => {
     reader.readAsText(file);
   };
 
+  const handleMdImportClick = () => {
+    mdFileInputRef.current?.click();
+  };
+
+  const handleMdFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const assignment = parseMdToAssignment(content);
+        storageService.save(assignment);
+        navigate(`/edit/${assignment.id}`);
+      } catch (error) {
+        console.error(error);
+        alert('Failed to parse markdown file. Please check the file format matches the GradeBridge assignment spec.');
+      }
+      if (mdFileInputRef.current) mdFileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
+  };
+
   const handleDuplicate = (e: React.MouseEvent, assignment: Assignment) => {
     e.preventDefault();
     e.stopPropagation();
@@ -135,12 +161,19 @@ const Dashboard: React.FC = () => {
       title="Assignment Dashboard" 
       action={
         <div className="flex gap-2">
-          <input 
-            type="file" 
-            accept=".json" 
-            ref={fileInputRef} 
-            className="hidden" 
-            onChange={handleFileUpload} 
+          <input
+            type="file"
+            accept=".json"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+          <input
+            type="file"
+            accept=".md"
+            ref={mdFileInputRef}
+            className="hidden"
+            onChange={handleMdFileUpload}
           />
           <Button variant="secondary" onClick={handleLoadExample}>
             <Sparkles className="w-4 h-4 mr-2" />
@@ -149,6 +182,10 @@ const Dashboard: React.FC = () => {
           <Button variant="secondary" onClick={handleImportClick}>
             <Upload className="w-4 h-4 mr-2" />
             Import JSON
+          </Button>
+          <Button variant="secondary" onClick={handleMdImportClick}>
+            <FileCode className="w-4 h-4 mr-2" />
+            Import Markdown
           </Button>
           <Link to="/create">
             <Button>
@@ -172,6 +209,10 @@ const Dashboard: React.FC = () => {
             <Link to="/create">
               <Button>Create Assignment</Button>
             </Link>
+            <Button variant="secondary" onClick={handleMdImportClick}>
+              <FileCode className="w-4 h-4 mr-2" />
+              Import Markdown
+            </Button>
             <Button variant="secondary" onClick={handleImportClick}>Import JSON</Button>
           </div>
 
