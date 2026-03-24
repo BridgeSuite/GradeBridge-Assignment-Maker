@@ -326,7 +326,7 @@ const Editor: React.FC = () => {
                               title="Points"
                            />
                          </div>
-                         <div className={`${sub.submissionType === SubmissionType.IMAGE ? 'md:col-span-2' : 'md:col-span-4'}`}>
+                         <div className={`${(sub.submissionType === SubmissionType.IMAGE || sub.submissionType === SubmissionType.TRUE_FALSE) ? 'md:col-span-2' : 'md:col-span-4'}`}>
                             <Select
                               value={sub.submissionType}
                               onChange={e => updateSubsection(pIndex, sIndex, { submissionType: e.target.value as SubmissionType })}
@@ -351,6 +351,20 @@ const Editor: React.FC = () => {
                                 />
                              </div>
                          )}
+                         {sub.submissionType === SubmissionType.TRUE_FALSE && (
+                           <div className="md:col-span-2">
+                             <Select
+                               value={sub.config || 'true'}
+                               onChange={e => updateSubsection(pIndex, sIndex, { config: e.target.value })}
+                               className="text-sm"
+                               title="Correct Answer"
+                               label="Correct Answer"
+                             >
+                               <option value="true">True</option>
+                               <option value="false">False</option>
+                             </Select>
+                           </div>
+                         )}
                       </div>
 
                       <button
@@ -361,7 +375,18 @@ const Editor: React.FC = () => {
                       </button>
                    </div>
                    {sub.submissionType === SubmissionType.AI_REFLECTIVE && (
-                     <div className="ml-8 mt-1 mb-2 px-3">
+                     <div className="ml-8 mt-1 mb-2 px-3 space-y-3">
+                       <div className="w-40">
+                         <Input
+                           type="number"
+                           label="Minimum Words"
+                           min={50}
+                           value={sub.minWords ?? 250}
+                           onChange={e => updateSubsection(pIndex, sIndex, { minWords: parseInt(e.target.value) || 250 })}
+                           className="text-sm"
+                           title="Minimum word count required from students (default 250)"
+                         />
+                       </div>
                        <TextArea
                          label="AI Grading Rubric (private — not shown to students)"
                          rows={4}

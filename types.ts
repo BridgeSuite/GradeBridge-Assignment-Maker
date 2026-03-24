@@ -3,6 +3,7 @@ export enum SubmissionType {
   TEXT = 'Text',
   IMAGE = 'Image',
   AI_REFLECTIVE = 'AI Reflective',
+  TRUE_FALSE = 'True/False',
   MATLAB_GRADER = 'MatlabGrader',
   CODE = 'Code',
   FILE_UPLOAD = 'File Upload'
@@ -23,6 +24,7 @@ export interface Subsection {
   maxImages?: number; // Specific for Image submission types
   config?: string; // For extra data like prompts or IDs
   aiGradingPrompt?: string;
+  minWords?: number; // Minimum word count for AI Reflective subsections (default 250)
 }
 
 export interface Problem {

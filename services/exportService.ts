@@ -491,11 +491,15 @@ const generateGradingRubric = (assignment: Assignment): object => {
     prob.subsections.forEach((sub, sIndex) => {
       const subsectionId = `p${pIndex}s${sIndex}`;
       const isAi = sub.submissionType === SubmissionType.AI_REFLECTIVE;
+      const isTrueFalse = sub.submissionType === SubmissionType.TRUE_FALSE;
+
       rubrics[subsectionId] = {
         subsection_id: subsectionId,
         max_points: sub.points,
         grading_prompt: isAi ? (sub.aiGradingPrompt || '') : '',
-        grading_type: isAi ? 'ai' : 'human'
+        grading_type: isAi ? 'ai' : isTrueFalse ? 'true_false' : 'human',
+        ...(isAi && { min_words: sub.minWords ?? 250 }),
+        ...(isTrueFalse && { correct_answer: sub.config || 'true' })
       };
     });
   });
@@ -519,18 +523,8 @@ export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
     const zip = new JSZip();
 
-    // 1. Public Spec JSON - strip private grading prompts before export
-    const publicAssignment = {
-      ...assignment,
-      problems: assignment.problems.map(prob => ({
-        ...prob,
-        subsections: prob.subsections.map(sub => {
-          const { aiGradingPrompt: _, ...rest } = sub;
-          return rest;
-        })
-      }))
-    };
-    zip.file('assignment_spec.json', JSON.stringify(publicAssignment, null, 2));
+    // 1. Spec JSON - full assignment including grading prompts so it can be reloaded as a template
+    zip.file('assignment_spec.json', JSON.stringify(assignment, null, 2));
 
     // 2. Student PDF
     const studentPdf = createPDF(assignment, 'student');
