@@ -270,6 +270,9 @@ const Editor: React.FC = () => {
                    <button onClick={() => moveProblem(pIndex, 'up')} disabled={pIndex === 0} className="hover:text-academic-700 disabled:opacity-30"><ChevronUp className="w-5 h-5" /></button>
                    <button onClick={() => moveProblem(pIndex, 'down')} disabled={pIndex === assignment.problems.length - 1} className="hover:text-academic-700 disabled:opacity-30"><ChevronDown className="w-5 h-5" /></button>
                  </div>
+                 <div className="flex items-center justify-center w-12 shrink-0">
+                   <span className="text-lg font-bold text-academic-700 font-serif">{pIndex + 1}</span>
+                 </div>
                  <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-4">
                     <div className="md:col-span-4">
                        <InputWithPreview
@@ -297,7 +300,7 @@ const Editor: React.FC = () => {
                 {problem.subsections.map((sub, sIndex) => (
                    <React.Fragment key={sub.id}>
                    <div className="flex flex-col md:flex-row gap-4 items-start md:items-center bg-academic-50/50 p-3 rounded border border-dashed border-academic-200 ml-8 relative">
-                      <div className="absolute -left-8 top-3 font-mono font-bold text-academic-500">{String.fromCharCode(97 + sIndex)}.</div>
+                      <div className="absolute -left-8 top-3 font-mono font-bold text-academic-500">{pIndex + 1}{String.fromCharCode(97 + sIndex)}.</div>
 
                       <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
                          <div className="md:col-span-3">
