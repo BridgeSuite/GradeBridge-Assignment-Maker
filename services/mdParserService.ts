@@ -51,14 +51,13 @@ function parseProblemHeader(line: string): { name: string } | null {
   return m ? { name: m[1].trim() } : null;
 }
 
-function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title' | 'dueDate' | 'dueTime' | 'preamble'> {
-  const meta = { courseCode: '', title: '', dueDate: '', dueTime: '23:59', preamble: '' };
+function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble'> {
+  const meta = { courseCode: '', title: '', preamble: '' };
   for (const line of lines) {
     const l = line.trim();
     let m = l.match(/^#\s+([^:]+):\s+(.+)$/);
     if (m) { meta.courseCode = m[1].trim(); meta.title = m[2].trim(); continue; }
-    m = l.match(/^\*\*Due:\*\*\s+(\d{4}-\d{2}-\d{2})\s+at\s+(\d{2}:\d{2})/);
-    if (m) { meta.dueDate = m[1]; meta.dueTime = m[2]; continue; }
+    // **Due:** lines are intentionally ignored — due dates are managed in Canvas
     m = l.match(/^\*\*Preamble:\*\*\s+(.+)$/);
     if (m) { meta.preamble = m[1].trim(); continue; }
   }
@@ -162,8 +161,6 @@ export function parseMdToAssignment(content: string): Assignment {
     id: uuidv4(),
     courseCode: meta.courseCode,
     title: meta.title,
-    dueDate: meta.dueDate,
-    dueTime: meta.dueTime,
     preamble: meta.preamble,
     problems,
     aiGradingConfig: DEFAULT_AI_CONFIG,

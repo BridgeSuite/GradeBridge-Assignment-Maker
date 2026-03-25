@@ -48,9 +48,10 @@ const Editor: React.FC = () => {
     if (id) {
       const loaded = storageService.get(id);
       if (loaded) {
-        // Ensure new fields exist on loaded data
+        // Ensure new fields exist on loaded data; strip deprecated fields
+        const { dueDate: _d, dueTime: _t, ...loadedWithoutDate } = loaded as any;
         const sanitized = {
-          ...loaded,
+          ...loadedWithoutDate,
           aiGradingConfig: loaded.aiGradingConfig || DEFAULT_AI_GRADING_CONFIG,
           problems: loaded.problems.map(p => ({
             ...p,
