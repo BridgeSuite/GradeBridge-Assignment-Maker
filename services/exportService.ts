@@ -101,6 +101,14 @@ const convertToStudentSubmissionFormat = (assignment: Assignment): StudentSubmis
   };
 };
 
+// Strip LaTeX math delimiters for plain-text PDF rendering (jsPDF cannot render math)
+const stripLatexForPDF = (text: string): string => {
+  if (!text) return '';
+  return text
+    .replace(/\$\$([\s\S]*?)\$\$/g, '$1')
+    .replace(/\$(.*?)\$/g, '$1');
+};
+
 // Helper to add text with automatic page wrapping
 const addWrappedText = (doc: jsPDF, text: string, x: number, y: number, maxWidth: number, lineHeight: number, margin: number): number => {
   const lines = doc.splitTextToSize(text, maxWidth);
@@ -153,7 +161,7 @@ const generatePDFContent = (doc: jsPDF, assignment: Assignment, isTemplate: bool
   if (assignment.preamble) {
     doc.setFont("times", "italic");
     doc.setFontSize(11);
-    y = addWrappedText(doc, assignment.preamble, margin, y, contentWidth, 6, margin);
+    y = addWrappedText(doc, stripLatexForPDF(assignment.preamble), margin, y, contentWidth, 6, margin);
     y += 10;
   }
 
@@ -183,19 +191,20 @@ const generatePDFContent = (doc: jsPDF, assignment: Assignment, isTemplate: bool
         // Header: Problem info (Repeated on every page for clarity)
         doc.setFont("times", "bold");
         doc.setFontSize(14);
-        doc.text(`Problem ${pIndex + 1}: ${prob.name}`, margin, y);
+        doc.text(`Problem ${pIndex + 1}: ${stripLatexForPDF(prob.name)}`, margin, y);
         y += 7;
 
-        // Problem description (only on first page of the subsection, or repeated? 
-        // Usually helpful to see it, but let's keep it compact if it's long. 
-        // We will show it on the first page of the first subsection of the problem, 
+        // Problem description (only on first page of the subsection, or repeated?
+        // Usually helpful to see it, but let's keep it compact if it's long.
+        // We will show it on the first page of the first subsection of the problem,
         // OR just show it on every page to be safe for the student context).
         if (prob.description && y < 50) {
              doc.setFont("times", "normal");
              doc.setFontSize(10);
              doc.setTextColor(100);
              // Just show first line to save space if it's a repeat page
-             const descText = (prob.description.length > 100) ? prob.description.substring(0, 100) + "..." : prob.description;
+             const cleanDesc = stripLatexForPDF(prob.description);
+             const descText = (cleanDesc.length > 100) ? cleanDesc.substring(0, 100) + "..." : cleanDesc;
              doc.text(descText, margin, y);
              doc.setTextColor(0);
              y += 8;
@@ -205,19 +214,19 @@ const generatePDFContent = (doc: jsPDF, assignment: Assignment, isTemplate: bool
         doc.setFont("times", "bold");
         doc.setFontSize(12);
         const subLabel = String.fromCharCode(97 + sIndex); // a, b, c...
-        
-        let title = `(${subLabel}) [${sub.points} pts] ${sub.name}`;
+
+        let title = `(${subLabel}) [${sub.points} pts] ${stripLatexForPDF(sub.name)}`;
         if (pageCount > 1) {
             title += ` (Page ${i + 1} of ${pageCount})`;
         }
-        
+
         doc.text(title, margin + 5, y);
         y += 6;
 
         if (sub.description) {
             doc.setFont("times", "normal");
             doc.setFontSize(11);
-            y = addWrappedText(doc, sub.description, margin + 5, y, contentWidth - 5, 5, margin);
+            y = addWrappedText(doc, stripLatexForPDF(sub.description), margin + 5, y, contentWidth - 5, 5, margin);
             y += 5;
         }
 
@@ -266,15 +275,15 @@ const generateHTML = (assignment: Assignment): string => {
 <html>
 <head>
 <title>${assignment.courseCode} - ${assignment.title}</title>
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script>
   window.MathJax = {
     tex: {
-      inlineMath: [['$', '$'], ['\\(', '\\)']],
-      displayMath: [['$$', '$$'], ['\\[', '\\]']]
+      inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+      displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']]
     }
   };
 </script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
 <style>
 body { font-family: 'Georgia', serif; max-width: 800px; margin: 40px auto; line-height: 1.6; padding: 0 20px; color: #333; }
 h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
