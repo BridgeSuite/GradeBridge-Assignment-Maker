@@ -137,9 +137,9 @@ export function parseMdToAssignment(content: string): Assignment {
       const aiGradingPrompt = extractBlockquoteValue('grading_prompt', body);
       const correctAnswer = extractBlockquoteValue('correct_answer', body);
 
-      // A grading_prompt always means AI Reflective at 100 pts
+      // A grading_prompt always means AI Reflective; respect the points set in the .md file
       const submissionType = aiGradingPrompt ? SubmissionType.AI_REFLECTIVE : subMeta.submissionType;
-      const points = aiGradingPrompt ? 100 : subMeta.points;
+      const points = subMeta.points;
 
       const subsection: Subsection = {
         id: uuidv4(),

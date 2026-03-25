@@ -118,7 +118,7 @@ Optional subsection description. LaTeX supported.
 
 ### Auto-Upgrade Rule
 
-**If a `> grading_prompt:` block is present on any subsection, the importer automatically sets the type to `AI Reflective` and points to 100** — regardless of what the tag or point value say. This means you can add a rubric to an existing question (e.g. one tagged `[text]`) and the importer will upgrade it automatically.
+**If a `> grading_prompt:` block is present on any subsection, the importer automatically sets the type to `AI Reflective`** — the point value in the `[N pts]` tag is always respected. This means you can add a rubric to an existing question (e.g. one tagged `[text]`) and the importer will upgrade the type automatically while keeping whatever points you set.
 
 ### Grading Prompt Format
 
