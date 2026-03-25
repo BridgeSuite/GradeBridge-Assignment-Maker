@@ -152,10 +152,7 @@ const generatePDFContent = (doc: jsPDF, assignment: Assignment, isTemplate: bool
   doc.text(`${assignment.courseCode}: ${assignment.title}`, margin, y);
   y += 10;
 
-  doc.setFont("times", "normal");
-  doc.setFontSize(12);
-  doc.text(`Due: ${assignment.dueDate} at ${assignment.dueTime}`, margin, y);
-  y += 20;
+  y += 10;
 
   // Preamble
   if (assignment.preamble) {
@@ -296,7 +293,7 @@ h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
 </head>
 <body>
   <h1>${assignment.courseCode}: ${assignment.title}</h1>
-  <div class="metadata">Due: ${assignment.dueDate} at ${assignment.dueTime}</div>
+  <div class="metadata">${assignment.courseCode}</div>
   <p>${assignment.preamble}</p>
 
   ${assignment.problems.map((p, i) => `
@@ -406,7 +403,6 @@ const generateLaTeX = (assignment: Assignment): string => {
 % ---- Title Section ----
 \\begin{center}
 {\\LARGE\\bfseries ${escapeLatex(assignment.courseCode)}: ${escapeLatex(assignment.title)}}\\\\[0.5em]
-{\\large Due: ${escapeLatex(assignment.dueDate)} at ${escapeLatex(assignment.dueTime)}}\\\\[0.3em]
 {\\large Total Points: ${totalPoints}}
 \\end{center}
 
@@ -553,7 +549,6 @@ const assignmentToMd = (assignment: Assignment): string => {
   // Header
   lines.push(`# ${assignment.courseCode}: ${assignment.title}`);
   lines.push('');
-  lines.push(`**Due:** ${assignment.dueDate || 'YYYY-MM-DD'} at ${assignment.dueTime || '23:59'}`);
   if (assignment.preamble) {
     lines.push(`**Preamble:** ${assignment.preamble}`);
   }

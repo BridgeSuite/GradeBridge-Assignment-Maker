@@ -38,8 +38,8 @@ export interface Assignment {
   id: string;
   courseCode: string;
   title: string;
-  dueDate: string; // ISO Date string
-  dueTime: string; // HH:MM
+  dueDate?: string; // ISO Date string — optional, managed in Canvas
+  dueTime?: string; // HH:MM — optional, managed in Canvas
   preamble: string;
   problems: Problem[];
   aiGradingConfig: AiGradingConfig;

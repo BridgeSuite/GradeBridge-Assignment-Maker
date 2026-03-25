@@ -243,8 +243,6 @@ const Dashboard: React.FC = () => {
                   <h3 className="text-lg font-bold text-academic-900">{assignment.title}</h3>
                 </div>
                 <div className="text-sm text-academic-500 flex flex-wrap gap-x-4">
-                  <span>Due: {new Date(assignment.dueDate).toLocaleDateString()} at {assignment.dueTime}</span>
-                  <span>•</span>
                   <span>{assignment.problems.length} Problems</span>
                   <span>•</span>
                   <span>Total Points: {assignment.problems.reduce((acc, p) => acc + p.subsections.reduce((sAcc, s) => sAcc + s.points, 0), 0)}</span>

@@ -37,8 +37,6 @@ const Editor: React.FC = () => {
     id: uuidv4(),
     courseCode: '',
     title: '',
-    dueDate: '',
-    dueTime: '23:59',
     preamble: '',
     problems: [emptyProblem()],
     aiGradingConfig: DEFAULT_AI_GRADING_CONFIG,
@@ -71,8 +69,8 @@ const Editor: React.FC = () => {
   }, [id, navigate]);
 
   const handleSave = () => {
-    if (!assignment.courseCode || !assignment.title || !assignment.dueDate) {
-      alert("Please fill in Course Code, Title, and Due Date.");
+    if (!assignment.courseCode || !assignment.title) {
+      alert("Please fill in Course Code and Title.");
       return;
     }
     storageService.save(assignment);
@@ -232,18 +230,6 @@ const Editor: React.FC = () => {
               placeholder="e.g. Homework 1: Intro" 
               value={assignment.title} 
               onChange={e => setAssignment({...assignment, title: e.target.value})} 
-            />
-            <Input 
-              label="Due Date" 
-              type="date" 
-              value={assignment.dueDate} 
-              onChange={e => setAssignment({...assignment, dueDate: e.target.value})} 
-            />
-            <Input 
-              label="Due Time" 
-              type="time" 
-              value={assignment.dueTime} 
-              onChange={e => setAssignment({...assignment, dueTime: e.target.value})} 
             />
             <div className="md:col-span-2">
               <TextAreaWithPreview

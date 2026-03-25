@@ -49,8 +49,7 @@ const Preview: React.FC = () => {
                   <p className="text-academic-600 m-0 font-medium">{assignment.courseCode}</p>
                </div>
                <div className="text-right text-sm text-academic-500">
-                  <p className="m-0">Due: <strong>{new Date(assignment.dueDate).toDateString()}</strong></p>
-                  <p className="m-0">Time: <strong>{assignment.dueTime}</strong></p>
+                  <p className="m-0">Set due date in Canvas</p>
                </div>
             </div>
             
