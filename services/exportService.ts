@@ -1,5 +1,6 @@
 
 import { Assignment, SubmissionType } from '../types';
+import { encryptJson } from './cryptoService';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
@@ -605,8 +606,10 @@ export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
     const zip = new JSZip();
 
-    // 1. Spec JSON - full assignment including grading prompts so it can be reloaded as a template
-    zip.file('assignment_spec.json', JSON.stringify(assignment, null, 2));
+    // 1. Spec JSON — encoded with AES-256-GCM so students cannot read or edit it.
+    //    The Student Submission app decodes it transparently on load.
+    //    Assignment Maker's "Import JSON" also handles encoded files.
+    zip.file('assignment_spec.json', await encryptJson(assignment));
 
     // 2. Student PDF
     const studentPdf = createPDF(assignment, 'student');

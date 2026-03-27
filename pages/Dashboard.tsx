@@ -9,6 +9,7 @@ import { Layout, Card, Button } from '../components/Common';
 import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
 import { parseMdToAssignment } from '../services/mdParserService';
+import { isEncoded, decryptJson } from '../services/cryptoService';
 
 const Dashboard: React.FC = () => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -56,10 +57,13 @@ const Dashboard: React.FC = () => {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
-        const json = e.target?.result as string;
-        const importedAssignment = JSON.parse(json) as Assignment;
+        const raw = (e.target?.result as string).trim();
+        // Support both encoded (gb1:…) and plain JSON (backward compatibility)
+        const importedAssignment = isEncoded(raw)
+          ? (await decryptJson(raw)) as Assignment
+          : JSON.parse(raw) as Assignment;
 
         // Basic validation
         if (!importedAssignment.id || !importedAssignment.title || !Array.isArray(importedAssignment.problems)) {
