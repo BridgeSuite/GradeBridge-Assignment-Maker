@@ -123,6 +123,23 @@ const Dashboard: React.FC = () => {
       try {
         const content = e.target?.result as string;
         const assignment = parseMdToAssignment(content);
+
+        // Check for existing assignment with same courseCode + title
+        const existing = storageService.getAll().find(
+          a => a.courseCode === assignment.courseCode && a.title === assignment.title
+        );
+
+        if (existing) {
+          const shouldOverwrite = window.confirm(
+            `"${assignment.courseCode}: ${assignment.title}" already exists.\n\nClick OK to OVERWRITE the existing assignment.\nClick Cancel to save as a NEW COPY.`
+          );
+          if (shouldOverwrite) {
+            assignment.id = existing.id;
+            assignment.createdAt = existing.createdAt;
+          }
+          // If cancel: keep new UUID → saves as new copy
+        }
+
         storageService.save(assignment);
         navigate(`/edit/${assignment.id}`);
       } catch (error) {
@@ -250,6 +267,8 @@ const Dashboard: React.FC = () => {
                   <span>{assignment.problems.length} Problems</span>
                   <span>•</span>
                   <span>Total Points: {assignment.problems.reduce((acc, p) => acc + p.subsections.reduce((sAcc, s) => sAcc + s.points, 0), 0)}</span>
+                  <span>•</span>
+                  <span>Updated {new Date(assignment.updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
                 </div>
               </div>
               <div className="flex items-center gap-2 border-t sm:border-t-0 pt-4 sm:pt-0 border-academic-100">
