@@ -103,12 +103,13 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
 // TextArea with LaTeX Preview
 export const TextAreaWithPreview: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string }> = ({ label, className = '', value, ...props }) => {
   const textVal = (value || '') as string;
-  const showPreview = textVal && (textVal.includes('$') || textVal.includes('\\'));
+  const hasLatex = textVal.includes('$') || textVal.includes('\\');
+  const showPreview = textVal.trim().length > 0 && hasLatex;
 
   return (
     <div className="w-full">
       {label && <label className="block text-sm font-medium text-academic-700 mb-1">{label}</label>}
-      <textarea className={`w-full bg-white text-academic-900 rounded-md border-academic-300 shadow-sm focus:border-academic-500 focus:ring-academic-500 sm:text-sm py-2 px-3 border ${className}`} value={value} {...props} />
+      <textarea className={`w-full bg-white text-academic-900 rounded-md border-academic-300 shadow-sm focus:border-academic-500 focus:ring-academic-500 sm:text-sm py-2 px-3 border resize-y ${className}`} value={value} {...props} />
       {showPreview && (
         <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
           <p className="text-xs text-blue-600 mb-1 font-bold uppercase">LaTeX Preview:</p>
