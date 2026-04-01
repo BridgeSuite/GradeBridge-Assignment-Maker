@@ -554,7 +554,7 @@ const generateGradingRubric = (assignment: Assignment): object => {
         subsection_name: sub.name,
         display_name: `Problem ${pIndex + 1}(${subsectionLetter}): ${sub.name}`,
         max_points: sub.points,
-        grading_type: isAi ? 'ai' : isImage ? 'human_image' : 'human',
+        grading_type: isAi ? 'ai' : isImage ? (sub.imageGradingMode === 'auto' ? 'ai_image_completion' : 'human_image') : 'human',
         grading_prompt: isAi ? (sub.aiGradingPrompt || '') : '',
         ...(isAi && minWords !== undefined && { min_words: minWords }),
         ...(isImage && { max_images: sub.maxImages ?? 1 })

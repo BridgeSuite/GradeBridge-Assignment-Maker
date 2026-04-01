@@ -24,6 +24,7 @@ export interface Subsection {
   points: number;
   submissionType: SubmissionType;
   maxImages?: number; // Specific for Image submission types
+  imageGradingMode?: 'human' | 'auto'; // Image only: 'human' = TA reviews; 'auto' = autograder checks images_submitted > 0
   config?: string; // For extra data like prompts or IDs
   aiGradingPrompt?: string;
   minWords?: number; // Minimum word count — derived from ai-graded category on import

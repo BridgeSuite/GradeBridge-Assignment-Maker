@@ -445,22 +445,47 @@ const Editor: React.FC = () => {
                        </button>
                      ))}
                      <span className="text-xs text-academic-300 mx-1">|</span>
-                     {([
-                       { label: '1pt completion', pts: 1 },
-                       { label: '3pt completion', pts: 3 },
-                     ] as { label: string; pts: number }[]).map(({ label, pts }) => (
-                       <button
-                         key={pts}
-                         type="button"
-                         onClick={() => updateSubsection(pIndex, sIndex, {
-                           points: pts,
-                           ...(AI_GRADED_TYPES.has(sub.submissionType) ? { submissionType: SubmissionType.TEXT } : {}),
-                         })}
-                         className="text-xs px-3 py-1 rounded-full border font-medium transition-colors bg-white text-academic-500 border-academic-200 hover:border-academic-400 hover:text-academic-700"
-                       >
-                         {label}
-                       </button>
-                     ))}
+                     {sub.submissionType === SubmissionType.IMAGE ? (
+                       <>
+                         <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Grading:</span>
+                         {([
+                           { label: 'Human Inspection', mode: 'human' as const },
+                           { label: 'AI Completion',    mode: 'auto'  as const },
+                         ]).map(({ label, mode }) => (
+                           <button
+                             key={mode}
+                             type="button"
+                             onClick={() => updateSubsection(pIndex, sIndex, { imageGradingMode: mode })}
+                             className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
+                               (sub.imageGradingMode ?? 'human') === mode
+                                 ? 'bg-academic-700 text-white border-academic-700'
+                                 : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                             }`}
+                           >
+                             {label}
+                           </button>
+                         ))}
+                       </>
+                     ) : (
+                       <>
+                         {([
+                           { label: '1pt completion', pts: 1 },
+                           { label: '3pt completion', pts: 3 },
+                         ] as { label: string; pts: number }[]).map(({ label, pts }) => (
+                           <button
+                             key={pts}
+                             type="button"
+                             onClick={() => updateSubsection(pIndex, sIndex, {
+                               points: pts,
+                               ...(AI_GRADED_TYPES.has(sub.submissionType) ? { submissionType: SubmissionType.TEXT } : {}),
+                             })}
+                             className="text-xs px-3 py-1 rounded-full border font-medium transition-colors bg-white text-academic-500 border-academic-200 hover:border-academic-400 hover:text-academic-700"
+                           >
+                             {label}
+                           </button>
+                         ))}
+                       </>
+                     )}
                    </div>
                    {AI_GRADED_TYPES.has(sub.submissionType) && (
                      <div className="ml-8 mt-1 mb-2 px-3 space-y-3">
