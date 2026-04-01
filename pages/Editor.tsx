@@ -5,10 +5,44 @@ import { v4 as uuidv4 } from 'uuid';
 import { Assignment, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService } from '../services/exportService';
-import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview, Select } from '../components/Common';
+import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown } from 'lucide-react';
 
 const DEFAULT_AI_GRADING_CONFIG: AiGradingConfig = { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 };
+
+const AI_GRADED_TYPES = new Set([
+  SubmissionType.AI_GRADED_BINARY,
+  SubmissionType.AI_GRADED_SHORT,
+  SubmissionType.AI_GRADED_MEDIUM,
+  SubmissionType.AI_GRADED_LONG,
+]);
+
+const AI_WORD_RANGES: Partial<Record<SubmissionType, { range: string; min: number }>> = {
+  [SubmissionType.AI_GRADED_BINARY]: { range: '20–40 words',   min: 20  },
+  [SubmissionType.AI_GRADED_SHORT]:  { range: '50–100 words',  min: 50  },
+  [SubmissionType.AI_GRADED_MEDIUM]: { range: '100–150 words', min: 100 },
+  [SubmissionType.AI_GRADED_LONG]:   { range: '150–250 words', min: 150 },
+};
+
+const normalizePoints = (assignment: Assignment): Assignment => {
+  const allSubs = assignment.problems.flatMap(p => p.subsections);
+  const total = allSubs.reduce((sum, s) => sum + s.points, 0);
+  if (total === 0 || total === 100) return assignment;
+  const scaled = allSubs.map(s => Math.round(s.points * 100 / total));
+  const diff = 100 - scaled.reduce((a, b) => a + b, 0);
+  if (diff !== 0) {
+    const maxIdx = scaled.reduce((maxI, v, i, arr) => v > arr[maxI] ? i : maxI, 0);
+    scaled[maxIdx] += diff;
+  }
+  let idx = 0;
+  return {
+    ...assignment,
+    problems: assignment.problems.map(p => ({
+      ...p,
+      subsections: p.subsections.map(s => ({ ...s, points: scaled[idx++] }))
+    }))
+  };
+};
 
 const emptySubsection = (): Subsection => ({
   id: uuidv4(),
@@ -171,6 +205,10 @@ const Editor: React.FC = () => {
     reader.readAsText(file);
   };
 
+  const handleNormalize = () => {
+    setAssignment(normalizePoints(assignment));
+  };
+
   // Move Problem logic
   const moveProblem = (index: number, direction: 'up' | 'down') => {
       if ((direction === 'up' && index === 0) || (direction === 'down' && index === assignment.problems.length - 1)) return;
@@ -180,11 +218,14 @@ const Editor: React.FC = () => {
       setAssignment({ ...assignment, problems: newProblems });
   };
 
+  const totalPoints = assignment.problems.flatMap(p => p.subsections).reduce((sum, s) => sum + s.points, 0);
+  const pointsAtTarget = totalPoints === 100;
+
   return (
     <Layout
       title={isEdit ? "Edit Assignment" : "Create Assignment"}
       action={
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <input
             type="file"
             accept=".json"
@@ -192,6 +233,19 @@ const Editor: React.FC = () => {
             className="hidden"
             onChange={handleFileUpload}
           />
+          {/* Total points badge */}
+          <span className={`text-xs font-bold px-2 py-1 rounded-full border ${
+            pointsAtTarget
+              ? 'bg-green-50 text-green-700 border-green-300'
+              : 'bg-amber-50 text-amber-700 border-amber-300'
+          }`}>
+            {totalPoints} pts total
+          </span>
+          {!pointsAtTarget && (
+            <Button variant="secondary" onClick={handleNormalize} className="text-xs">
+              Normalize to 100
+            </Button>
+          )}
           {!isEdit && (
             <Button variant="secondary" onClick={handleLoadTemplate}>
               <Upload className="w-4 h-4 mr-2" />
@@ -295,7 +349,7 @@ const Editor: React.FC = () => {
                       <div className="absolute -left-8 top-3 font-mono font-bold text-academic-500">{pIndex + 1}{String.fromCharCode(97 + sIndex)}.</div>
 
                       <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
-                         <div className="md:col-span-3">
+                         <div className="md:col-span-4">
                            <InputWithPreview
                               placeholder="Subsection Name"
                               value={sub.name}
@@ -303,7 +357,7 @@ const Editor: React.FC = () => {
                               className="text-sm"
                            />
                          </div>
-                         <div className="md:col-span-4">
+                         <div className="md:col-span-6">
                            <InputWithPreview
                               placeholder="Description (LaTeX supported)"
                               value={sub.description}
@@ -311,7 +365,7 @@ const Editor: React.FC = () => {
                               className="text-sm"
                            />
                          </div>
-                         <div className="md:col-span-1">
+                         <div className="md:col-span-2">
                            <Input
                               type="number"
                               placeholder="Pts"
@@ -321,98 +375,100 @@ const Editor: React.FC = () => {
                               title="Points"
                            />
                          </div>
-                         <div className={`${(sub.submissionType === SubmissionType.IMAGE || sub.submissionType === SubmissionType.TRUE_FALSE) ? 'md:col-span-2' : 'md:col-span-4'}`}>
-                            <Select
-                              value={sub.submissionType}
-                              onChange={e => updateSubsection(pIndex, sIndex, { submissionType: e.target.value as SubmissionType })}
-                              className="text-sm"
-                            >
-                               {Object.values(SubmissionType).map(type => (
-                                 <option key={type} value={type}>{type}</option>
-                               ))}
-                            </Select>
-                         </div>
-                         {sub.submissionType === SubmissionType.IMAGE && (
-                             <div className="md:col-span-2">
-                                <Input
-                                  type="number"
-                                  min={1}
-                                  value={sub.maxImages || 1}
-                                  onChange={e => updateSubsection(pIndex, sIndex, { maxImages: parseInt(e.target.value) || 1 })}
-                                  className="text-sm"
-                                  placeholder="Pages"
-                                  title="Number of image pages allowed (creates separate pages in PDF)"
-                                  label="Max Pages"
-                                />
-                             </div>
-                         )}
-                         {sub.submissionType === SubmissionType.TRUE_FALSE && (
-                           <div className="md:col-span-2">
-                             <Select
-                               value={sub.config || 'true'}
-                               onChange={e => updateSubsection(pIndex, sIndex, { config: e.target.value })}
-                               className="text-sm"
-                               title="Correct Answer"
-                               label="Correct Answer"
-                             >
-                               <option value="true">True</option>
-                               <option value="false">False</option>
-                             </Select>
-                           </div>
-                         )}
                       </div>
 
-                         <button
+                      <button
                         onClick={() => removeSubsection(pIndex, sIndex)}
                         className="text-academic-400 hover:text-red-500 transition-colors p-1"
                       >
-                         <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                    </div>
-                   {/* Grading Mode Toggles */}
+                   {/* Type Selector */}
                    <div className="ml-8 mt-1 flex flex-wrap items-center gap-2">
-                     <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Grading:</span>
+                     <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Type:</span>
                      {([
-                       { label: 'Completion Auto', pts: 1, type: sub.submissionType === SubmissionType.AI_REFLECTIVE ? SubmissionType.TEXT : sub.submissionType },
-                       { label: 'Completion Human', pts: 3, type: sub.submissionType === SubmissionType.AI_REFLECTIVE ? SubmissionType.TEXT : sub.submissionType },
-                       { label: 'AI Reflective', pts: 100, type: SubmissionType.AI_REFLECTIVE },
-                     ] as { label: string; pts: number; type: SubmissionType }[]).map(({ label, pts, type }) => {
-                       const isActive = type === SubmissionType.AI_REFLECTIVE
-                         ? sub.submissionType === SubmissionType.AI_REFLECTIVE
-                         : sub.submissionType !== SubmissionType.AI_REFLECTIVE && sub.points === pts;
-                       return (
-                         <button
-                           key={label}
-                           type="button"
-                           onClick={() => updateSubsection(pIndex, sIndex, { submissionType: type, points: pts })}
-                           className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                             isActive
-                               ? 'bg-academic-700 text-white border-academic-700'
-                               : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
-                           }`}
-                         >
-                           {label} ({pts}pt{pts !== 1 ? 's' : ''})
-                         </button>
-                       );
-                     })}
-                   </div>
-                   {sub.submissionType === SubmissionType.AI_REFLECTIVE && (
-                     <div className="ml-8 mt-1 mb-2 px-3 space-y-3">
-                       <div className="w-40">
-                         <Input
+                       { label: 'Text',  type: SubmissionType.TEXT  },
+                       { label: 'Image', type: SubmissionType.IMAGE },
+                     ] as { label: string; type: SubmissionType }[]).map(({ label, type }) => (
+                       <button
+                         key={type}
+                         type="button"
+                         onClick={() => updateSubsection(pIndex, sIndex, { submissionType: type })}
+                         className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
+                           sub.submissionType === type
+                             ? 'bg-academic-700 text-white border-academic-700'
+                             : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                         }`}
+                       >
+                         {label}
+                       </button>
+                     ))}
+                     {sub.submissionType === SubmissionType.IMAGE && (
+                       <div className="flex items-center gap-1.5">
+                         <span className="text-xs text-academic-500">pages:</span>
+                         <input
                            type="number"
-                           label="Minimum Words"
-                           min={50}
-                           value={sub.minWords ?? 250}
-                           onChange={e => updateSubsection(pIndex, sIndex, { minWords: parseInt(e.target.value) || 250 })}
-                           className="text-sm"
-                           title="Minimum word count required from students (default 250)"
+                           min={1}
+                           value={sub.maxImages || 1}
+                           onChange={e => updateSubsection(pIndex, sIndex, { maxImages: parseInt(e.target.value) || 1 })}
+                           className="w-14 text-xs border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
+                           title="Number of image pages allowed"
                          />
+                       </div>
+                     )}
+                     <span className="text-xs text-academic-300 mx-1">|</span>
+                     <span className="text-xs text-purple-500 font-medium uppercase tracking-wide">AI Graded:</span>
+                     {([
+                       { label: 'Binary', type: SubmissionType.AI_GRADED_BINARY, defaultPts: 3  },
+                       { label: 'Short',  type: SubmissionType.AI_GRADED_SHORT,  defaultPts: 8  },
+                       { label: 'Medium', type: SubmissionType.AI_GRADED_MEDIUM, defaultPts: 15 },
+                       { label: 'Long',   type: SubmissionType.AI_GRADED_LONG,   defaultPts: 25 },
+                     ] as { label: string; type: SubmissionType; defaultPts: number }[]).map(({ label, type, defaultPts }) => (
+                       <button
+                         key={type}
+                         type="button"
+                         onClick={() => updateSubsection(pIndex, sIndex, {
+                           submissionType: type,
+                           points: sub.points > 0 ? sub.points : defaultPts,
+                           minWords: AI_WORD_RANGES[type]?.min,
+                         })}
+                         className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
+                           sub.submissionType === type
+                             ? 'bg-purple-700 text-white border-purple-700'
+                             : 'bg-white text-purple-600 border-purple-300 hover:border-purple-500 hover:text-purple-800'
+                         }`}
+                       >
+                         {label}
+                       </button>
+                     ))}
+                     <span className="text-xs text-academic-300 mx-1">|</span>
+                     {([
+                       { label: '1pt completion', pts: 1 },
+                       { label: '3pt completion', pts: 3 },
+                     ] as { label: string; pts: number }[]).map(({ label, pts }) => (
+                       <button
+                         key={pts}
+                         type="button"
+                         onClick={() => updateSubsection(pIndex, sIndex, {
+                           points: pts,
+                           ...(AI_GRADED_TYPES.has(sub.submissionType) ? { submissionType: SubmissionType.TEXT } : {}),
+                         })}
+                         className="text-xs px-3 py-1 rounded-full border font-medium transition-colors bg-white text-academic-500 border-academic-200 hover:border-academic-400 hover:text-academic-700"
+                       >
+                         {label}
+                       </button>
+                     ))}
+                   </div>
+                   {AI_GRADED_TYPES.has(sub.submissionType) && (
+                     <div className="ml-8 mt-1 mb-2 px-3 space-y-3">
+                       <div className="text-xs text-purple-600 font-medium">
+                         Expected length: {AI_WORD_RANGES[sub.submissionType]?.range} · minimum {AI_WORD_RANGES[sub.submissionType]?.min} words enforced
                        </div>
                        <TextArea
                          label="AI Grading Rubric (private — not shown to students)"
                          rows={4}
-                         placeholder="Describe how to grade this question. Include criteria, point breakdown, and what constitutes a strong vs weak response..."
+                         placeholder="Describe how to grade this question. Use the correct number of bands for the category (Binary: 2, Short: 3, Medium: 4, Long: 5)."
                          value={sub.aiGradingPrompt || ''}
                          onChange={e => updateSubsection(pIndex, sIndex, { aiGradingPrompt: e.target.value })}
                          className="text-sm"

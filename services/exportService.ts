@@ -32,18 +32,63 @@ interface StudentSubmissionAssignment {
   problems: StudentSubmissionProblem[];
 }
 
+const AI_GRADED_TYPES = new Set([
+  SubmissionType.AI_GRADED_BINARY,
+  SubmissionType.AI_GRADED_SHORT,
+  SubmissionType.AI_GRADED_MEDIUM,
+  SubmissionType.AI_GRADED_LONG,
+]);
+
+const MIN_WORDS_BY_TYPE: Partial<Record<SubmissionType, number>> = {
+  [SubmissionType.AI_GRADED_BINARY]: 20,
+  [SubmissionType.AI_GRADED_SHORT]:  50,
+  [SubmissionType.AI_GRADED_MEDIUM]: 100,
+  [SubmissionType.AI_GRADED_LONG]:   150,
+};
+
+/**
+ * Scale all subsection point values so they sum to exactly 100.
+ * Rounding error is absorbed by the highest-point subsection.
+ * Returns a new Assignment — does not mutate the input.
+ */
+const normalizePoints = (assignment: Assignment): Assignment => {
+  const allSubs = assignment.problems.flatMap(p => p.subsections);
+  const total = allSubs.reduce((sum, s) => sum + s.points, 0);
+  if (total === 0 || total === 100) return assignment;
+
+  const scaled = allSubs.map(s => Math.round(s.points * 100 / total));
+
+  const diff = 100 - scaled.reduce((a, b) => a + b, 0);
+  if (diff !== 0) {
+    const maxIdx = scaled.reduce((maxI, v, i, arr) => v > arr[maxI] ? i : maxI, 0);
+    scaled[maxIdx] += diff;
+  }
+
+  let idx = 0;
+  return {
+    ...assignment,
+    problems: assignment.problems.map(p => ({
+      ...p,
+      subsections: p.subsections.map(s => ({ ...s, points: scaled[idx++] }))
+    }))
+  };
+};
+
 const convertSubmissionType = (type: SubmissionType): string[] => {
   switch (type) {
     case SubmissionType.TEXT:
       return ['Answer as text'];
     case SubmissionType.IMAGE:
       return ['Answer as image'];
-    case SubmissionType.AI_REFLECTIVE:
-      return ['AI Reflective'];
+    case SubmissionType.AI_GRADED_BINARY:
+    case SubmissionType.AI_GRADED_SHORT:
+    case SubmissionType.AI_GRADED_MEDIUM:
+    case SubmissionType.AI_GRADED_LONG:
+      return [type]; // pass through the category string
     case SubmissionType.CODE:
-      return ['Answer as text']; // Code submissions render as text
+      return ['Answer as text'];
     case SubmissionType.FILE_UPLOAD:
-      return ['Answer as image']; // File uploads treated as images
+      return ['Answer as image'];
     default:
       return ['Answer as text'];
   }
@@ -496,10 +541,10 @@ const generateGradingRubric = (assignment: Assignment): object => {
   assignment.problems.forEach((prob, pIndex) => {
     prob.subsections.forEach((sub, sIndex) => {
       const subsectionId = `p${pIndex}s${sIndex}`;
-      const isAi = sub.submissionType === SubmissionType.AI_REFLECTIVE;
-      const isTrueFalse = sub.submissionType === SubmissionType.TRUE_FALSE;
+      const isAi = AI_GRADED_TYPES.has(sub.submissionType);
       const isImage = sub.submissionType === SubmissionType.IMAGE;
       const subsectionLetter = String.fromCharCode(97 + sIndex);
+      const minWords = MIN_WORDS_BY_TYPE[sub.submissionType];
 
       rubrics[subsectionId] = {
         subsection_id: subsectionId,
@@ -509,10 +554,9 @@ const generateGradingRubric = (assignment: Assignment): object => {
         subsection_name: sub.name,
         display_name: `Problem ${pIndex + 1}(${subsectionLetter}): ${sub.name}`,
         max_points: sub.points,
-        grading_type: isAi ? 'ai' : isTrueFalse ? 'true_false' : isImage ? 'human_image' : 'human',
+        grading_type: isAi ? 'ai' : isImage ? 'human_image' : 'human',
         grading_prompt: isAi ? (sub.aiGradingPrompt || '') : '',
-        ...(isAi && { min_words: sub.minWords ?? 250 }),
-        ...(isTrueFalse && { correct_answer: sub.config || 'true' }),
+        ...(isAi && minWords !== undefined && { min_words: minWords }),
         ...(isImage && { max_images: sub.maxImages ?? 1 })
       };
     });
@@ -538,23 +582,26 @@ const generateGradingRubric = (assignment: Assignment): object => {
 // =====================================================
 
 const TYPE_TAG: Partial<Record<SubmissionType, string>> = {
-  [SubmissionType.TEXT]:          'text',
-  [SubmissionType.IMAGE]:         'image',
-  [SubmissionType.AI_REFLECTIVE]: 'ai-reflective',
-  [SubmissionType.TRUE_FALSE]:    'true-false',
+  [SubmissionType.TEXT]:             'text',
+  [SubmissionType.IMAGE]:            'image',
+  [SubmissionType.AI_GRADED_BINARY]: 'ai-graded:binary',
+  [SubmissionType.AI_GRADED_SHORT]:  'ai-graded:short',
+  [SubmissionType.AI_GRADED_MEDIUM]: 'ai-graded:medium',
+  [SubmissionType.AI_GRADED_LONG]:   'ai-graded:long',
 };
 
 const assignmentToMd = (assignment: Assignment): string => {
+  // Always export with normalized points
+  const normalized = normalizePoints(assignment);
   const lines: string[] = [];
 
-  // Header
-  lines.push(`# ${assignment.courseCode}: ${assignment.title}`);
+  lines.push(`# ${normalized.courseCode}: ${normalized.title}`);
   lines.push('');
-  if (assignment.preamble) {
-    lines.push(`**Preamble:** ${assignment.preamble}`);
+  if (normalized.preamble) {
+    lines.push(`**Preamble:** ${normalized.preamble}`);
   }
 
-  assignment.problems.forEach((prob, pIdx) => {
+  normalized.problems.forEach((prob, pIdx) => {
     lines.push('');
     lines.push(`## Problem ${pIdx + 1}: ${prob.name}`);
     if (prob.description) {
@@ -576,12 +623,9 @@ const assignmentToMd = (assignment: Assignment): string => {
         lines.push(sub.description);
       }
 
-      if (sub.submissionType === SubmissionType.AI_REFLECTIVE && sub.aiGradingPrompt) {
+      if (AI_GRADED_TYPES.has(sub.submissionType) && sub.aiGradingPrompt) {
         lines.push('');
-        // Wrap grading prompt as blockquote continuation lines
-        const words = sub.aiGradingPrompt;
-        // Split on sentence boundaries to keep lines readable
-        const sentences = words.split(/(?<=\.)\s+/);
+        const sentences = sub.aiGradingPrompt.split(/(?<=\.)\s+/);
         sentences.forEach((sentence, i) => {
           if (i === 0) {
             lines.push(`> grading_prompt: ${sentence.trim()}`);
@@ -589,11 +633,6 @@ const assignmentToMd = (assignment: Assignment): string => {
             lines.push(`> ${sentence.trim()}`);
           }
         });
-      }
-
-      if (sub.submissionType === SubmissionType.TRUE_FALSE) {
-        lines.push('');
-        lines.push(`> correct_answer: ${sub.config || 'true'}`);
       }
     });
   });
@@ -605,6 +644,7 @@ const assignmentToMd = (assignment: Assignment): string => {
 export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
     const zip = new JSZip();
+    assignment = normalizePoints(assignment);
 
     // 1. Spec JSON — encoded with AES-256-GCM so students cannot read or edit it.
     //    The Student Submission app decodes it transparently on load.

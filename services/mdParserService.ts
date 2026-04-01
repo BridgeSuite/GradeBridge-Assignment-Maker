@@ -14,10 +14,19 @@ const DEFAULT_AI_CONFIG: AiGradingConfig = {
 };
 
 const TYPE_MAP: Record<string, SubmissionType> = {
-  'text':          SubmissionType.TEXT,
-  'image':         SubmissionType.IMAGE,
-  'ai-reflective': SubmissionType.AI_REFLECTIVE,
-  'true-false':    SubmissionType.TRUE_FALSE,
+  'text':              SubmissionType.TEXT,
+  'image':             SubmissionType.IMAGE,
+  'ai-graded:binary':  SubmissionType.AI_GRADED_BINARY,
+  'ai-graded:short':   SubmissionType.AI_GRADED_SHORT,
+  'ai-graded:medium':  SubmissionType.AI_GRADED_MEDIUM,
+  'ai-graded:long':    SubmissionType.AI_GRADED_LONG,
+};
+
+const MIN_WORDS_MAP: Partial<Record<SubmissionType, number>> = {
+  [SubmissionType.AI_GRADED_BINARY]: 20,
+  [SubmissionType.AI_GRADED_SHORT]:  50,
+  [SubmissionType.AI_GRADED_MEDIUM]: 100,
+  [SubmissionType.AI_GRADED_LONG]:   150,
 };
 
 interface SubsectionMeta {
@@ -38,10 +47,13 @@ function parseSubsectionHeader(line: string): SubsectionMeta | null {
 
   let maxImages = 1;
   let baseType = typeTag;
+
+  // image:N — split on first colon only for image type
   if (typeTag.startsWith('image:')) {
     baseType = 'image';
     maxImages = parseInt(typeTag.split(':')[1]) || 1;
   }
+  // ai-graded:* tags are kept as-is for TYPE_MAP lookup
 
   return { name, points, submissionType: TYPE_MAP[baseType] ?? SubmissionType.TEXT, maxImages, rawType: baseType };
 }
@@ -57,7 +69,7 @@ function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title'
     const l = line.trim();
     let m = l.match(/^#\s+([^:]+):\s+(.+)$/);
     if (m) { meta.courseCode = m[1].trim(); meta.title = m[2].trim(); continue; }
-    // **Due:** lines are intentionally ignored — due dates are managed in Canvas
+    // **Due:** lines intentionally ignored — due dates are managed in Canvas
     m = l.match(/^\*\*Preamble:\*\*\s+(.+)$/);
     if (m) { meta.preamble = m[1].trim(); continue; }
   }
@@ -135,21 +147,20 @@ export function parseMdToAssignment(content: string): Assignment {
 
       const description = body.filter(l => l.trim() && !l.trim().startsWith('>')).join('\n').trim();
       const aiGradingPrompt = extractBlockquoteValue('grading_prompt', body);
-      const correctAnswer = extractBlockquoteValue('correct_answer', body);
 
-      // A grading_prompt always means AI Reflective; respect the points set in the .md file
-      const submissionType = aiGradingPrompt ? SubmissionType.AI_REFLECTIVE : subMeta.submissionType;
-      const points = subMeta.points;
+      const submissionType = subMeta.submissionType;
+      const minWords = MIN_WORDS_MAP[submissionType];
 
       const subsection: Subsection = {
         id: uuidv4(),
         name: subMeta.name,
         description,
-        points,
+        points: subMeta.points,
         submissionType,
         maxImages: subMeta.maxImages,
         aiGradingPrompt,
-        config: subMeta.rawType === 'true-false' ? correctAnswer : '',
+        config: '',
+        ...(minWords !== undefined && { minWords }),
       };
       currentProblem.subsections.push(subsection);
     }
