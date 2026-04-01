@@ -386,8 +386,9 @@ const Editor: React.FC = () => {
                         <Trash2 className="w-4 h-4" />
                       </button>
                    </div>
-                   {/* Type Selector */}
+                   {/* Type + Grading Selector */}
                    <div className="ml-8 mt-1 flex flex-wrap items-center gap-2">
+                     {/* Medium: Text or Image */}
                      <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Type:</span>
                      {([
                        { label: 'Text',  type: SubmissionType.TEXT  },
@@ -398,7 +399,9 @@ const Editor: React.FC = () => {
                          type="button"
                          onClick={() => updateSubsection(pIndex, sIndex, { submissionType: type })}
                          className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                           sub.submissionType === type
+                           (type === SubmissionType.IMAGE
+                             ? sub.submissionType === SubmissionType.IMAGE
+                             : sub.submissionType !== SubmissionType.IMAGE)
                              ? 'bg-academic-700 text-white border-academic-700'
                              : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
                          }`}
@@ -406,51 +409,27 @@ const Editor: React.FC = () => {
                          {label}
                        </button>
                      ))}
-                     {sub.submissionType === SubmissionType.IMAGE && (
-                       <div className="flex items-center gap-1.5">
-                         <span className="text-xs text-academic-500">pages:</span>
-                         <input
-                           type="number"
-                           min={1}
-                           value={sub.maxImages || 1}
-                           onChange={e => updateSubsection(pIndex, sIndex, { maxImages: parseInt(e.target.value) || 1 })}
-                           className="w-14 text-xs border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
-                           title="Number of image pages allowed"
-                         />
-                       </div>
-                     )}
+
                      <span className="text-xs text-academic-300 mx-1">|</span>
-                     <span className="text-xs text-purple-500 font-medium uppercase tracking-wide">AI Graded:</span>
-                     {([
-                       { label: 'Binary', type: SubmissionType.AI_GRADED_BINARY, defaultPts: 3  },
-                       { label: 'Short',  type: SubmissionType.AI_GRADED_SHORT,  defaultPts: 8  },
-                       { label: 'Medium', type: SubmissionType.AI_GRADED_MEDIUM, defaultPts: 15 },
-                       { label: 'Long',   type: SubmissionType.AI_GRADED_LONG,   defaultPts: 25 },
-                     ] as { label: string; type: SubmissionType; defaultPts: number }[]).map(({ label, type, defaultPts }) => (
-                       <button
-                         key={type}
-                         type="button"
-                         onClick={() => updateSubsection(pIndex, sIndex, {
-                           submissionType: type,
-                           points: sub.points > 0 ? sub.points : defaultPts,
-                           minWords: AI_WORD_RANGES[type]?.min,
-                         })}
-                         className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                           sub.submissionType === type
-                             ? 'bg-purple-700 text-white border-purple-700'
-                             : 'bg-white text-purple-600 border-purple-300 hover:border-purple-500 hover:text-purple-800'
-                         }`}
-                       >
-                         {label}
-                       </button>
-                     ))}
-                     <span className="text-xs text-academic-300 mx-1">|</span>
+                     <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Grading:</span>
+
                      {sub.submissionType === SubmissionType.IMAGE ? (
+                       /* Image branch */
                        <>
-                         <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Grading:</span>
+                         <div className="flex items-center gap-1.5">
+                           <span className="text-xs text-academic-500">pages:</span>
+                           <input
+                             type="number"
+                             min={1}
+                             value={sub.maxImages || 1}
+                             onChange={e => updateSubsection(pIndex, sIndex, { maxImages: parseInt(e.target.value) || 1 })}
+                             className="w-14 text-xs border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
+                             title="Number of image pages allowed"
+                           />
+                         </div>
                          {([
                            { label: 'Human Inspection', mode: 'human' as const },
-                           { label: 'AI Completion',    mode: 'auto'  as const },
+                           { label: 'AI Inspection',    mode: 'auto'  as const },
                          ]).map(({ label, mode }) => (
                            <button
                              key={mode}
@@ -467,19 +446,40 @@ const Editor: React.FC = () => {
                          ))}
                        </>
                      ) : (
+                       /* Text branch */
                        <>
+                         <button
+                           type="button"
+                           onClick={() => updateSubsection(pIndex, sIndex, { submissionType: SubmissionType.TEXT })}
+                           className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
+                             sub.submissionType === SubmissionType.TEXT
+                               ? 'bg-academic-700 text-white border-academic-700'
+                               : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                           }`}
+                         >
+                           Human
+                         </button>
+                         <span className="text-xs text-academic-300">|</span>
+                         <span className="text-xs text-purple-500 font-medium uppercase tracking-wide">AI:</span>
                          {([
-                           { label: '1pt completion', pts: 1 },
-                           { label: '3pt completion', pts: 3 },
-                         ] as { label: string; pts: number }[]).map(({ label, pts }) => (
+                           { label: 'Binary', type: SubmissionType.AI_GRADED_BINARY, defaultPts: 3  },
+                           { label: 'Short',  type: SubmissionType.AI_GRADED_SHORT,  defaultPts: 8  },
+                           { label: 'Medium', type: SubmissionType.AI_GRADED_MEDIUM, defaultPts: 15 },
+                           { label: 'Long',   type: SubmissionType.AI_GRADED_LONG,   defaultPts: 25 },
+                         ] as { label: string; type: SubmissionType; defaultPts: number }[]).map(({ label, type, defaultPts }) => (
                            <button
-                             key={pts}
+                             key={type}
                              type="button"
                              onClick={() => updateSubsection(pIndex, sIndex, {
-                               points: pts,
-                               ...(AI_GRADED_TYPES.has(sub.submissionType) ? { submissionType: SubmissionType.TEXT } : {}),
+                               submissionType: type,
+                               points: sub.points > 0 ? sub.points : defaultPts,
+                               minWords: AI_WORD_RANGES[type]?.min,
                              })}
-                             className="text-xs px-3 py-1 rounded-full border font-medium transition-colors bg-white text-academic-500 border-academic-200 hover:border-academic-400 hover:text-academic-700"
+                             className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
+                               sub.submissionType === type
+                                 ? 'bg-purple-700 text-white border-purple-700'
+                                 : 'bg-white text-purple-600 border-purple-300 hover:border-purple-500 hover:text-purple-800'
+                             }`}
                            >
                              {label}
                            </button>
