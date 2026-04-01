@@ -329,10 +329,11 @@ const Editor: React.FC = () => {
                        />
                     </div>
                     <div className="md:col-span-8">
-                       <InputWithPreview
+                       <TextAreaWithPreview
                           placeholder="Problem Description (Optional, LaTeX supported)"
                           value={problem.description}
                           onChange={e => updateProblem(pIndex, { description: e.target.value })}
+                          rows={2}
                        />
                     </div>
                  </div>
@@ -358,11 +359,12 @@ const Editor: React.FC = () => {
                            />
                          </div>
                          <div className="md:col-span-6">
-                           <InputWithPreview
+                           <TextAreaWithPreview
                               placeholder="Description (LaTeX supported)"
                               value={sub.description}
                               onChange={e => updateSubsection(pIndex, sIndex, { description: e.target.value })}
                               className="text-sm"
+                              rows={2}
                            />
                          </div>
                          <div className="md:col-span-2">
