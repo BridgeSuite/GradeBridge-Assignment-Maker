@@ -2,7 +2,7 @@
 
 Create structured assignments with LaTeX support and Gradescope AI-autograding integration — entirely in your browser.
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 **[Live App](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)** | **[Student Submission App](https://bridgesuite.github.io/GradeBridge-Student-Submission/)**
@@ -29,24 +29,38 @@ Create structured assignments with LaTeX support and Gradescope AI-autograding i
 
 ---
 
-## Submission Types & Grading Modes
+## Submission Types and Grading Modes
 
-Each subsection has a **Grading Mode** toggle that sets both the question type and point value in one click:
+Each subsection has a **Type** selector and a **Grading** selector. The two branch based on medium:
 
-| Toggle | Points | Type set to | Autograded? |
-|---|---|---|---|
-| **Completion Auto** | 1 pt | unchanged | — |
-| **Completion Human** | 3 pts | unchanged | TA reviews |
-| **AI Reflective** | 100 pts | AI Reflective | Yes — AI rubric |
+### Text questions
 
-Submission types available:
+`Type: [Text] [Image]  |  Grading: [Human] | AI: [Binary] [Short] [Medium] [Long]`
 
-| Type | Student submits | Notes |
+| Grading selection | What it means | Autograded? |
 |---|---|---|
-| `Text` | Typed answer | LaTeX math supported |
-| `Image` | Photo / screenshot | Set max pages with the Pages field |
-| `AI Reflective` | Reflective text | AI-graded against your rubric; live word counter for students |
-| `True/False` | Toggle button | Set the correct answer in the editor |
+| **Human** | TA reviews the student's written answer | No |
+| **AI: Binary** | Student states yes/no and briefly justifies; AI grades | Yes — 2 bands, 20 word min |
+| **AI: Short** | Student answers a focused concept question; AI grades | Yes — 3 bands, 50 word min |
+| **AI: Medium** | Student explains a mechanism or relationship; AI grades | Yes — 4 bands, 100 word min |
+| **AI: Long** | Student analyses trade-offs or synthesises across concepts; AI grades | Yes — 5 bands, 150 word min |
+
+### Image questions
+
+`Type: [Text] [Image]  pages: __  |  Grading: [Human Inspection] [AI Inspection]`
+
+| Grading selection | What it means | Autograded? |
+|---|---|---|
+| **Human Inspection** *(default)* | TA reviews the uploaded image | No |
+| **AI Inspection** | Autograder checks `images_submitted > 0`; awards full marks automatically | Yes |
+
+Set the number of image pages allowed with the **pages** field (e.g. 6 for a quiz transcript).
+
+---
+
+## Point Normalisation
+
+All subsection point values must sum to exactly 100. The editor header shows a running total. If the total is not 100, a **Normalize to 100** button appears — click it to scale all values proportionally. Normalisation is also applied automatically at ZIP export and `.md` export.
 
 ---
 
@@ -55,9 +69,9 @@ Submission types available:
 ### Option A — Start from scratch
 1. Open the [Live App](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)
 2. Click **New Assignment**
-3. Fill in course code, title, due date, and instructions
-4. Add problems and subsections; use the **Grading Mode** toggles
-5. For AI Reflective questions, write a grading rubric in the rubric field
+3. Fill in course code, title, and preamble
+4. Add problems and subsections; use the **Type** and **Grading** selectors
+5. For AI-graded questions, write the grading rubric in the rubric field
 6. Click **Export** to download the ZIP
 
 ### Option B — Import a Markdown file (recommended for bulk authoring)
@@ -66,32 +80,29 @@ Submission types available:
 3. The app parses the file instantly and opens it in the editor
 4. Review, fine-tune, and export
 
-> **Tip:** Use Claude Code (CC) to generate the `.md` file from your lab manual — see [CC Prompt](#cc-prompt-generate-md-from-a-lab-manual) below.
+### Option C — Generate with Claude Code (recommended)
+Use the two-phase CC workflow to generate `.md` files from lab manual source material. See `CCAssignmentMaker/CC_PROMPT.md` for the ready-to-use prompt.
 
-### Option C — Iterating with Claude Code (CC)
-
+### Option D — Iterate with Claude Code
 The `.md` format enables a tight CC iteration loop so you never need to manually explain changes:
 
-1. CC generates `EEC1_Lab1_InLab.md` from your lab manual
+1. CC generates `EEC1_Lab1_Prelab.md` from your lab manual
 2. Click **Import Markdown** → assignment opens in the editor
-3. Make changes in the UI (adjust points, tweak descriptions, add rubrics, reorder problems)
-4. Click **Export .md** (top-right of editor) → downloads the updated `.md` with all your changes reflected
-5. Next CC session: *"read EEC1_Lab1_InLab.md"* — CC sees exactly the current state, no explanation needed
-
-This keeps the `.md` file as the single source of truth across both the app and CC.
+3. Make changes in the UI (adjust points, tweak descriptions, edit rubrics)
+4. Click **Export .md** (top-right of editor) → downloads the updated `.md` with all changes
+5. Next CC session: *"read EEC1_Lab1_Prelab.md"* — CC sees exactly the current state, no explanation needed
 
 ---
 
 ## Markdown Assignment Format
 
-Assignments can be authored as plain `.md` files and imported directly into the app. This is the recommended workflow for bulk assignment preparation.
+Assignments can be authored as plain `.md` files and imported directly into the app.
 
 ### File Structure
 
 ```markdown
 # {CourseCode}: {Assignment Title}
 
-**Due:** YYYY-MM-DD at HH:MM
 **Preamble:** One or two sentences of general instructions for students.
 
 ## Problem {N}: {Problem Name}
@@ -100,164 +111,91 @@ Optional problem description. One paragraph max. LaTeX supported with $...$.
 ### ({letter}) {Subsection Name} [{points} pts] [{type}]
 Optional subsection description. LaTeX supported.
 
-> grading_prompt: Rubric text. Only for ai-reflective subsections.
-
-> correct_answer: true
+> grading_prompt: Rubric text here. (ai-graded subsections only)
 ```
-*(true-false only — value must be exactly `true` or `false`)*
 
 ### Submission Type Tags
 
 | Tag | Creates | Notes |
 |---|---|---|
-| `[text]` | Text answer box | Default |
-| `[image]` | Single image upload | |
-| `[image:N]` | Image upload, N pages | e.g. `[image:3]` |
-| `[ai-reflective]` | Reflective text, AI graded | Must include `> grading_prompt:` |
-| `[true-false]` | True / False toggle | Must include `> correct_answer: true` or `false` |
-
-### Auto-Upgrade Rule
-
-**If a `> grading_prompt:` block is present on any subsection, the importer automatically sets the type to `AI Reflective`** — the point value in the `[N pts]` tag is always respected. This means you can add a rubric to an existing question (e.g. one tagged `[text]`) and the importer will upgrade the type automatically while keeping whatever points you set.
+| `[text]` | Text answer box | Human-graded by default |
+| `[image]` | Single image upload | Human Inspection by default |
+| `[image:N]` | Image upload, N pages | e.g. `[image:6]` for a quiz transcript |
+| `[ai-graded:binary]` | Yes/no free-text, AI graded | 20 word min; 2 grading bands |
+| `[ai-graded:short]` | Short free-text, AI graded | 50 word min; 3 grading bands |
+| `[ai-graded:medium]` | Medium free-text, AI graded | 100 word min; 4 grading bands |
+| `[ai-graded:long]` | Long free-text, AI graded | 150 word min; 5 grading bands |
 
 ### Grading Prompt Format
 
+Every `[ai-graded:*]` subsection must have a `> grading_prompt:` block. The rubric must be fully self-contained — the autograder sees only the rubric and the student's response, nothing else.
+
+Every rubric (except binary) must begin with a `Required elements:` list. Bands are defined by how many elements are present.
+
+**Binary (2 bands):**
 ```
-> grading_prompt: Award {high} pts for responses that {specific full-marks criteria}.
-> Award {mid} pts for responses that {partial credit criteria}.
-> Award 0–{low} pts for responses that {minimal/no credit criteria}.
+> grading_prompt: The correct answer is YES. Award full marks for any response that
+> clearly and correctly answers yes to the question, regardless of phrasing used.
+> Award no credit for responses that give the incorrect answer or are non-committal.
 > Do not deduct marks for grammar or writing style.
 ```
 
-Multi-line blockquotes (each line starting with `>`) are joined into a single rubric string.
+**Short (3 bands):**
+```
+> grading_prompt: Required elements: (1) [complete technical statement]; (2) [complete technical statement].
+> Award full marks for responses that correctly address both elements.
+> Award partial credit for responses that correctly address only one element, or address both with a significant inaccuracy.
+> Award no credit for responses that address neither element or are off-topic.
+> Do not deduct marks for grammar or writing style.
+```
 
-### Metadata Fields
-
-| Field | Required | Format |
-|---|---|---|
-| Course code + title | Yes | `# EEC1: Lab 2 Prelab` |
-| Due date | Yes | `**Due:** 2026-04-15 at 23:59` |
-| Preamble | No | `**Preamble:** Complete before lab session.` |
+**Medium (4 bands)** and **Long (5 bands)** follow the same pattern with 3 and 4 required elements respectively.
 
 ### Complete Example
 
 ```markdown
-# EEC1: Lab 2 Prelab
+# EEC1: Lab 1 Prelab
 
-**Due:** 2026-04-15 at 23:59
-**Preamble:** Complete all problems before your scheduled lab session. Show all working for calculation questions.
+**Preamble:** Complete all problems before your scheduled lab session.
 
-## Problem 1: RC Circuit Analysis
+## Problem 1: AI Exploration
 
-Analyze the RC low-pass filter circuit with $R = 10\,k\Omega$ and $C = 100\,nF$.
+### (a) Original quiz prompt draft [5 pts] [image]
+Take a screenshot of your draft prompt and add your name before uploading.
 
-### (a) Sketch the circuit [5 pts] [image:2]
-Draw the circuit schematic and label all component values.
+Your name must be visible in the image before uploading.
 
-### (b) Calculate cutoff frequency [10 pts] [text]
-Calculate the cutoff frequency using $f_c = \frac{1}{2\pi RC}$. Show full working.
+### (b) Quiz transcript [10 pts] [image:6]
+Run the quiz and capture the complete exchange. Zoom your browser out if needed to fit more content per image.
 
-### (c) Is this a low-pass filter? [5 pts] [true-false]
-Based on your analysis above, is this circuit a low-pass filter?
+Your name must be visible in the image before uploading.
 
-> correct_answer: true
+## Problem 2: Formal Reflection
 
-## Problem 2: Signal Acquisition
+### (a) Written reflection [75 pts] [ai-graded:long]
+Write a formal reflection of 150–250 words addressing the three required points.
 
-### (a) Reflection [100 pts] [ai-reflective]
-Explain why differential wiring was used and how it affects noise rejection.
-
-> grading_prompt: Award 80–100 pts for responses that correctly identify common-mode noise rejection
-> as the primary benefit, explain the role of the differential amplifier, and connect this to the
-> specific lab circuit. Award 50–79 pts for responses that mention noise reduction without fully
-> explaining the mechanism. Award 0–49 pts for vague or off-topic responses.
-> Do not deduct marks for grammar or writing style.
-```
-
----
-
-## CC Prompt — Generate .md from a Lab Manual
-
-Use this prompt with Claude Code (CC) to generate a GradeBridge `.md` file directly from your lab manual or assignment description.
-
-**How to use:**
-1. Open Claude Code in the `CCAssignmentMaker` directory (or any directory containing `ASSIGNMENT_MD_SPEC.md`)
-2. Copy the prompt below and paste your source material at the bottom
-3. CC will produce a `.md` file — save it, then use **Import Markdown** in the app
-
----
-
-```
-Read ASSIGNMENT_MD_SPEC.md in this directory before proceeding — it is the authoritative format specification.
-Then read the source material I have provided below and generate a GradeBridge assignment .md file following
-that specification exactly.
-
-## Output Format Specification
-
-The output must be a single markdown file with this exact structure:
-
-# {CourseCode}: {Assignment Title}
-
-**Due:** YYYY-MM-DD at HH:MM
-**Preamble:** One or two sentences of general instructions for students.
-
-## Problem {N}: {Problem Name}
-Optional problem description. One paragraph max. LaTeX supported with $...$.
-
-### ({letter}) {Subsection Name} [{points} pts] [{type}]
-Optional subsection description. LaTeX supported.
-
-> grading_prompt: Rubric text here. (ai-reflective only)
-
-> correct_answer: true
-(true-false only — value must be exactly true or false)
-
-## Submission Types
-
-Use exactly these tags:
-
-| Tag | Use for |
-|---|---|
-| [text] | Calculation, short answer, derivation |
-| [image] | Hand-drawn circuit, schematic, graph, data table |
-| [image:N] | Image submission requiring N pages |
-| [ai-reflective] | Open-ended reflective or conceptual question graded by AI |
-| [true-false] | Binary true/false question |
-
-## Rules You Must Follow
-
-1. Extract or infer the course code and assignment title from the source material
-2. If no due date is in the source, use a placeholder: **Due:** YYYY-MM-DD at 23:59
-3. Write a concise preamble (1–2 sentences) appropriate for the assignment type
-4. Break the assignment into logical problems matching the structure of the source material
-5. For each problem, create subsections that map to individual deliverables or questions
-6. Assign point values that sum to 100 (or a clear multiple of 10 if specified in the source)
-7. Choose the most appropriate submission type for each subsection:
-   - Use [image] for anything hand-drawn, sketched, or measured on paper
-   - Use [text] for calculations, numerical answers, and short written responses
-   - Use [ai-reflective] for open-ended questions asking students to explain, reflect, or justify
-   - Use [true-false] for direct binary conceptual checks
-8. Every [ai-reflective] subsection MUST have a > grading_prompt: block
-9. Every [true-false] subsection MUST have a > correct_answer: true or > correct_answer: false
-10. Grading prompts must be specific — define full marks, partial credit, and zero clearly
-11. Do not add markdown elements not in this spec (no tables, no code blocks, no horizontal rules)
-12. LaTeX math is supported anywhere using $...$ for inline and $$...$$ for display math
-
-## Grading Prompt Standard
-
-Every [ai-reflective] grading prompt must follow this structure:
-
-> grading_prompt: Award {high range} pts for responses that {specific criteria for full marks}.
-> Award {mid range} pts for responses that {criteria for partial credit}.
-> Award 0–{low} pts for responses that {criteria for minimal/no credit}.
+> grading_prompt: Required elements: (1) differential wiring protects signal quality by measuring
+> the voltage difference between two lines rather than one line against ground, so equal noise on
+> both lines cancels at the differential input; (2) a specific mechanism term (common-mode rejection
+> or quantization error) is used to explain a physical process, not merely named; (3) a specific
+> concrete wiring mistake is identified with its observable consequence.
+> Award full marks for responses that correctly address all three elements.
+> Award most marks for responses that correctly address two elements, with one minor gap.
+> Award partial credit for responses that correctly address one element.
+> Award minimal credit for responses that correctly address only one element partially.
+> Award no credit for responses that address none of the elements or are off-topic.
 > Do not deduct marks for grammar or writing style.
 
-Make the criteria concrete and tied to the specific concepts in the question.
+## Problem 3: Software Installation
 
-## Source Material
+### (a) Scopy screenshot [10 pts] [image]
+Connect your M2K, open Scopy, and upload a screenshot confirming device recognition.
 
-[PASTE YOUR LAB MANUAL SECTION OR ASSIGNMENT DESCRIPTION BELOW THIS LINE]
+Your name must be visible in the image before uploading.
 ```
+
+Point total: 5 + 10 + 75 + 10 = **100 pts** ✓
 
 ---
 
@@ -267,27 +205,36 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
 
 ```json
 {
-  "assignment_id": "EEC1_Lab2_Prelab",
+  "assignment_id": "EEC1_Lab1_Prelab",
   "course_code": "EEC1",
+  "assignment_title": "Lab 1 Prelab",
+  "ai_grading_config": { "model": "claude-haiku-4-5-20251001", "temperature": 0.1, "max_tokens": 1024 },
   "rubrics": {
-    "p0s0": {
-      "subsection_id": "p0s0",
-      "max_points": 100,
-      "grading_type": "ai",
-      "grading_prompt": "Award 80–100 pts for...",
-      "min_words": 250
-    },
     "p1s0": {
       "subsection_id": "p1s0",
-      "max_points": 1,
-      "grading_type": "human",
+      "max_points": 75,
+      "grading_type": "ai",
+      "grading_prompt": "Required elements: (1) ...; (2) ...",
+      "min_words": 150
+    },
+    "p0s0": {
+      "subsection_id": "p0s0",
+      "max_points": 5,
+      "grading_type": "human_image",
       "grading_prompt": ""
     }
   }
 }
 ```
 
-`grading_type` values: `"ai"` (AI-graded), `"human"` (TA-reviewed), `"true_false"` (auto-checked).
+`grading_type` values:
+
+| Value | Meaning |
+|---|---|
+| `"ai"` | AI-graded text response |
+| `"human"` | TA reviews text response |
+| `"human_image"` | TA reviews uploaded image |
+| `"ai_image_completion"` | Auto-award if `images_submitted > 0` |
 
 ---
 
@@ -307,7 +254,7 @@ cd GradeBridge-Assignment-Maker
 npm install
 npm run dev       # → http://localhost:3000/GradeBridge-Assignment-Maker/
 npm run build     # production build
-npm run deploy    # deploy to GitHub Pages
+npm run deploy    # deploy to GitHub Pages (SSH remote required)
 ```
 
 **Tech stack:** React 18 · TypeScript · Vite · Tailwind CSS · KaTeX · jsPDF · JSZip · Lucide
@@ -322,6 +269,7 @@ npm run deploy    # deploy to GitHub Pages
 | LaTeX not rendering | Refresh page; KaTeX loads from CDN |
 | PDF generation slow | Large images slow down PDF generation — reduce image count or size |
 | Lost work | Export JSON backup regularly; localStorage is cleared with browser cache |
+| Deploy returns 403 | SSH remote required — run `git remote set-url origin git@github.com:BridgeSuite/GradeBridge-Assignment-Maker.git` |
 
 ---
 
