@@ -6,7 +6,7 @@ import { Assignment, Problem, Subsection, SubmissionType, AiGradingConfig } from
 import { storageService } from '../services/storageService';
 import { exportService } from '../services/exportService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
-import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown } from 'lucide-react';
+import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock } from 'lucide-react';
 
 const DEFAULT_AI_GRADING_CONFIG: AiGradingConfig = { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 };
 
@@ -92,7 +92,8 @@ const Editor: React.FC = () => {
             subsections: p.subsections.map(s => ({
               ...s,
               maxImages: s.maxImages || 1,
-              aiGradingPrompt: s.aiGradingPrompt || ''
+              aiGradingPrompt: s.aiGradingPrompt || '',
+              graderNote: s.graderNote || ''
             }))
           }))
         };
@@ -185,7 +186,8 @@ const Editor: React.FC = () => {
             subsections: p.subsections.map(s => ({
               ...s,
               id: uuidv4(),
-              aiGradingPrompt: s.aiGradingPrompt || ''
+              aiGradingPrompt: s.aiGradingPrompt || '',
+              graderNote: s.graderNote || ''
             }))
           }))
         };
@@ -261,6 +263,10 @@ const Editor: React.FC = () => {
           <Button variant="secondary" onClick={() => exportService.downloadMd(assignment)}>
             <FileDown className="w-4 h-4 mr-2" />
             Export .md
+          </Button>
+          <Button variant="secondary" onClick={() => exportService.downloadGraderDoc(assignment)}>
+            <Lock className="w-4 h-4 mr-2" />
+            Grader Doc
           </Button>
           <Button variant="secondary" onClick={() => navigate('/')}>Cancel</Button>
           <Button onClick={handleSave}>
@@ -488,9 +494,9 @@ const Editor: React.FC = () => {
                      )}
                    </div>
                    {AI_GRADED_TYPES.has(sub.submissionType) && (
-                     <div className="ml-8 mt-1 mb-2 px-3 space-y-3">
+                     <div className="ml-8 mt-1 px-3 space-y-3">
                        <div className="text-xs text-purple-600 font-medium">
-                         Expected length: {AI_WORD_RANGES[sub.submissionType]?.range} · minimum {AI_WORD_RANGES[sub.submissionType]?.min} words enforced
+                         Suggested length: {AI_WORD_RANGES[sub.submissionType]?.range} · suggested minimum: {AI_WORD_RANGES[sub.submissionType]?.min} words (guidance only — not enforced)
                        </div>
                        <TextArea
                          label="AI Grading Rubric (private — not shown to students)"
@@ -502,6 +508,35 @@ const Editor: React.FC = () => {
                        />
                      </div>
                    )}
+                   {/* Grader note — shown for all subsection types */}
+                   <div className="ml-8 mt-1 mb-2 px-3">
+                     <div className="rounded border border-amber-200 bg-amber-50 p-3 space-y-1.5">
+                       <div className="flex items-center gap-1.5">
+                         <Lock className="w-3 h-3 text-amber-600 shrink-0" />
+                         <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                           {sub.submissionType === SubmissionType.IMAGE
+                             ? 'Grader note — what to look for in the submission'
+                             : AI_GRADED_TYPES.has(sub.submissionType)
+                             ? 'Supplementary TA note (optional — AI rubric above is primary)'
+                             : 'Grader note — expected answer / worked solution'}
+                         </span>
+                         <span className="text-xs text-amber-500 ml-1">· not shown to students</span>
+                       </div>
+                       <TextArea
+                         rows={3}
+                         placeholder={
+                           sub.submissionType === SubmissionType.IMAGE
+                             ? 'List what the grader should verify: topology, labels, settings visible, etc. State full / partial / no credit thresholds.'
+                             : AI_GRADED_TYPES.has(sub.submissionType)
+                             ? 'Optional: add model answer or edge-case guidance for TAs reviewing AI-flagged submissions.'
+                             : 'State the expected answer with key formula and numerical result. State what earns full / partial / no credit.'
+                         }
+                         value={sub.graderNote || ''}
+                         onChange={e => updateSubsection(pIndex, sIndex, { graderNote: e.target.value })}
+                         className="text-sm bg-white border-amber-200 focus:border-amber-400"
+                       />
+                     </div>
+                   </div>
                    </React.Fragment>
                 ))}
                 <div className="ml-8">

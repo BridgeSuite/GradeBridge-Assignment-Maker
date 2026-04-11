@@ -634,11 +634,133 @@ const assignmentToMd = (assignment: Assignment): string => {
           }
         });
       }
+
+      if (sub.graderNote) {
+        lines.push('');
+        const sentences = sub.graderNote.split(/(?<=\.)\s+/);
+        sentences.forEach((sentence, i) => {
+          if (i === 0) {
+            lines.push(`> grader_note: ${sentence.trim()}`);
+          } else {
+            lines.push(`> ${sentence.trim()}`);
+          }
+        });
+      }
     });
   });
 
   lines.push('');
   return lines.join('\n');
+};
+
+// =====================================================
+// GRADER DOCUMENT — Instructor/TA reference sheet
+// Shows rubrics (ai-graded) and answer keys (text/image)
+// CONFIDENTIAL — not distributed to students
+// =====================================================
+
+const generateGraderHTML = (assignment: Assignment): string => {
+  const totalPoints = assignment.problems.reduce((sum, prob) =>
+    sum + prob.subsections.reduce((s, sub) => s + sub.points, 0), 0
+  );
+
+  const subsectionRows = assignment.problems.map((prob, pIdx) => {
+    const problemPoints = prob.subsections.reduce((s, sub) => s + sub.points, 0);
+    const subsRows = prob.subsections.map((sub, sIdx) => {
+      const letter = String.fromCharCode(97 + sIdx);
+      const isAi = AI_GRADED_TYPES.has(sub.submissionType);
+      const isImage = sub.submissionType === SubmissionType.IMAGE;
+
+      let referenceBlock = '';
+      if (isAi && sub.aiGradingPrompt) {
+        referenceBlock = `<div class="ref-block ai-ref"><span class="ref-label">AI Rubric</span><p>${sub.aiGradingPrompt}</p></div>`;
+      } else if (sub.graderNote) {
+        const label = isImage ? 'What to look for' : 'Expected answer';
+        referenceBlock = `<div class="ref-block human-ref"><span class="ref-label">${label}</span><p>${sub.graderNote}</p></div>`;
+      } else {
+        referenceBlock = `<div class="ref-block empty-ref"><span class="ref-label">No grader note</span><p>Human review required — no reference answer provided.</p></div>`;
+      }
+
+      const typeLabel = isAi ? sub.submissionType : isImage
+        ? `Image${sub.maxImages && sub.maxImages > 1 ? ` (${sub.maxImages} pages)` : ''} — human review`
+        : 'Text — human grading';
+
+      return `
+        <div class="subsection">
+          <div class="sub-header">
+            <span class="sub-id">(${letter})</span>
+            <span class="sub-name">${sub.name}</span>
+            <span class="sub-pts">${sub.points} pts</span>
+            <span class="sub-type">${typeLabel}</span>
+          </div>
+          ${sub.description ? `<p class="sub-desc">${sub.description}</p>` : ''}
+          ${referenceBlock}
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="problem">
+        <div class="prob-header">
+          <span class="prob-num">Problem ${pIdx + 1}: ${prob.name}</span>
+          <span class="prob-pts">${problemPoints} pts</span>
+        </div>
+        ${prob.description ? `<p class="prob-desc">${prob.description}</p>` : ''}
+        ${subsRows}
+      </div>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GRADER DOCUMENT — ${assignment.courseCode}: ${assignment.title}</title>
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [['$','$'],['\\\\(','\\\\)']], displayMath: [['$$','$$'],['\\\\[','\\\\]']] }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+<style>
+  body { font-family: Georgia, serif; max-width: 900px; margin: 40px auto; line-height: 1.6; padding: 0 24px; color: #222; }
+  .confidential-banner { background: #b91c1c; color: #fff; text-align: center; padding: 10px 0; font-weight: bold; font-size: 1.1em; letter-spacing: 0.05em; margin-bottom: 28px; border-radius: 4px; }
+  h1 { font-size: 1.6em; border-bottom: 2px solid #333; padding-bottom: 8px; margin-bottom: 4px; }
+  .meta { color: #555; font-style: italic; margin-bottom: 28px; font-size: 0.95em; }
+  .problem { margin-top: 36px; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+  .prob-header { background: #1e3a5f; color: #fff; padding: 10px 16px; display: flex; justify-content: space-between; align-items: baseline; }
+  .prob-num { font-weight: bold; font-size: 1.05em; }
+  .prob-pts { font-size: 0.9em; opacity: 0.85; }
+  .prob-desc { margin: 10px 16px 0; color: #444; font-size: 0.95em; }
+  .subsection { border-top: 1px solid #e5e5e5; padding: 12px 16px; }
+  .sub-header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .sub-id { font-weight: bold; color: #1e3a5f; min-width: 28px; }
+  .sub-name { font-weight: bold; flex: 1; }
+  .sub-pts { font-size: 0.9em; color: #555; white-space: nowrap; }
+  .sub-type { font-size: 0.82em; font-family: monospace; background: #f0f0f0; padding: 1px 6px; border-radius: 3px; color: #444; }
+  .sub-desc { color: #555; font-size: 0.93em; margin: 2px 0 8px 28px; }
+  .ref-block { margin: 8px 0 0 28px; padding: 10px 14px; border-radius: 4px; font-size: 0.93em; }
+  .ref-label { display: inline-block; font-weight: bold; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .ai-ref { background: #eff6ff; border-left: 4px solid #2563eb; }
+  .ai-ref .ref-label { color: #1d4ed8; }
+  .human-ref { background: #f0fdf4; border-left: 4px solid #16a34a; }
+  .human-ref .ref-label { color: #15803d; }
+  .empty-ref { background: #fafafa; border-left: 4px solid #d1d5db; }
+  .empty-ref .ref-label { color: #9ca3af; }
+  .ref-block p { margin: 0; white-space: pre-wrap; }
+  @media print {
+    .confidential-banner { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .prob-header { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .problem { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+  <div class="confidential-banner">CONFIDENTIAL — INSTRUCTOR / TA USE ONLY — NOT FOR DISTRIBUTION</div>
+  <h1>${assignment.courseCode}: ${assignment.title} — Grader Reference</h1>
+  <div class="meta">Total: ${totalPoints} pts &nbsp;|&nbsp; Generated by GradeBridge Assignment Maker &nbsp;|&nbsp; Blue = AI rubric &nbsp;|&nbsp; Green = Answer key / What to look for</div>
+  ${assignment.preamble ? `<p><em>${assignment.preamble}</em></p>` : ''}
+  ${subsectionRows}
+</body>
+</html>`;
 };
 
 export const exportService = {
@@ -672,6 +794,11 @@ export const exportService = {
     const rubricFilename = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_grading_rubric.json`;
     zip.file(rubricFilename, JSON.stringify(rubric, null, 2));
 
+    // 7. Grader Document HTML (private — instructor/TA reference with rubrics and answer keys)
+    const graderDoc = generateGraderHTML(assignment);
+    const graderDocFilename = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_grader_document.html`;
+    zip.file(graderDocFilename, graderDoc);
+
     const content = await zip.generateAsync({ type: 'blob' });
 
     // Handle file-saver import differences (default export vs named export property)
@@ -686,6 +813,17 @@ export const exportService = {
     const a = document.createElement('a');
     a.href = url;
     a.download = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
+  downloadGraderDoc: (assignment: Assignment) => {
+    const html = generateGraderHTML(normalizePoints(assignment));
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_grader_document.html`;
     a.click();
     URL.revokeObjectURL(url);
   }

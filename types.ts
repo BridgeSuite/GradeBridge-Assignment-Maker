@@ -27,6 +27,7 @@ export interface Subsection {
   imageGradingMode?: 'human' | 'auto'; // Image only: 'human' = TA reviews; 'auto' = autograder checks images_submitted > 0
   config?: string; // For extra data like prompts or IDs
   aiGradingPrompt?: string;
+  graderNote?: string; // Human grader reference: expected answer or what to look for (not shown to students)
   minWords?: number; // Minimum word count — derived from ai-graded category on import
 }
 

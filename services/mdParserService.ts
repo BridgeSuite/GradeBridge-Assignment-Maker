@@ -147,6 +147,7 @@ export function parseMdToAssignment(content: string): Assignment {
 
       const description = body.filter(l => l.trim() && !l.trim().startsWith('>')).join('\n').trim();
       const aiGradingPrompt = extractBlockquoteValue('grading_prompt', body);
+      const graderNote = extractBlockquoteValue('grader_note', body);
 
       const submissionType = subMeta.submissionType;
       const minWords = MIN_WORDS_MAP[submissionType];
@@ -159,6 +160,7 @@ export function parseMdToAssignment(content: string): Assignment {
         submissionType,
         maxImages: subMeta.maxImages,
         aiGradingPrompt,
+        ...(graderNote && { graderNote }),
         config: '',
         ...(minWords !== undefined && { minWords }),
       };
