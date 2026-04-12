@@ -90,7 +90,7 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
       </main>
       <footer className="bg-academic-800 text-academic-300 py-8 border-t border-academic-700">
         <div className="max-w-7xl mx-auto px-4 text-center text-sm">
-          <p>&copy; {new Date().getFullYear()} GradeBridge. Client-side Assignment Management.</p>
+          <p>&copy; {new Date().getFullYear()} GradeBridge AI. Client-side Assignment Management.</p>
         </div>
       </footer>
 
