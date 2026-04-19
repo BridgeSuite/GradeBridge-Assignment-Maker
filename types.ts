@@ -47,6 +47,7 @@ export interface Assignment {
   preamble: string;
   problems: Problem[];
   aiGradingConfig: AiGradingConfig;
+  targetPoints?: number; // Target total for point scaling (default 100)
   createdAt: number;
   updatedAt: number;
 }

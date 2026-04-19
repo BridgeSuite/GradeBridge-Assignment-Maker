@@ -47,18 +47,19 @@ const MIN_WORDS_BY_TYPE: Partial<Record<SubmissionType, number>> = {
 };
 
 /**
- * Scale all subsection point values so they sum to exactly 100.
+ * Scale all subsection point values so they sum to assignment.targetPoints (default 100).
  * Rounding error is absorbed by the highest-point subsection.
  * Returns a new Assignment — does not mutate the input.
  */
 const normalizePoints = (assignment: Assignment): Assignment => {
+  const target = assignment.targetPoints || 100;
   const allSubs = assignment.problems.flatMap(p => p.subsections);
   const total = allSubs.reduce((sum, s) => sum + s.points, 0);
-  if (total === 0 || total === 100) return assignment;
+  if (total === 0 || total === target) return assignment;
 
-  const scaled = allSubs.map(s => Math.round(s.points * 100 / total));
+  const scaled = allSubs.map(s => Math.round(s.points * target / total));
 
-  const diff = 100 - scaled.reduce((a, b) => a + b, 0);
+  const diff = target - scaled.reduce((a, b) => a + b, 0);
   if (diff !== 0) {
     const maxIdx = scaled.reduce((maxI, v, i, arr) => v > arr[maxI] ? i : maxI, 0);
     scaled[maxIdx] += diff;

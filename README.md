@@ -58,9 +58,16 @@ Set the number of image pages allowed with the **pages** field (e.g. 6 for a qui
 
 ---
 
-## Point Normalisation
+## Point Scaling
 
-All subsection point values must sum to exactly 100. The editor header shows a running total. If the total is not 100, a **Normalize to 100** button appears — click it to scale all values proportionally. Normalisation is also applied automatically at ZIP export and `.md` export.
+The editor header shows a running total of all subsection points. You can set any point total you like — 100 is the default, but 50, 150, or any other value works equally well.
+
+**To change the total:**
+1. Enter the desired total in the **Target** field in the editor header.
+2. If the current total does not match the target, a **Rescale** button appears.
+3. Click **Rescale** — all subsection values scale proportionally, with any rounding remainder absorbed by the highest-value subsection.
+
+The target is saved with the assignment and applied automatically at ZIP export (including the grading rubric and assignment spec).
 
 ---
 
@@ -276,7 +283,8 @@ npm run deploy    # deploy to GitHub Pages (SSH remote required)
 ## Links
 
 - **Live App:** [bridgesuite.github.io/GradeBridge-Assignment-Maker](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)
-- **Student App:** [bridgesuite.github.io/GradeBridge-Student-Submission](https://bridgesuite.github.io/GradeBridge-Student-Submission/)
+- **Student App (production):** [bridgesuite.github.io/GradeBridge-Student-Submission](https://bridgesuite.github.io/GradeBridge-Student-Submission/)
+- **Student App (beta):** [aknoesen.github.io/GradeBridge-Student-Submission-Beta](https://aknoesen.github.io/GradeBridge-Student-Submission-Beta/)
 - **Issues:** [GitHub Issues](https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/issues)
 
 ---

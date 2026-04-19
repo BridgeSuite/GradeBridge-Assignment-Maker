@@ -25,11 +25,12 @@ const AI_WORD_RANGES: Partial<Record<SubmissionType, { range: string; min: numbe
 };
 
 const normalizePoints = (assignment: Assignment): Assignment => {
+  const target = assignment.targetPoints || 100;
   const allSubs = assignment.problems.flatMap(p => p.subsections);
   const total = allSubs.reduce((sum, s) => sum + s.points, 0);
-  if (total === 0 || total === 100) return assignment;
-  const scaled = allSubs.map(s => Math.round(s.points * 100 / total));
-  const diff = 100 - scaled.reduce((a, b) => a + b, 0);
+  if (total === 0 || total === target) return assignment;
+  const scaled = allSubs.map(s => Math.round(s.points * target / total));
+  const diff = target - scaled.reduce((a, b) => a + b, 0);
   if (diff !== 0) {
     const maxIdx = scaled.reduce((maxI, v, i, arr) => v > arr[maxI] ? i : maxI, 0);
     scaled[maxIdx] += diff;
@@ -207,8 +208,15 @@ const Editor: React.FC = () => {
     reader.readAsText(file);
   };
 
-  const handleNormalize = () => {
+  const handleRescale = () => {
     setAssignment(normalizePoints(assignment));
+  };
+
+  const handleSetTarget = (value: string) => {
+    const n = parseInt(value, 10);
+    if (!isNaN(n) && n > 0) {
+      setAssignment({ ...assignment, targetPoints: n });
+    }
   };
 
   // Move Problem logic
@@ -221,7 +229,8 @@ const Editor: React.FC = () => {
   };
 
   const totalPoints = assignment.problems.flatMap(p => p.subsections).reduce((sum, s) => sum + s.points, 0);
-  const pointsAtTarget = totalPoints === 100;
+  const targetPoints = assignment.targetPoints || 100;
+  const pointsAtTarget = totalPoints === targetPoints;
 
   return (
     <Layout
@@ -235,7 +244,7 @@ const Editor: React.FC = () => {
             className="hidden"
             onChange={handleFileUpload}
           />
-          {/* Total points badge */}
+          {/* Total points badge + rescale control */}
           <span className={`text-xs font-bold px-2 py-1 rounded-full border ${
             pointsAtTarget
               ? 'bg-green-50 text-green-700 border-green-300'
@@ -243,9 +252,20 @@ const Editor: React.FC = () => {
           }`}>
             {totalPoints} pts total
           </span>
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-academic-500">Target:</span>
+            <input
+              type="number"
+              min={1}
+              value={targetPoints}
+              onChange={e => handleSetTarget(e.target.value)}
+              className="w-16 text-xs border border-academic-300 rounded px-1 py-0.5 text-center"
+            />
+            <span className="text-xs text-academic-500">pts</span>
+          </div>
           {!pointsAtTarget && (
-            <Button variant="secondary" onClick={handleNormalize} className="text-xs">
-              Normalize to 100
+            <Button variant="secondary" onClick={handleRescale} className="text-xs">
+              Rescale
             </Button>
           )}
           {!isEdit && (
