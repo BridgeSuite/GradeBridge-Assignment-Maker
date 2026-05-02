@@ -37,30 +37,40 @@ interface SubsectionMeta {
   rawType: string;
 }
 
+interface ProblemHeaderMeta {
+  name: string;
+  points?: number;
+  submissionType?: SubmissionType;
+  maxImages: number;
+}
+
+function parseTypeTag(typeTag: string): { submissionType: SubmissionType; maxImages: number } {
+  let maxImages = 1;
+  let baseType = typeTag.trim().toLowerCase();
+  if (baseType.startsWith('image:')) {
+    maxImages = parseInt(baseType.split(':')[1]) || 1;
+    baseType = 'image';
+  }
+  return { submissionType: TYPE_MAP[baseType] ?? SubmissionType.TEXT, maxImages };
+}
+
 function parseSubsectionHeader(line: string): SubsectionMeta | null {
   const m = line.trim().match(/^###\s+\([a-z]+\)\s+(.+?)\s+\[(\d+)\s+pts?\]\s+\[([^\]]+)\]\s*$/i);
   if (!m) return null;
-
-  const name = m[1].trim();
-  const points = parseInt(m[2]);
-  const typeTag = m[3].trim().toLowerCase();
-
-  let maxImages = 1;
-  let baseType = typeTag;
-
-  // image:N — split on first colon only for image type
-  if (typeTag.startsWith('image:')) {
-    baseType = 'image';
-    maxImages = parseInt(typeTag.split(':')[1]) || 1;
-  }
-  // ai-graded:* tags are kept as-is for TYPE_MAP lookup
-
-  return { name, points, submissionType: TYPE_MAP[baseType] ?? SubmissionType.TEXT, maxImages, rawType: baseType };
+  const { submissionType, maxImages } = parseTypeTag(m[3]);
+  return { name: m[1].trim(), points: parseInt(m[2]), submissionType, maxImages, rawType: m[3].trim().toLowerCase() };
 }
 
-function parseProblemHeader(line: string): { name: string } | null {
+function parseProblemHeader(line: string): ProblemHeaderMeta | null {
+  // Flat format: ## Problem N: Title [N pts] [type]
+  const flatM = line.trim().match(/^##\s+Problem\s+\d+:\s+(.+?)\s+\[(\d+)\s+pts?\]\s+\[([^\]]+)\]\s*$/i);
+  if (flatM) {
+    const { submissionType, maxImages } = parseTypeTag(flatM[3]);
+    return { name: flatM[1].trim(), points: parseInt(flatM[2]), submissionType, maxImages };
+  }
+  // Standard format: ## Problem N: Title
   const m = line.trim().match(/^##\s+Problem\s+\d+:\s+(.+)$/i);
-  return m ? { name: m[1].trim() } : null;
+  return m ? { name: m[1].trim(), maxImages: 1 } : null;
 }
 
 function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble'> {
@@ -139,6 +149,29 @@ export function parseMdToAssignment(content: string): Assignment {
           l.trim() && !l.trim().startsWith('#') && !/^\*\*(Due|Preamble):/.test(l.trim())
         );
         currentProblem = { id: uuidv4(), name: prob.name, description: descLines.join('\n').trim(), subsections: [] };
+
+        if (prob.points !== undefined && prob.submissionType !== undefined) {
+          // Flat format — auto-promote body into a single (a) subsection
+          const description = body
+            .filter(l => l.trim() && !l.trim().startsWith('>') && !l.trim().startsWith('#') && !/^\*\*(Due|Preamble):/.test(l.trim()))
+            .join('\n').trim();
+          const aiGradingPrompt = extractBlockquoteValue('grading_prompt', body);
+          const graderNote = extractBlockquoteValue('grader_note', body);
+          const minWords = MIN_WORDS_MAP[prob.submissionType];
+          currentProblem.description = '';
+          currentProblem.subsections.push({
+            id: uuidv4(),
+            name: prob.name,
+            description,
+            points: prob.points,
+            submissionType: prob.submissionType,
+            maxImages: prob.maxImages,
+            aiGradingPrompt,
+            ...(graderNote && { graderNote }),
+            config: '',
+            ...(minWords !== undefined && { minWords }),
+          });
+        }
       }
     } else if (type === 'subsection') {
       if (!currentProblem) continue;
