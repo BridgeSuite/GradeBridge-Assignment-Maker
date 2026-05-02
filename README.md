@@ -107,19 +107,32 @@ Assignments can be authored as plain `.md` files and imported directly into the 
 
 ### File Structure
 
+Two equivalent formats are supported — use whichever is more natural:
+
+**Multi-subsection problems** (standard — required when a problem has more than one part):
 ```markdown
 # {CourseCode}: {Assignment Title}
 
 **Preamble:** One or two sentences of general instructions for students.
 
 ## Problem {N}: {Problem Name}
-Optional problem description. One paragraph max. LaTeX supported with $...$.
+Optional problem description shared across subsections.
 
 ### ({letter}) {Subsection Name} [{points} pts] [{type}]
-Optional subsection description. LaTeX supported.
+Subsection description. LaTeX supported.
 
 > grading_prompt: Rubric text here. (ai-graded subsections only)
 ```
+
+**Flat single-subsection problems** (shorthand — points and type on the `##` line):
+```markdown
+## Problem {N}: {Problem Name} [{points} pts] [{type}]
+Subsection description. LaTeX supported.
+
+> grading_prompt: Rubric text here. (ai-graded subsections only)
+```
+
+The parser auto-promotes a flat problem into a single `(a)` subsection on import. Both formats round-trip correctly through Export .md.
 
 ### Submission Type Tags
 
@@ -272,7 +285,7 @@ npm run deploy    # deploy to GitHub Pages (SSH remote required)
 
 | Issue | Solution |
 |---|---|
-| Import Markdown fails | Check file follows the spec exactly — heading levels and tag format are strict |
+| Import Markdown fails | Check heading levels (`#`, `##`, `###`) and tag format (`[N pts] [type]`). Both flat and subsection formats are supported — see Markdown Format above |
 | LaTeX not rendering | Refresh page; KaTeX loads from CDN |
 | PDF generation slow | Large images slow down PDF generation — reduce image count or size |
 | Lost work | Export JSON backup regularly; localStorage is cleared with browser cache |
