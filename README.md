@@ -9,12 +9,27 @@ Create structured assignments with LaTeX support and Gradescope AI-autograding i
 
 ---
 
-## The Two-App Workflow
+## The GradeBridge AI Ecosystem
+
+GradeBridge AI runs two parallel pipelines that share the same encryption contract and the same Gradescope-Docker autograder pattern. **This app belongs to the lab pipeline.**
+
+### Lab pipeline (this app)
+For lab reports, mini-projects, and homework with mixed text, image, and AI-graded responses.
 
 | App | Who uses it | What it does |
 |---|---|---|
 | **Assignment Maker** (this app) | Instructor | Create assignments, configure grading, export ZIP |
 | **[Student Submission](https://github.com/BridgeSuite/GradeBridge-Student-Submission)** | Student | Load assignment, fill answers, download submission files |
+
+### MQ pipeline (sibling apps)
+For timed multiple-choice quizzes drawn from a portable SQLite question bank. Useful for pre-lecture reading checks and vendor-independent quiz delivery.
+
+| App | Who uses it | What it does |
+|---|---|---|
+| **[MQ Assignment Maker](https://github.com/BridgeSuite/GradeBridge-MQ-Assignment-Maker)** | Instructor | Filter question bank, set time limit, export encrypted assignment (with optional 1.5x / 2x SDC accommodation variants) |
+| **[MQ Student Submission](https://github.com/BridgeSuite/GradeBridge-MQ-Student-Submission)** | Student | Take a timed quiz, sign the honor pledge, download encrypted ZIP for Gradescope |
+
+See the [GradeBridge-AI parent repo](https://github.com/BridgeSuite/GradeBridge-AI) for documentation, the worked example, and pipeline diagrams.
 
 **Export ZIP contains six files:**
 
