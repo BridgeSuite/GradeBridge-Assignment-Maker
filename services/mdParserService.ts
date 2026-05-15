@@ -14,12 +14,13 @@ const DEFAULT_AI_CONFIG: AiGradingConfig = {
 };
 
 const TYPE_MAP: Record<string, SubmissionType> = {
-  'text':              SubmissionType.TEXT,
-  'image':             SubmissionType.IMAGE,
-  'ai-graded:binary':  SubmissionType.AI_GRADED_BINARY,
-  'ai-graded:short':   SubmissionType.AI_GRADED_SHORT,
-  'ai-graded:medium':  SubmissionType.AI_GRADED_MEDIUM,
-  'ai-graded:long':    SubmissionType.AI_GRADED_LONG,
+  'text':                 SubmissionType.TEXT,
+  'image':                SubmissionType.IMAGE,
+  'ai-graded:binary':     SubmissionType.AI_GRADED_BINARY,
+  'ai-graded:short':      SubmissionType.AI_GRADED_SHORT,
+  'ai-graded:medium':     SubmissionType.AI_GRADED_MEDIUM,
+  'ai-graded:long':       SubmissionType.AI_GRADED_LONG,
+  'ai-graded:formative':  SubmissionType.AI_FORMATIVE,
 };
 
 const MIN_WORDS_MAP: Partial<Record<SubmissionType, number>> = {

@@ -37,6 +37,7 @@ const AI_GRADED_TYPES = new Set([
   SubmissionType.AI_GRADED_SHORT,
   SubmissionType.AI_GRADED_MEDIUM,
   SubmissionType.AI_GRADED_LONG,
+  SubmissionType.AI_FORMATIVE,
 ]);
 
 const MIN_WORDS_BY_TYPE: Partial<Record<SubmissionType, number>> = {
@@ -85,6 +86,7 @@ const convertSubmissionType = (type: SubmissionType): string[] => {
     case SubmissionType.AI_GRADED_SHORT:
     case SubmissionType.AI_GRADED_MEDIUM:
     case SubmissionType.AI_GRADED_LONG:
+    case SubmissionType.AI_FORMATIVE:
       return [type]; // pass through the category string
     case SubmissionType.CODE:
       return ['Answer as text'];
@@ -543,6 +545,7 @@ const generateGradingRubric = (assignment: Assignment): object => {
     prob.subsections.forEach((sub, sIndex) => {
       const subsectionId = `p${pIndex}s${sIndex}`;
       const isAi = AI_GRADED_TYPES.has(sub.submissionType);
+      const isFormative = sub.submissionType === SubmissionType.AI_FORMATIVE;
       const isImage = sub.submissionType === SubmissionType.IMAGE;
       const subsectionLetter = String.fromCharCode(97 + sIndex);
       const minWords = MIN_WORDS_BY_TYPE[sub.submissionType];
@@ -555,7 +558,7 @@ const generateGradingRubric = (assignment: Assignment): object => {
         subsection_name: sub.name,
         display_name: `Problem ${pIndex + 1}(${subsectionLetter}): ${sub.name}`,
         max_points: sub.points,
-        grading_type: isAi ? 'ai' : isImage ? (sub.imageGradingMode === 'auto' ? 'ai_image_completion' : 'human_image') : 'human',
+        grading_type: isFormative ? 'ai_formative' : isAi ? 'ai' : isImage ? (sub.imageGradingMode === 'auto' ? 'ai_image_completion' : 'human_image') : 'human',
         grading_prompt: isAi ? (sub.aiGradingPrompt || '') : '',
         ...(isAi && minWords !== undefined && { min_words: minWords }),
         ...(isImage && { max_images: sub.maxImages ?? 1 })
@@ -589,6 +592,7 @@ const TYPE_TAG: Partial<Record<SubmissionType, string>> = {
   [SubmissionType.AI_GRADED_SHORT]:  'ai-graded:short',
   [SubmissionType.AI_GRADED_MEDIUM]: 'ai-graded:medium',
   [SubmissionType.AI_GRADED_LONG]:   'ai-graded:long',
+  [SubmissionType.AI_FORMATIVE]:     'ai-graded:formative',
 };
 
 const assignmentToMd = (assignment: Assignment): string => {

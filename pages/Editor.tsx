@@ -15,6 +15,7 @@ const AI_GRADED_TYPES = new Set([
   SubmissionType.AI_GRADED_SHORT,
   SubmissionType.AI_GRADED_MEDIUM,
   SubmissionType.AI_GRADED_LONG,
+  SubmissionType.AI_FORMATIVE,
 ]);
 
 const AI_WORD_RANGES: Partial<Record<SubmissionType, { range: string; min: number }>> = {
@@ -488,10 +489,11 @@ const Editor: React.FC = () => {
                          <span className="text-xs text-academic-300">|</span>
                          <span className="text-xs text-purple-500 font-medium uppercase tracking-wide">AI:</span>
                          {([
-                           { label: 'Binary', type: SubmissionType.AI_GRADED_BINARY, defaultPts: 3  },
-                           { label: 'Short',  type: SubmissionType.AI_GRADED_SHORT,  defaultPts: 8  },
-                           { label: 'Medium', type: SubmissionType.AI_GRADED_MEDIUM, defaultPts: 15 },
-                           { label: 'Long',   type: SubmissionType.AI_GRADED_LONG,   defaultPts: 25 },
+                           { label: 'Binary',    type: SubmissionType.AI_GRADED_BINARY, defaultPts: 3  },
+                           { label: 'Short',     type: SubmissionType.AI_GRADED_SHORT,  defaultPts: 8  },
+                           { label: 'Medium',    type: SubmissionType.AI_GRADED_MEDIUM, defaultPts: 15 },
+                           { label: 'Long',      type: SubmissionType.AI_GRADED_LONG,   defaultPts: 25 },
+                           { label: 'Formative', type: SubmissionType.AI_FORMATIVE,     defaultPts: 25 },
                          ] as { label: string; type: SubmissionType; defaultPts: number }[]).map(({ label, type, defaultPts }) => (
                            <button
                              key={type}
@@ -515,13 +517,24 @@ const Editor: React.FC = () => {
                    </div>
                    {AI_GRADED_TYPES.has(sub.submissionType) && (
                      <div className="ml-8 mt-1 px-3 space-y-3">
-                       <div className="text-xs text-purple-600 font-medium">
-                         Suggested length: {AI_WORD_RANGES[sub.submissionType]?.range} · suggested minimum: {AI_WORD_RANGES[sub.submissionType]?.min} words (guidance only — not enforced)
-                       </div>
+                       {AI_WORD_RANGES[sub.submissionType] && (
+                         <div className="text-xs text-purple-600 font-medium">
+                           Suggested length: {AI_WORD_RANGES[sub.submissionType]?.range} · suggested minimum: {AI_WORD_RANGES[sub.submissionType]?.min} words (guidance only — not enforced)
+                         </div>
+                       )}
+                       {sub.submissionType === SubmissionType.AI_FORMATIVE && (
+                         <div className="text-xs text-purple-600 font-medium">
+                           Formative feedback (advisory) — student sees per-element status (Addressed / Partial / Missing) plus a section summary; no numeric score is surfaced.
+                         </div>
+                       )}
                        <TextArea
                          label="AI Grading Rubric (private — not shown to students)"
                          rows={4}
-                         placeholder="Describe how to grade this question. Use the correct number of bands for the category (Binary: 2, Short: 3, Medium: 4, Long: 5)."
+                         placeholder={
+                           sub.submissionType === SubmissionType.AI_FORMATIVE
+                             ? 'Formative grading prompt: required elements, status thresholds (Addressed/Partial/Missing), Human Review flags, and section summary instructions.'
+                             : 'Describe how to grade this question. Use the correct number of bands for the category (Binary: 2, Short: 3, Medium: 4, Long: 5).'
+                         }
                          value={sub.aiGradingPrompt || ''}
                          onChange={e => updateSubsection(pIndex, sIndex, { aiGradingPrompt: e.target.value })}
                          className="text-sm"
