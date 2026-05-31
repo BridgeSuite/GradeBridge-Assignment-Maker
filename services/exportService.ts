@@ -698,7 +698,6 @@ const generateGraderHTML = (assignment: Assignment): string => {
         referenceBlock = `<div class="ref-block empty-ref"><span class="ref-label">No grader note</span><p>Human review required — no reference answer provided.</p></div>`;
       }
 
-      const isTextAndImageRubric = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
       const typeLabel = isAi ? sub.submissionType : isImage
         ? `Image${sub.maxImages && sub.maxImages > 1 ? ` (${sub.maxImages} pages)` : ''} — human review`
         : isTextAndImageRubric
