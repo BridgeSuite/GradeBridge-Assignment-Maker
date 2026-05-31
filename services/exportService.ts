@@ -219,10 +219,14 @@ const generatePDFContent = (doc: jsPDF, assignment: Assignment, isTemplate: bool
     
     prob.subsections.forEach((sub, sIndex) => {
       
-      // Determine how many pages this subsection gets
-      const pageCount = sub.submissionType === SubmissionType.IMAGE 
-        ? (sub.maxImages || 1) 
-        : 1;
+      // Determine how many pages this subsection gets.
+      // TEXT_AND_IMAGE: 1 text page + N image pages.
+      const isTextAndImageSub = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
+      const pageCount = sub.submissionType === SubmissionType.IMAGE
+        ? (sub.maxImages || 1)
+        : isTextAndImageSub
+          ? 1 + (sub.maxImages || 1)
+          : 1;
 
       for (let i = 0; i < pageCount; i++) {
         doc.addPage(); // STRICT PAGE BREAK FOR EVERY ITEM
@@ -296,9 +300,11 @@ const generatePDFContent = (doc: jsPDF, assignment: Assignment, isTemplate: bool
                 
                 doc.setFontSize(8);
                 doc.setTextColor(150);
-                const regionText = sub.submissionType === SubmissionType.IMAGE 
-                    ? `Attach Image ${i + 1} Here` 
-                    : "Gradescope Answer Region";
+                const regionText = sub.submissionType === SubmissionType.IMAGE
+                    ? `Attach Image ${i + 1} Here`
+                    : isTextAndImageSub && i > 0
+                      ? `Attach Image ${i} Here`
+                      : "Gradescope Answer Region";
                 doc.text(regionText, margin + 7, y + 5);
                 doc.setTextColor(0);
                 doc.setDrawColor(0);
@@ -547,6 +553,7 @@ const generateGradingRubric = (assignment: Assignment): object => {
       const isAi = AI_GRADED_TYPES.has(sub.submissionType);
       const isFormative = sub.submissionType === SubmissionType.AI_FORMATIVE;
       const isImage = sub.submissionType === SubmissionType.IMAGE;
+      const isTextAndImage = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
       const subsectionLetter = String.fromCharCode(97 + sIndex);
       const minWords = MIN_WORDS_BY_TYPE[sub.submissionType];
 
@@ -561,7 +568,7 @@ const generateGradingRubric = (assignment: Assignment): object => {
         grading_type: isFormative ? 'ai_formative' : isAi ? 'ai' : isImage ? (sub.imageGradingMode === 'auto' ? 'ai_image_completion' : 'human_image') : 'human',
         grading_prompt: isAi ? (sub.aiGradingPrompt || '') : '',
         ...(isAi && minWords !== undefined && { min_words: minWords }),
-        ...(isImage && { max_images: sub.maxImages ?? 1 })
+        ...((isImage || isTextAndImage) && { max_images: sub.maxImages ?? 1 })
       };
     });
   });
@@ -588,6 +595,7 @@ const generateGradingRubric = (assignment: Assignment): object => {
 const TYPE_TAG: Partial<Record<SubmissionType, string>> = {
   [SubmissionType.TEXT]:             'text',
   [SubmissionType.IMAGE]:            'image',
+  [SubmissionType.TEXT_AND_IMAGE]:   'text+image',
   [SubmissionType.AI_GRADED_BINARY]: 'ai-graded:binary',
   [SubmissionType.AI_GRADED_SHORT]:  'ai-graded:short',
   [SubmissionType.AI_GRADED_MEDIUM]: 'ai-graded:medium',
@@ -617,9 +625,12 @@ const assignmentToMd = (assignment: Assignment): string => {
     prob.subsections.forEach((sub, sIdx) => {
       const letter = String.fromCharCode(97 + sIdx);
       const isImage = sub.submissionType === SubmissionType.IMAGE;
+      const isTextAndImage = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
       const typeTag = isImage && sub.maxImages && sub.maxImages > 1
         ? `image:${sub.maxImages}`
-        : (TYPE_TAG[sub.submissionType as SubmissionType] ?? 'text');
+        : isTextAndImage && sub.maxImages && sub.maxImages > 1
+          ? `text+image:${sub.maxImages}`
+          : (TYPE_TAG[sub.submissionType as SubmissionType] ?? 'text');
 
       lines.push('');
       lines.push(`### (${letter}) ${sub.name} [${sub.points} pts] [${typeTag}]`);
@@ -676,19 +687,23 @@ const generateGraderHTML = (assignment: Assignment): string => {
       const isAi = AI_GRADED_TYPES.has(sub.submissionType);
       const isImage = sub.submissionType === SubmissionType.IMAGE;
 
+      const isTextAndImageRubric = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
       let referenceBlock = '';
       if (isAi && sub.aiGradingPrompt) {
         referenceBlock = `<div class="ref-block ai-ref"><span class="ref-label">AI Rubric</span><p>${sub.aiGradingPrompt}</p></div>`;
       } else if (sub.graderNote) {
-        const label = isImage ? 'What to look for' : 'Expected answer';
+        const label = isImage ? 'What to look for' : isTextAndImageRubric ? 'Expected answer + what to look for in image' : 'Expected answer';
         referenceBlock = `<div class="ref-block human-ref"><span class="ref-label">${label}</span><p>${sub.graderNote}</p></div>`;
       } else {
         referenceBlock = `<div class="ref-block empty-ref"><span class="ref-label">No grader note</span><p>Human review required — no reference answer provided.</p></div>`;
       }
 
+      const isTextAndImageRubric = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
       const typeLabel = isAi ? sub.submissionType : isImage
         ? `Image${sub.maxImages && sub.maxImages > 1 ? ` (${sub.maxImages} pages)` : ''} — human review`
-        : 'Text — human grading';
+        : isTextAndImageRubric
+          ? `Text + Image${sub.maxImages && sub.maxImages > 1 ? ` (${sub.maxImages} image pages)` : ''} — human grading`
+          : 'Text — human grading';
 
       return `
         <div class="subsection">

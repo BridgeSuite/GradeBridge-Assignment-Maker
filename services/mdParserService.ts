@@ -16,6 +16,7 @@ const DEFAULT_AI_CONFIG: AiGradingConfig = {
 const TYPE_MAP: Record<string, SubmissionType> = {
   'text':                 SubmissionType.TEXT,
   'image':                SubmissionType.IMAGE,
+  'text+image':           SubmissionType.TEXT_AND_IMAGE,
   'ai-graded:binary':     SubmissionType.AI_GRADED_BINARY,
   'ai-graded:short':      SubmissionType.AI_GRADED_SHORT,
   'ai-graded:medium':     SubmissionType.AI_GRADED_MEDIUM,
@@ -51,6 +52,9 @@ function parseTypeTag(typeTag: string): { submissionType: SubmissionType; maxIma
   if (baseType.startsWith('image:')) {
     maxImages = parseInt(baseType.split(':')[1]) || 1;
     baseType = 'image';
+  } else if (baseType.startsWith('text+image:')) {
+    maxImages = parseInt(baseType.split(':')[1]) || 1;
+    baseType = 'text+image';
   }
   return { submissionType: TYPE_MAP[baseType] ?? SubmissionType.TEXT, maxImages };
 }

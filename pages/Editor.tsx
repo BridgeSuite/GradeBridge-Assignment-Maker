@@ -415,20 +415,23 @@ const Editor: React.FC = () => {
                    </div>
                    {/* Type + Grading Selector */}
                    <div className="ml-8 mt-1 flex flex-wrap items-center gap-2">
-                     {/* Medium: Text or Image */}
+                     {/* Medium: Text, Image, or Text + Image */}
                      <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Type:</span>
                      {([
-                       { label: 'Text',  type: SubmissionType.TEXT  },
-                       { label: 'Image', type: SubmissionType.IMAGE },
+                       { label: 'Text',        type: SubmissionType.TEXT          },
+                       { label: 'Image',       type: SubmissionType.IMAGE         },
+                       { label: 'Text + Image', type: SubmissionType.TEXT_AND_IMAGE },
                      ] as { label: string; type: SubmissionType }[]).map(({ label, type }) => (
                        <button
                          key={type}
                          type="button"
-                         onClick={() => updateSubsection(pIndex, sIndex, { submissionType: type })}
+                         onClick={() => updateSubsection(pIndex, sIndex, { submissionType: type, imageGradingMode: 'human' })}
                          className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
                            (type === SubmissionType.IMAGE
                              ? sub.submissionType === SubmissionType.IMAGE
-                             : sub.submissionType !== SubmissionType.IMAGE)
+                             : type === SubmissionType.TEXT_AND_IMAGE
+                               ? sub.submissionType === SubmissionType.TEXT_AND_IMAGE
+                               : sub.submissionType !== SubmissionType.IMAGE && sub.submissionType !== SubmissionType.TEXT_AND_IMAGE)
                              ? 'bg-academic-700 text-white border-academic-700'
                              : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
                          }`}
@@ -471,6 +474,24 @@ const Editor: React.FC = () => {
                              {label}
                            </button>
                          ))}
+                       </>
+                     ) : sub.submissionType === SubmissionType.TEXT_AND_IMAGE ? (
+                       /* Text + Image branch — human grading only */
+                       <>
+                         <div className="flex items-center gap-1.5">
+                           <span className="text-xs text-academic-500">image pages:</span>
+                           <input
+                             type="number"
+                             min={1}
+                             value={sub.maxImages || 1}
+                             onChange={e => updateSubsection(pIndex, sIndex, { maxImages: parseInt(e.target.value) || 1 })}
+                             className="w-14 text-xs border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
+                             title="Number of image pages allowed"
+                           />
+                         </div>
+                         <span className="text-xs px-3 py-1 rounded-full border font-medium bg-academic-700 text-white border-academic-700">
+                           Human
+                         </span>
                        </>
                      ) : (
                        /* Text branch */
@@ -549,6 +570,8 @@ const Editor: React.FC = () => {
                          <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
                            {sub.submissionType === SubmissionType.IMAGE
                              ? 'Grader note — what to look for in the submission'
+                             : sub.submissionType === SubmissionType.TEXT_AND_IMAGE
+                             ? 'Grader note — expected text answer + what to look for in the image'
                              : AI_GRADED_TYPES.has(sub.submissionType)
                              ? 'Supplementary TA note (optional — AI rubric above is primary)'
                              : 'Grader note — expected answer / worked solution'}
