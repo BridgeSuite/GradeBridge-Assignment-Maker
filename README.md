@@ -50,7 +50,7 @@ Each subsection has a **Type** selector and a **Grading** selector. The two bran
 
 ### Text questions
 
-`Type: [Text] [Image]  |  Grading: [Human] | AI: [Binary] [Short] [Medium] [Long]`
+`Type: [Text] [Image] [Text + Image]  |  Grading: [Human] | AI: [Binary] [Short] [Medium] [Long] [Formative]`
 
 | Grading selection | What it means | Autograded? |
 |---|---|---|
@@ -59,10 +59,11 @@ Each subsection has a **Type** selector and a **Grading** selector. The two bran
 | **AI: Short** | Student answers a focused concept question; AI grades | Yes — 3 bands, 50 word min |
 | **AI: Medium** | Student explains a mechanism or relationship; AI grades | Yes — 4 bands, 100 word min |
 | **AI: Long** | Student analyses trade-offs or synthesises across concepts; AI grades | Yes — 5 bands, 150 word min |
+| **AI: Formative** | Student writes a report section; AI returns per-element status (Addressed / Partial / Missing) and a section summary — no numeric score is surfaced | Advisory only — no grade emitted |
 
 ### Image questions
 
-`Type: [Text] [Image]  pages: __  |  Grading: [Human Inspection] [AI Inspection]`
+`Type: [Text] [Image] [Text + Image]  pages: __  |  Grading: [Human Inspection] [AI Inspection]`
 
 | Grading selection | What it means | Autograded? |
 |---|---|---|
@@ -70,6 +71,12 @@ Each subsection has a **Type** selector and a **Grading** selector. The two bran
 | **AI Inspection** | Autograder checks `images_submitted > 0`; awards full marks automatically | Yes |
 
 Set the number of image pages allowed with the **pages** field (e.g. 6 for a quiz transcript).
+
+### Text + Image questions
+
+`Type: [Text] [Image] [Text + Image]  image pages: __  |  Grading: [Human]`
+
+Student submits both a written answer and one or more supporting images in a single subsection slot. Always human-graded — the TA reviews both the text response and the uploaded image(s) in the PDF. Set the maximum number of image pages with the **image pages** field.
 
 ---
 
@@ -156,10 +163,13 @@ The parser auto-promotes a flat problem into a single `(a)` subsection on import
 | `[text]` | Text answer box | Human-graded by default |
 | `[image]` | Single image upload | Human Inspection by default |
 | `[image:N]` | Image upload, N pages | e.g. `[image:6]` for a quiz transcript |
+| `[text+image]` | Text answer + single image upload | Human-graded; TA reviews both |
+| `[text+image:N]` | Text answer + N image pages | e.g. `[text+image:2]` |
 | `[ai-graded:binary]` | Yes/no free-text, AI graded | 20 word min; 2 grading bands |
 | `[ai-graded:short]` | Short free-text, AI graded | 50 word min; 3 grading bands |
 | `[ai-graded:medium]` | Medium free-text, AI graded | 100 word min; 4 grading bands |
 | `[ai-graded:long]` | Long free-text, AI graded | 150 word min; 5 grading bands |
+| `[ai-graded:formative]` | Report section, AI formative feedback | No enforced word min; no score emitted |
 
 ### Grading Prompt Format
 
@@ -266,8 +276,9 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
 
 | Value | Meaning |
 |---|---|
-| `"ai"` | AI-graded text response |
-| `"human"` | TA reviews text response |
+| `"ai"` | AI-graded text response (scored) |
+| `"ai_formative"` | AI formative feedback — per-element status only, no numeric score |
+| `"human"` | TA reviews text response (also used for Text + Image) |
 | `"human_image"` | TA reviews uploaded image |
 | `"ai_image_completion"` | Auto-award if `images_submitted > 0` |
 
