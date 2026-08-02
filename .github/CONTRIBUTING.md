@@ -16,7 +16,7 @@ Thank you for your interest in contributing to GradeBridge Assignment Maker! Thi
 
 ## Code of Conduct
 
-This project is maintained by VeriQAi for the educational community. We are committed to providing a welcoming and inclusive environment for all contributors. Please be respectful, constructive, and professional in all interactions.
+This project is maintained by UC Davis for the educational community. We are committed to providing a welcoming and inclusive environment for all contributors. Please be respectful, constructive, and professional in all interactions.
 
 ## How Can I Contribute?
 
@@ -41,11 +41,11 @@ You don't need to be a professional developer to contribute! Here are ways you c
 
 ## Reporting Bugs
 
-Before creating a bug report, please check the [existing issues](https://github.com/VeriQAi/GradeBridge-Assignment-Maker/issues) to avoid duplicates.
+Before creating a bug report, please check the [existing issues](https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/issues) to avoid duplicates.
 
 ### How to Submit a Bug Report
 
-1. Use the [bug report template](https://github.com/VeriQAi/GradeBridge-Assignment-Maker/issues/new?template=bug_report.md)
+1. Use the [bug report template](https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/issues/new?template=bug_report.md)
 2. Provide a clear, descriptive title
 3. Include detailed steps to reproduce the issue
 4. Describe what you expected to happen vs. what actually happened
@@ -58,7 +58,7 @@ Before creating a bug report, please check the [existing issues](https://github.
 
 We love hearing ideas for improving the assignment creation experience! Before suggesting a feature:
 
-1. Check [existing feature requests](https://github.com/VeriQAi/GradeBridge-Assignment-Maker/issues?q=is%3Aissue+is%3Aopen+label%3Aenhancement)
+1. Check [existing feature requests](https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/issues?q=is%3Aissue+is%3Aopen+label%3Aenhancement)
 2. Consider whether it aligns with our goals:
    - **Client-side processing** (no server dependencies)
    - **Privacy-first** (data stays on educator's device)
@@ -68,7 +68,7 @@ We love hearing ideas for improving the assignment creation experience! Before s
 
 ### How to Submit a Feature Request
 
-1. Use the [feature request template](https://github.com/VeriQAi/GradeBridge-Assignment-Maker/issues/new?template=feature_request.md)
+1. Use the [feature request template](https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/issues/new?template=feature_request.md)
 2. Describe the problem or pain point
 3. Propose a solution
 4. Explain how it benefits educators and students
@@ -320,7 +320,7 @@ Remember that this tool is used to create academic assessments:
 
 ## Response Times
 
-This is a community edition tool maintained by VeriQAi as time permits. Please be patient:
+This is a community edition tool maintained by UC Davis as time permits. Please be patient:
 
 - **Bug reports**: We aim to respond within 1 week
 - **Feature requests**: May take longer to evaluate and implement
@@ -339,13 +339,13 @@ Contributors will be:
 
 ## Questions?
 
-- **General questions**: Open a [GitHub Discussion](https://github.com/VeriQAi/GradeBridge-Assignment-Maker/discussions)
-- **Bug reports**: Use the [bug template](https://github.com/VeriQAi/GradeBridge-Assignment-Maker/issues/new?template=bug_report.md)
-- **Feature ideas**: Use the [feature template](https://github.com/VeriQAi/GradeBridge-Assignment-Maker/issues/new?template=feature_request.md)
+- **General questions**: Open a [GitHub Discussion](https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/discussions)
+- **Bug reports**: Use the [bug template](https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/issues/new?template=bug_report.md)
+- **Feature ideas**: Use the [feature template](https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/issues/new?template=feature_request.md)
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache License, Version 2.0.
+By contributing, you agree that your contributions will be licensed under the MIT License.
 
 ---
 

@@ -5,31 +5,18 @@ Create structured assignments with LaTeX support and Gradescope AI-autograding i
 ![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-**[Live App](https://veriqai.github.io/GradeBridge-Assignment-Maker/)** | **[Student Submission App](https://veriqai.github.io/GradeBridge-Student-Submission/)**
+**[Live App](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)** | **[Student Submission App](https://bridgesuite.github.io/GradeBridge-Student-Submission/)**
 
 ---
 
-## The GradeBridge AI Ecosystem
+## The Apps
 
-GradeBridge AI runs two parallel pipelines that share the same encryption contract and the same Gradescope-Docker autograder pattern. **This app belongs to the lab pipeline.**
-
-### Lab pipeline (this app)
-For lab reports, mini-projects, and homework with mixed text, image, and AI-graded responses.
+GradeBridge apps share an encryption contract and a Gradescope-Docker autograder pattern. This app handles lab reports, mini-projects, and homework with mixed text, image, and AI-graded responses.
 
 | App | Who uses it | What it does |
 |---|---|---|
 | **Assignment Maker** (this app) | Instructor | Create assignments, configure grading, export ZIP |
-| **[Student Submission](https://github.com/VeriQAi/GradeBridge-Student-Submission)** | Student | Load assignment, fill answers, download submission files |
-
-### MQ pipeline (sibling apps)
-For timed multiple-choice quizzes drawn from a portable SQLite question bank. Useful for pre-lecture reading checks and vendor-independent quiz delivery.
-
-| App | Who uses it | What it does |
-|---|---|---|
-| **[MQ Assignment Maker](https://github.com/VeriQAi/GradeBridge-MQ-Assignment-Maker)** | Instructor | Filter question bank, set time limit, export encrypted assignment (with optional 1.5x / 2x SDC accommodation variants) |
-| **[MQ Student Submission](https://github.com/VeriQAi/GradeBridge-MQ-Student-Submission)** | Student | Take a timed quiz, sign the honor pledge, download encrypted ZIP for Gradescope |
-
-See the [GradeBridge-AI parent repo](https://github.com/VeriQAi/GradeBridge-AI) for documentation, the worked example, and pipeline diagrams.
+| **[Student Submission](https://github.com/BridgeSuite/GradeBridge-Student-Submission)** | Student | Load assignment, fill answers, download submission files |
 
 **Export ZIP contains six files:**
 
@@ -96,7 +83,7 @@ The target is saved with the assignment and applied automatically at ZIP export 
 ## Quick Start
 
 ### Option A — Start from scratch
-1. Open the [Live App](https://veriqai.github.io/GradeBridge-Assignment-Maker/)
+1. Open the [Live App](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)
 2. Click **New Assignment**
 3. Fill in course code, title, and preamble
 4. Add problems and subsections; use the **Type** and **Grading** selectors
@@ -295,7 +282,7 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
 ## Local Development
 
 ```bash
-git clone https://github.com/VeriQAi/GradeBridge-Assignment-Maker.git
+git clone https://github.com/BridgeSuite/GradeBridge-Assignment-Maker.git
 cd GradeBridge-Assignment-Maker
 npm install
 npm run dev       # → http://localhost:3000/GradeBridge-Assignment-Maker/
@@ -315,17 +302,17 @@ npm run deploy    # deploy to GitHub Pages (SSH remote required)
 | LaTeX not rendering | Refresh page; KaTeX loads from CDN |
 | PDF generation slow | Large images slow down PDF generation — reduce image count or size |
 | Lost work | Export JSON backup regularly; localStorage is cleared with browser cache |
-| Deploy returns 403 | SSH remote required — run `git remote set-url origin git@github.com:VeriQAi/GradeBridge-Assignment-Maker.git` |
+| Deploy returns 403 | SSH remote required — run `git remote set-url origin git@github.com:BridgeSuite/GradeBridge-Assignment-Maker.git` |
 
 ---
 
 ## Links
 
-- **Live App:** [veriqai.github.io/GradeBridge-Assignment-Maker](https://veriqai.github.io/GradeBridge-Assignment-Maker/)
-- **Student App (production):** [veriqai.github.io/GradeBridge-Student-Submission](https://veriqai.github.io/GradeBridge-Student-Submission/)
+- **Live App:** [bridgesuite.github.io/GradeBridge-Assignment-Maker](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)
+- **Student App (production):** [bridgesuite.github.io/GradeBridge-Student-Submission](https://bridgesuite.github.io/GradeBridge-Student-Submission/)
 - **Student App (beta):** [aknoesen.github.io/GradeBridge-Student-Submission-Beta](https://aknoesen.github.io/GradeBridge-Student-Submission-Beta/)
-- **Issues:** [GitHub Issues](https://github.com/VeriQAi/GradeBridge-Assignment-Maker/issues)
+- **Issues:** [GitHub Issues](https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/issues)
 
 ---
 
-MIT License · Provided free by **[VeriQAi](https://github.com/VeriQAi)**
+MIT License · © 2026 The Regents of the University of California · Provided free by **UC Davis**

@@ -25,7 +25,7 @@ export const PrivacyNotice: React.FC = () => {
           <div className="flex items-center gap-3">
             <ShieldCheck className="w-8 h-8" />
             <div>
-              <h2 className="text-2xl font-bold">Welcome to VeriQAi Assignment Manager</h2>
+              <h2 className="text-2xl font-bold">Welcome to GradeBridge Assignment Maker</h2>
               <p className="text-academic-200 text-sm mt-1">Privacy & Data Notice</p>
             </div>
           </div>
@@ -73,13 +73,13 @@ export const PrivacyNotice: React.FC = () => {
               This software is provided "as is", without warranty of any kind, express or implied,
               including but not limited to the warranties of merchantability, fitness for a particular
               purpose and noninfringement. Copyright © 2026 The Regents of the University of
-              California. This application is made available under the Apache License, Version 2.0.
+              California. This application is made available under the MIT License.
             </p>
           </div>
 
           <div className="border-t border-academic-200 pt-4">
             <p className="text-academic-500 text-xs text-center">
-              Provided free of charge by <span className="font-bold text-[#00A4E4]">VeriQAi</span>
+              Provided free of charge by <span className="font-bold text-[#00A4E4]">UC Davis</span>
             </p>
           </div>
         </div>
