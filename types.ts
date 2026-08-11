@@ -50,6 +50,7 @@ export interface Assignment {
   problems: Problem[];
   aiGradingConfig: AiGradingConfig;
   targetPoints?: number; // Target total for point scaling (default 100)
+  coursePublicKey?: string; // SPKI PEM (public only). Present → students produce hardened gb2 submissions; absent → gb1.
   createdAt: number;
   updatedAt: number;
 }

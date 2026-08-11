@@ -5,8 +5,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { Assignment, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService } from '../services/exportService';
+import {
+  validateCoursePublicKey,
+  normalizeCoursePublicKey,
+  CoursePublicKeyValidation
+} from '../services/cryptoService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
-import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock } from 'lucide-react';
+import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, ShieldCheck, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
 
 const DEFAULT_AI_GRADING_CONFIG: AiGradingConfig = { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 };
 
@@ -80,6 +85,11 @@ const Editor: React.FC = () => {
     updatedAt: Date.now()
   });
 
+  // Course public key is edited as raw text and only committed to the assignment once it validates.
+  const [keyInput, setKeyInput] = useState('');
+  const [keyStatus, setKeyStatus] = useState<CoursePublicKeyValidation | null>(null);
+  const keyCheckSeq = useRef(0);
+
   useEffect(() => {
     if (id) {
       const loaded = storageService.get(id);
@@ -100,18 +110,71 @@ const Editor: React.FC = () => {
           }))
         };
         setAssignment(sanitized);
+        setKeyInput(loaded.coursePublicKey || '');
+        if (loaded.coursePublicKey) checkCourseKey(loaded.coursePublicKey);
       } else {
         navigate('/');
       }
     }
   }, [id, navigate]);
 
-  const handleSave = () => {
+  // Write the key onto the assignment, or drop the field entirely when there is no key.
+  const setCourseKeyOnAssignment = (pem: string | null) => {
+    setAssignment(prev => {
+      if (pem === null) {
+        if (prev.coursePublicKey === undefined) return prev;
+        const { coursePublicKey: _dropped, ...rest } = prev;
+        return rest as Assignment;
+      }
+      return { ...prev, coursePublicKey: pem };
+    });
+  };
+
+  // Validate the pasted key and keep the assignment in sync. Only a valid key is ever stored.
+  const checkCourseKey = async (value: string) => {
+    const seq = ++keyCheckSeq.current;
+    const pem = normalizeCoursePublicKey(value);
+
+    if (!pem) {
+      setKeyStatus(null);
+      setCourseKeyOnAssignment(null);
+      return;
+    }
+
+    const result = await validateCoursePublicKey(pem);
+    if (seq !== keyCheckSeq.current) return; // a newer paste superseded this check
+
+    setKeyStatus(result);
+    setCourseKeyOnAssignment(result.ok ? pem : null);
+  };
+
+  const handleSave = async () => {
     if (!assignment.courseCode || !assignment.title) {
       alert("Please fill in Course Code and Title.");
       return;
     }
-    storageService.save(assignment);
+
+    // Re-validate on save so an unblurred paste can never slip through.
+    const pem = normalizeCoursePublicKey(keyInput);
+    let toSave = assignment;
+
+    if (pem) {
+      const result = await validateCoursePublicKey(pem);
+      keyCheckSeq.current++;
+      setKeyStatus(result);
+      if (!result.ok) {
+        setCourseKeyOnAssignment(null);
+        alert(`The course public key is not valid, so the assignment was not saved.\n\n${result.error}\n\nClear the field to keep the standard (gb1) encoding.`);
+        return;
+      }
+      toSave = { ...assignment, coursePublicKey: pem };
+    } else {
+      const { coursePublicKey: _dropped, ...rest } = assignment;
+      toSave = rest as Assignment;
+    }
+
+    setAssignment(toSave);
+    storageService.save(toSave);
     navigate('/');
   };
 
@@ -195,6 +258,8 @@ const Editor: React.FC = () => {
         };
 
         setAssignment(newAssignment);
+        setKeyInput(newAssignment.coursePublicKey || '');
+        checkCourseKey(newAssignment.coursePublicKey || '');
         alert("Template loaded! You can now edit and save it as a new assignment.");
       } catch (error) {
         console.error(error);
@@ -321,6 +386,57 @@ const Editor: React.FC = () => {
                 value={assignment.preamble}
                 onChange={e => setAssignment({...assignment, preamble: e.target.value})}
               />
+            </div>
+
+            {/* Course public key — optional; enables gb2 hardened submissions */}
+            <div className="md:col-span-2">
+              <div className="rounded border border-academic-200 bg-academic-50/60 p-4 space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-academic-600 shrink-0" />
+                  <span className="text-sm font-medium text-academic-800">
+                    Course public key (enables hardened gb2 submissions)
+                  </span>
+                  <span className="text-xs text-academic-500">· optional</span>
+                </div>
+                <p className="text-xs text-academic-500 leading-relaxed">
+                  Paste the <strong>public</strong> key issued for this course — SPKI PEM, starting with
+                  {' '}<code className="font-mono">-----BEGIN PUBLIC KEY-----</code>. It ships inside the assignment and is
+                  safe to distribute: with it, students' submissions can only be opened by the autograder's private key.
+                  Leave this empty to keep the current encoding. Your institution generates and holds the keypair —
+                  <strong> never paste a private key</strong>.
+                </p>
+                <textarea
+                  rows={5}
+                  spellCheck={false}
+                  value={keyInput}
+                  onChange={e => setKeyInput(e.target.value)}
+                  onBlur={e => checkCourseKey(e.target.value)}
+                  placeholder={'-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkq...\n-----END PUBLIC KEY-----'}
+                  className="w-full font-mono text-xs bg-white text-academic-900 rounded-md border border-academic-300 shadow-sm py-2 px-3 resize-y focus:outline-none focus:border-academic-500 focus:ring-1 focus:ring-academic-500"
+                />
+                {!keyInput.trim() ? (
+                  <div className="flex items-start gap-1.5 text-xs text-academic-500">
+                    <span>No key set — submissions use the standard (gb1) encoding.</span>
+                  </div>
+                ) : keyStatus?.ok && keyStatus.warning ? (
+                  <div className="flex items-start gap-1.5 text-xs text-amber-700">
+                    <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+                    <span>Valid RSA public key ({keyStatus.bits}-bit). {keyStatus.warning}</span>
+                  </div>
+                ) : keyStatus?.ok ? (
+                  <div className="flex items-start gap-1.5 text-xs text-green-700">
+                    <CheckCircle2 className="w-3.5 h-3.5 mt-px shrink-0" />
+                    <span>Valid RSA public key ({keyStatus.bits}-bit) — exported specs will carry it.</span>
+                  </div>
+                ) : keyStatus ? (
+                  <div className="flex items-start gap-1.5 text-xs text-red-600">
+                    <XCircle className="w-3.5 h-3.5 mt-px shrink-0" />
+                    <span>{keyStatus.error}</span>
+                  </div>
+                ) : (
+                  <div className="text-xs text-academic-500">Click outside the box to check the key.</div>
+                )}
+              </div>
             </div>
           </div>
         </Card>

@@ -1,6 +1,6 @@
 
 import { Assignment, SubmissionType } from '../types';
-import { encryptJson } from './cryptoService';
+import { encryptJson, normalizeCoursePublicKey, validateCoursePublicKey } from './cryptoService';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
@@ -782,6 +782,27 @@ const generateGraderHTML = (assignment: Assignment): string => {
 </html>`;
 };
 
+// =====================================================
+// ASSIGNMENT SPEC — payload of assignment_spec.json
+// =====================================================
+// The spec is the Assignment object itself. `coursePublicKey` is the one
+// field with conditional presence: when set it is carried verbatim so the
+// Student Submission app switches to gb2; when unset the field is omitted
+// entirely, leaving the spec identical to pre-gb2 exports (→ gb1).
+export const buildAssignmentSpec = async (assignment: Assignment): Promise<Assignment> => {
+  const { coursePublicKey, ...withoutKey } = assignment;
+  const pem = normalizeCoursePublicKey(coursePublicKey || '');
+  if (!pem) return withoutKey as Assignment;
+
+  // A malformed key would silently produce unreadable submissions — stop instead.
+  const check = await validateCoursePublicKey(pem);
+  if (!check.ok) {
+    throw new Error(`Export stopped: the course public key on this assignment is not valid. ${check.error}`);
+  }
+
+  return { ...(withoutKey as Assignment), coursePublicKey: pem };
+};
+
 export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
     const zip = new JSZip();
@@ -790,7 +811,7 @@ export const exportService = {
     // 1. Spec JSON — encoded with AES-256-GCM so students cannot read or edit it.
     //    The Student Submission app decodes it transparently on load.
     //    Assignment Maker's "Import JSON" also handles encoded files.
-    zip.file('assignment_spec.json', await encryptJson(assignment));
+    zip.file('assignment_spec.json', await encryptJson(await buildAssignmentSpec(assignment)));
 
     // 2. Student PDF
     const studentPdf = createPDF(assignment, 'student');

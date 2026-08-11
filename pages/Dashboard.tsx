@@ -44,8 +44,13 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleExport = (assignment: Assignment) => {
-    exportService.downloadZIP(assignment);
+  const handleExport = async (assignment: Assignment) => {
+    try {
+      await exportService.downloadZIP(assignment);
+    } catch (error) {
+      console.error(error);
+      alert(error instanceof Error ? error.message : 'Failed to export the assignment package.');
+    }
   };
 
   const handleImportClick = () => {
@@ -136,6 +141,11 @@ const Dashboard: React.FC = () => {
           if (shouldOverwrite) {
             assignment.id = existing.id;
             assignment.createdAt = existing.createdAt;
+            // The .md format carries no course public key, so an overwrite would
+            // silently drop it and quietly downgrade students back to gb1.
+            if (existing.coursePublicKey) {
+              assignment.coursePublicKey = existing.coursePublicKey;
+            }
           }
           // If cancel: keep new UUID → saves as new copy
         }
