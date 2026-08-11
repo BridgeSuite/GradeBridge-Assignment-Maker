@@ -57,7 +57,7 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
           <div className="flex items-center gap-4">
             <Link to="/" className="flex items-center gap-3">
               <div className="flex flex-col">
-                <h1 className="text-lg font-bold text-academic-900">Veri<span className="text-[#00A4E4]">Q</span>Ai</h1>
+                <h1 className="text-lg font-bold text-academic-900"><span className="text-[#00A4E4]">B</span>ridgeSuite</h1>
                 <span className="text-xs text-academic-500">Assignment Manager</span>
               </div>
             </Link>
