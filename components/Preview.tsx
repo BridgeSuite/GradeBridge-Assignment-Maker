@@ -13,6 +13,16 @@ const Preview: React.FC = () => {
   const navigate = useNavigate();
   const assignment = id ? storageService.get(id) : undefined;
 
+  const handleExport = async () => {
+    if (!assignment) return;
+    try {
+      await exportService.downloadZIP(assignment);
+    } catch (error) {
+      console.error(error);
+      alert(error instanceof Error ? error.message : 'Failed to export the assignment package.');
+    }
+  };
+
   if (!assignment) {
     return (
       <Layout>
@@ -35,7 +45,7 @@ const Preview: React.FC = () => {
            <Link to={`/edit/${assignment.id}`}>
               <Button variant="secondary"><Edit2 className="w-4 h-4 mr-2"/>Edit</Button>
            </Link>
-           <Button onClick={() => exportService.downloadZIP(assignment)}>
+           <Button onClick={handleExport}>
              <Download className="w-4 h-4 mr-2" /> Export Package
            </Button>
         </div>

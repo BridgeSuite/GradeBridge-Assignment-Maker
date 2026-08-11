@@ -2,7 +2,7 @@
 
 Create structured assignments with LaTeX support and Gradescope AI-autograding integration — entirely in your browser.
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 **[Live App](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)** | **[Student Submission App](https://bridgesuite.github.io/GradeBridge-Student-Submission/)**
@@ -279,6 +279,33 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
 
 ---
 
+## Course public key (hardened `gb2` submissions)
+
+Optional, per assignment, in the editor under the preamble. Paste the **public**
+key issued for your course — SPKI PEM, starting with
+`-----BEGIN PUBLIC KEY-----` — and it is carried in the exported
+`assignment_spec.json` as `coursePublicKey`.
+
+| Field | Student submission JSON |
+|---|---|
+| left empty | `gb1:` shared-key encoding, includes the student's name — the existing default |
+| key set | `gb2:` public-key envelope, **de-identified**: name, email, and SID are stripped |
+
+Under `gb2` a per-submission AES key is wrapped with your course key, so only
+the autograder's matching private key can open a submission. The PDF and all
+filenames still carry the student's name; identity comes from Gradescope's
+authenticated submitter metadata.
+
+The field validates on blur and reports the key size. It refuses PKCS#1 keys
+(`BEGIN RSA PUBLIC KEY`) and — emphatically — anything containing a private
+key. **This app never generates keypairs and must never be given a private
+key**; your institution issues the pair and holds the private half. An
+assignment whose key does not validate will not save, and will not export.
+
+Leaving the field empty keeps today's behaviour exactly.
+
+---
+
 ## Local Development
 
 ```bash
@@ -287,6 +314,7 @@ cd GradeBridge-Assignment-Maker
 npm install
 npm run dev       # → http://localhost:3000/GradeBridge-Assignment-Maker/
 npm run build     # production build
+npm run test      # course public key / spec export suite — see tests/README.md
 npm run deploy    # deploy to GitHub Pages (SSH remote required)
 ```
 
