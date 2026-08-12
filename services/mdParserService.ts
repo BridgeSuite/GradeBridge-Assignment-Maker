@@ -1,6 +1,6 @@
 /**
  * mdParserService.ts
- * Browser-side port of CCAssignmentMaker/convert.py
+ * Browser-side port of converter/convert.py (same repo — keep the two in lockstep)
  * Parses a GradeBridge assignment .md file into an Assignment object.
  */
 
