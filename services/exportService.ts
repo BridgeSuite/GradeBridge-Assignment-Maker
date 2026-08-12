@@ -76,12 +76,15 @@ const normalizePoints = (assignment: Assignment): Assignment => {
   };
 };
 
-const convertSubmissionType = (type: SubmissionType): string[] => {
+// Student-app contract: these element strings are matched verbatim downstream.
+export const convertSubmissionType = (type: SubmissionType): string[] => {
   switch (type) {
     case SubmissionType.TEXT:
       return ['Answer as text'];
     case SubmissionType.IMAGE:
       return ['Answer as image'];
+    case SubmissionType.HANDWRITTEN:
+      return ['Answer as handwritten'];
     case SubmissionType.AI_GRADED_BINARY:
     case SubmissionType.AI_GRADED_SHORT:
     case SubmissionType.AI_GRADED_MEDIUM:
@@ -544,7 +547,7 @@ const generateLaTeX = (assignment: Assignment): string => {
   return latex;
 };
 
-const generateGradingRubric = (assignment: Assignment): object => {
+export const generateGradingRubric = (assignment: Assignment): object => {
   const rubrics: Record<string, object> = {};
 
   assignment.problems.forEach((prob, pIndex) => {
@@ -554,6 +557,8 @@ const generateGradingRubric = (assignment: Assignment): object => {
       const isFormative = sub.submissionType === SubmissionType.AI_FORMATIVE;
       const isImage = sub.submissionType === SubmissionType.IMAGE;
       const isTextAndImage = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
+      const isHandwritten = sub.submissionType === SubmissionType.HANDWRITTEN;
+      const isAiHandwritten = isHandwritten && (sub.handwrittenGradingMode ?? 'ai') !== 'human';
       const subsectionLetter = String.fromCharCode(97 + sIndex);
       const minWords = MIN_WORDS_BY_TYPE[sub.submissionType];
 
@@ -565,9 +570,17 @@ const generateGradingRubric = (assignment: Assignment): object => {
         subsection_name: sub.name,
         display_name: `Problem ${pIndex + 1}(${subsectionLetter}): ${sub.name}`,
         max_points: sub.points,
-        grading_type: isFormative ? 'ai_formative' : isAi ? 'ai' : isImage ? (sub.imageGradingMode === 'auto' ? 'ai_image_completion' : 'human_image') : 'human',
-        grading_prompt: isAi ? (sub.aiGradingPrompt || '') : '',
+        // Handwritten is checked first: pages are cropped per region, so it never
+        // falls through to the image or plain-human branches.
+        grading_type: isHandwritten
+            ? (sub.handwrittenGradingMode === 'human' ? 'human_handwritten' : 'ai_handwritten')
+          : isFormative ? 'ai_formative'
+          : isAi ? 'ai'
+          : isImage ? (sub.imageGradingMode === 'auto' ? 'ai_image_completion' : 'human_image')
+          : 'human',
+        grading_prompt: (isAi || isAiHandwritten) ? (sub.aiGradingPrompt || '') : '',
         ...(isAi && minWords !== undefined && { min_words: minWords }),
+        // No max_images for handwritten — pages are an assignment-level pool.
         ...((isImage || isTextAndImage) && { max_images: sub.maxImages ?? 1 })
       };
     });
@@ -601,15 +614,22 @@ const TYPE_TAG: Partial<Record<SubmissionType, string>> = {
   [SubmissionType.AI_GRADED_MEDIUM]: 'ai-graded:medium',
   [SubmissionType.AI_GRADED_LONG]:   'ai-graded:long',
   [SubmissionType.AI_FORMATIVE]:     'ai-graded:formative',
+  [SubmissionType.HANDWRITTEN]:      'handwritten',
 };
 
-const assignmentToMd = (assignment: Assignment): string => {
+export const assignmentToMd = (assignment: Assignment): string => {
   // Always export with normalized points
   const normalized = normalizePoints(assignment);
   const lines: string[] = [];
 
   lines.push(`# ${normalized.courseCode}: ${normalized.title}`);
   lines.push('');
+  // Only handwritten assignments carry the line — electronic files stay byte-identical
+  // to everything exported before handwritten support existed.
+  if (normalized.inputMode === 'handwritten') {
+    lines.push(`**Input:** handwritten`);
+    lines.push('');
+  }
   if (normalized.preamble) {
     lines.push(`**Preamble:** ${normalized.preamble}`);
   }
@@ -626,11 +646,15 @@ const assignmentToMd = (assignment: Assignment): string => {
       const letter = String.fromCharCode(97 + sIdx);
       const isImage = sub.submissionType === SubmissionType.IMAGE;
       const isTextAndImage = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
+      const isHandwritten = sub.submissionType === SubmissionType.HANDWRITTEN;
+      const isAiHandwritten = isHandwritten && sub.handwrittenGradingMode !== 'human';
       const typeTag = isImage && sub.maxImages && sub.maxImages > 1
         ? `image:${sub.maxImages}`
         : isTextAndImage && sub.maxImages && sub.maxImages > 1
           ? `text+image:${sub.maxImages}`
-          : (TYPE_TAG[sub.submissionType as SubmissionType] ?? 'text');
+          : isHandwritten && sub.handwrittenGradingMode === 'human'
+            ? 'handwritten:human'
+            : (TYPE_TAG[sub.submissionType as SubmissionType] ?? 'text');
 
       lines.push('');
       lines.push(`### (${letter}) ${sub.name} [${sub.points} pts] [${typeTag}]`);
@@ -639,7 +663,7 @@ const assignmentToMd = (assignment: Assignment): string => {
         lines.push(sub.description);
       }
 
-      if (AI_GRADED_TYPES.has(sub.submissionType) && sub.aiGradingPrompt) {
+      if ((AI_GRADED_TYPES.has(sub.submissionType) || isAiHandwritten) && sub.aiGradingPrompt) {
         lines.push('');
         const sentences = sub.aiGradingPrompt.split(/(?<=\.)\s+/);
         sentences.forEach((sentence, i) => {
@@ -686,23 +710,30 @@ const generateGraderHTML = (assignment: Assignment): string => {
       const letter = String.fromCharCode(97 + sIdx);
       const isAi = AI_GRADED_TYPES.has(sub.submissionType);
       const isImage = sub.submissionType === SubmissionType.IMAGE;
+      const isHandwritten = sub.submissionType === SubmissionType.HANDWRITTEN;
+      const isAiHandwritten = isHandwritten && (sub.handwrittenGradingMode ?? 'ai') !== 'human';
 
       const isTextAndImageRubric = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
       let referenceBlock = '';
-      if (isAi && sub.aiGradingPrompt) {
+      if ((isAi || isAiHandwritten) && sub.aiGradingPrompt) {
         referenceBlock = `<div class="ref-block ai-ref"><span class="ref-label">AI Rubric</span><p>${sub.aiGradingPrompt}</p></div>`;
       } else if (sub.graderNote) {
-        const label = isImage ? 'What to look for' : isTextAndImageRubric ? 'Expected answer + what to look for in image' : 'Expected answer';
+        const label = isImage ? 'What to look for'
+          : isTextAndImageRubric ? 'Expected answer + what to look for in image'
+          : isHandwritten ? 'Expected answer — grade from the marked region'
+          : 'Expected answer';
         referenceBlock = `<div class="ref-block human-ref"><span class="ref-label">${label}</span><p>${sub.graderNote}</p></div>`;
       } else {
         referenceBlock = `<div class="ref-block empty-ref"><span class="ref-label">No grader note</span><p>Human review required — no reference answer provided.</p></div>`;
       }
 
-      const typeLabel = isAi ? sub.submissionType : isImage
+      const typeLabel = isHandwritten
+        ? (isAiHandwritten ? 'Handwritten (AI graded)' : 'Handwritten (human review)')
+        : isAi ? sub.submissionType : isImage
         ? `Image${sub.maxImages && sub.maxImages > 1 ? ` (${sub.maxImages} pages)` : ''} — human review`
         : isTextAndImageRubric
           ? `Text + Image${sub.maxImages && sub.maxImages > 1 ? ` (${sub.maxImages} image pages)` : ''} — human grading`
-          : 'Text — human grading';
+          : 'Electronic text — human grading';
 
       return `
         <div class="subsection">

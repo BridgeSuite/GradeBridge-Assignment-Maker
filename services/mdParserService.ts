@@ -5,7 +5,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Assignment, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
+import { Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
 
 const DEFAULT_AI_CONFIG: AiGradingConfig = {
   model: 'claude-haiku-4-5-20251001',
@@ -22,6 +22,7 @@ const TYPE_MAP: Record<string, SubmissionType> = {
   'ai-graded:medium':     SubmissionType.AI_GRADED_MEDIUM,
   'ai-graded:long':       SubmissionType.AI_GRADED_LONG,
   'ai-graded:formative':  SubmissionType.AI_FORMATIVE,
+  'handwritten':          SubmissionType.HANDWRITTEN,
 };
 
 const MIN_WORDS_MAP: Partial<Record<SubmissionType, number>> = {
@@ -36,6 +37,7 @@ interface SubsectionMeta {
   points: number;
   submissionType: SubmissionType;
   maxImages: number;
+  handwrittenGradingMode?: 'ai' | 'human';
   rawType: string;
 }
 
@@ -44,10 +46,16 @@ interface ProblemHeaderMeta {
   points?: number;
   submissionType?: SubmissionType;
   maxImages: number;
+  handwrittenGradingMode?: 'ai' | 'human';
 }
 
-function parseTypeTag(typeTag: string): { submissionType: SubmissionType; maxImages: number } {
+function parseTypeTag(typeTag: string): {
+  submissionType: SubmissionType;
+  maxImages: number;
+  handwrittenGradingMode?: 'ai' | 'human';
+} {
   let maxImages = 1;
+  let handwrittenGradingMode: 'ai' | 'human' | undefined;
   let baseType = typeTag.trim().toLowerCase();
   if (baseType.startsWith('image:')) {
     maxImages = parseInt(baseType.split(':')[1]) || 1;
@@ -55,31 +63,44 @@ function parseTypeTag(typeTag: string): { submissionType: SubmissionType; maxIma
   } else if (baseType.startsWith('text+image:')) {
     maxImages = parseInt(baseType.split(':')[1]) || 1;
     baseType = 'text+image';
+  } else if (baseType === 'handwritten:human') {
+    handwrittenGradingMode = 'human';
+    baseType = 'handwritten';
   }
-  return { submissionType: TYPE_MAP[baseType] ?? SubmissionType.TEXT, maxImages };
+  // Bare `handwritten` leaves the mode undefined — it is read as 'ai' downstream.
+  return { submissionType: TYPE_MAP[baseType] ?? SubmissionType.TEXT, maxImages, handwrittenGradingMode };
 }
 
 function parseSubsectionHeader(line: string): SubsectionMeta | null {
   const m = line.trim().match(/^###\s+\([a-z]+\)\s+(.+?)\s+\[(\d+)\s+pts?\]\s+\[([^\]]+)\]\s*$/i);
   if (!m) return null;
-  const { submissionType, maxImages } = parseTypeTag(m[3]);
-  return { name: m[1].trim(), points: parseInt(m[2]), submissionType, maxImages, rawType: m[3].trim().toLowerCase() };
+  const { submissionType, maxImages, handwrittenGradingMode } = parseTypeTag(m[3]);
+  return {
+    name: m[1].trim(),
+    points: parseInt(m[2]),
+    submissionType,
+    maxImages,
+    handwrittenGradingMode,
+    rawType: m[3].trim().toLowerCase(),
+  };
 }
 
 function parseProblemHeader(line: string): ProblemHeaderMeta | null {
   // Flat format: ## Problem N: Title [N pts] [type]
   const flatM = line.trim().match(/^##\s+Problem\s+\d+:\s+(.+?)\s+\[(\d+)\s+pts?\]\s+\[([^\]]+)\]\s*$/i);
   if (flatM) {
-    const { submissionType, maxImages } = parseTypeTag(flatM[3]);
-    return { name: flatM[1].trim(), points: parseInt(flatM[2]), submissionType, maxImages };
+    const { submissionType, maxImages, handwrittenGradingMode } = parseTypeTag(flatM[3]);
+    return { name: flatM[1].trim(), points: parseInt(flatM[2]), submissionType, maxImages, handwrittenGradingMode };
   }
   // Standard format: ## Problem N: Title
   const m = line.trim().match(/^##\s+Problem\s+\d+:\s+(.+)$/i);
   return m ? { name: m[1].trim(), maxImages: 1 } : null;
 }
 
-function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble'> {
-  const meta = { courseCode: '', title: '', preamble: '' };
+function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'> {
+  // **Input:** is optional — files without it are electronic, which keeps every
+  // pre-handwritten .md byte-identical on round trip.
+  const meta = { courseCode: '', title: '', preamble: '', inputMode: 'electronic' as InputMode };
   for (const line of lines) {
     const l = line.trim();
     let m = l.match(/^#\s+([^:]+):\s+(.+)$/);
@@ -87,6 +108,8 @@ function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title'
     // **Due:** lines intentionally ignored — due dates are managed in Canvas
     m = l.match(/^\*\*Preamble:\*\*\s+(.+)$/);
     if (m) { meta.preamble = m[1].trim(); continue; }
+    m = l.match(/^\*\*Input:\*\*\s+(.+)$/i);
+    if (m) { meta.inputMode = m[1].trim().toLowerCase() === 'handwritten' ? 'handwritten' : 'electronic'; continue; }
   }
   return meta;
 }
@@ -163,6 +186,7 @@ export function parseMdToAssignment(content: string): Assignment {
           const aiGradingPrompt = extractBlockquoteValue('grading_prompt', body);
           const graderNote = extractBlockquoteValue('grader_note', body);
           const minWords = MIN_WORDS_MAP[prob.submissionType];
+          const isHandwritten = prob.submissionType === SubmissionType.HANDWRITTEN;
           currentProblem.description = '';
           currentProblem.subsections.push({
             id: uuidv4(),
@@ -170,7 +194,10 @@ export function parseMdToAssignment(content: string): Assignment {
             description,
             points: prob.points,
             submissionType: prob.submissionType,
-            maxImages: prob.maxImages,
+            // Handwritten pages are an assignment-level pool — no per-part image count.
+            ...(isHandwritten
+              ? { handwrittenGradingMode: prob.handwrittenGradingMode ?? 'ai' }
+              : { maxImages: prob.maxImages }),
             aiGradingPrompt,
             ...(graderNote && { graderNote }),
             config: '',
@@ -189,6 +216,7 @@ export function parseMdToAssignment(content: string): Assignment {
 
       const submissionType = subMeta.submissionType;
       const minWords = MIN_WORDS_MAP[submissionType];
+      const isHandwritten = submissionType === SubmissionType.HANDWRITTEN;
 
       const subsection: Subsection = {
         id: uuidv4(),
@@ -196,7 +224,10 @@ export function parseMdToAssignment(content: string): Assignment {
         description,
         points: subMeta.points,
         submissionType,
-        maxImages: subMeta.maxImages,
+        // Handwritten pages are an assignment-level pool — no per-part image count.
+        ...(isHandwritten
+          ? { handwrittenGradingMode: subMeta.handwrittenGradingMode ?? 'ai' }
+          : { maxImages: subMeta.maxImages }),
         aiGradingPrompt,
         ...(graderNote && { graderNote }),
         config: '',
@@ -212,6 +243,7 @@ export function parseMdToAssignment(content: string): Assignment {
     id: uuidv4(),
     courseCode: meta.courseCode,
     title: meta.title,
+    inputMode: meta.inputMode,
     preamble: meta.preamble,
     problems,
     aiGradingConfig: DEFAULT_AI_CONFIG,
