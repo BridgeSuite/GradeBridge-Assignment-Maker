@@ -1,5 +1,5 @@
 // =====================================================
-// Course public key (gb2) test runner
+// Assignment Maker test runner
 // =====================================================
 // Plain Node (>=18) — no test framework. Transpiles the source with the
 // esbuild that ships inside Vite and runs it against the same WebCrypto the
@@ -9,7 +9,8 @@
 //
 // Covers validateCoursePublicKey() and buildAssignmentSpec(), plus a
 // cross-app check that a key exported here actually drives the Student
-// Submission app's gb2 encoder.
+// Submission app's gb2 encoder, plus the handwritten input-mode / medium
+// round trip through .md export, .md import and grading_rubric.json.
 //
 // The fixture (test keypair + a known-good SPKI PEM) is NOT committed — it
 // contains a private key. Default location:
@@ -86,8 +87,13 @@ const exportSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), '
   plugins: [stubHeavyDeps],
 });
 
+const mdParser = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParserService.mjs');
+const inputModeSvc = await loadModule(join(REPO, 'services', 'inputModeService.ts'), 'inputModeService.mjs');
+
 const { validateCoursePublicKey, normalizeCoursePublicKey, looksLikeCoursePublicKey, encryptJson, decryptJson } = crypto_;
-const { buildAssignmentSpec } = exportSvc;
+const { buildAssignmentSpec, assignmentToMd, generateGradingRubric, convertSubmissionType } = exportSvc;
+const { parseMdToAssignment } = mdParser;
+const { typeAllowedInMode, defaultTypeForMode, convertSubsectionToMode, strandedSubsectionLabels } = inputModeSvc;
 
 // ---------- helpers ----------
 const spkiPem = (der) =>
@@ -122,7 +128,7 @@ const fixturePath = process.env.GB2_FIXTURE
   : resolve(REPO, '..', 'Encryption', 'gb2_test_fixture.json');
 const fixture = existsSync(fixturePath) ? JSON.parse(readFileSync(fixturePath, 'utf8')) : null;
 
-console.log('\ncoursePublicKey (gb2) test suite');
+console.log('\nAssignment Maker test suite — coursePublicKey (gb2) + handwritten round trip');
 console.log(`fixture: ${fixture ? fixturePath : `NOT FOUND at ${fixturePath}`}\n`);
 
 // =====================================================
@@ -329,6 +335,177 @@ if (fixture) {
     const why = !fixture ? 'fixture not found' : 'Student Submission repo not alongside this one';
     skip('cross-app: a spec exported here produces a gb2 submission the course key opens', why);
   }
+}
+
+// =====================================================
+// 5. Handwritten input mode + medium (stage 1)
+// =====================================================
+{
+  const handwrittenAssignment = {
+    id: 'hw1',
+    courseCode: 'EEC130B',
+    title: 'HW 3',
+    inputMode: 'handwritten',
+    preamble: 'Show all working on paper.',
+    problems: [{
+      id: 'p1', name: 'Waveguides', description: '',
+      subsections: [
+        {
+          id: 's1', name: 'Cutoff frequency', description: 'Determine the cutoff frequency of the TE10 mode.',
+          points: 60, submissionType: 'Handwritten', handwrittenGradingMode: 'ai',
+          aiGradingPrompt: 'Required elements: (1) correct use of f_c = c/(2a). Award full marks for a correct value.',
+        },
+        {
+          id: 's2', name: 'Field sketch', description: 'Sketch the field pattern.',
+          points: 40, submissionType: 'Handwritten', handwrittenGradingMode: 'human',
+          graderNote: 'Look for arrows normal to the walls. Award full marks when both E and H are shown.',
+        },
+      ],
+    }],
+    aiGradingConfig: { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 },
+    createdAt: 1700000000000,
+    updatedAt: 1700000000000,
+  };
+
+  // --- .md export ---
+  const md = assignmentToMd(handwrittenAssignment);
+  check('md export: handwritten assignment carries the **Input:** line', () =>
+    assert(/^\*\*Input:\*\* handwritten$/m.test(md), `no Input line in:\n${md}`));
+  check('md export: AI part is tagged [handwritten] with a grading_prompt', () => {
+    assert(/### \(a\) Cutoff frequency \[60 pts\] \[handwritten\]/.test(md), 'wrong tag for the AI part');
+    assert(/^> grading_prompt: Required elements/m.test(md), 'grading_prompt blockquote missing');
+  });
+  check('md export: human part is tagged [handwritten:human] with a grader_note', () => {
+    assert(/### \(b\) Field sketch \[40 pts\] \[handwritten:human\]/.test(md), 'wrong tag for the human part');
+    assert(/^> grader_note: Look for arrows/m.test(md), 'grader_note blockquote missing');
+  });
+  check('md export: no grading_prompt is emitted for the human-handwritten part', () =>
+    assert((md.match(/> grading_prompt:/g) || []).length === 1, 'grading_prompt emitted more than once'));
+
+  // --- .md import ---
+  const reimported = parseMdToAssignment(md);
+  check('md import: inputMode comes back as handwritten', () =>
+    assertEqual(reimported.inputMode, 'handwritten', 'inputMode lost on import'));
+  const [subA, subB] = reimported.problems[0].subsections;
+  check('md import: [handwritten] → Handwritten + ai, prompt preserved', () => {
+    assertEqual(subA.submissionType, 'Handwritten', 'wrong submissionType');
+    assertEqual(subA.handwrittenGradingMode, 'ai', 'wrong grading mode');
+    assert(/f_c = c\/\(2a\)/.test(subA.aiGradingPrompt), 'grading prompt lost');
+    assert(!('maxImages' in subA), 'handwritten part got a maxImages field');
+  });
+  check('md import: [handwritten:human] → Handwritten + human, note preserved', () => {
+    assertEqual(subB.submissionType, 'Handwritten', 'wrong submissionType');
+    assertEqual(subB.handwrittenGradingMode, 'human', 'wrong grading mode');
+    assert(/arrows normal to the walls/.test(subB.graderNote), 'grader note lost');
+  });
+  check('md round trip is stable (export → import → export is identical)', () =>
+    assertEqual(assignmentToMd(reimported), md, 'the second export differs from the first'));
+
+  // --- grading_rubric.json ---
+  const rubric = generateGradingRubric(handwrittenAssignment);
+  check('rubric: AI handwritten part is ai_handwritten with its prompt and no max_images', () => {
+    const r = rubric.rubrics.p0s0;
+    assertEqual(r.grading_type, 'ai_handwritten', 'wrong grading_type');
+    assert(r.grading_prompt.startsWith('Required elements'), `grading_prompt is "${r.grading_prompt}"`);
+    assert(!('max_images' in r), 'max_images was written for a handwritten part');
+  });
+  check('rubric: human handwritten part is human_handwritten with an empty prompt', () => {
+    const r = rubric.rubrics.p0s1;
+    assertEqual(r.grading_type, 'human_handwritten', 'wrong grading_type');
+    assertEqual(r.grading_prompt, '', 'a prompt was written for a human-graded part');
+    assert(!('max_images' in r), 'max_images was written for a handwritten part');
+  });
+
+  // --- assignment_spec.json + student-app contract ---
+  const spec = await buildAssignmentSpec(handwrittenAssignment);
+  check('spec: inputMode ships in assignment_spec.json', () =>
+    assertEqual(spec.inputMode, 'handwritten', 'inputMode did not survive into the spec'));
+  check("spec: the handwritten submission element string is 'Answer as handwritten'", () =>
+    assertEqual(convertSubmissionType('Handwritten'), ['Answer as handwritten'], 'contract string changed'));
+
+  // --- electronic back-compat ---
+  const legacyMd = [
+    '# EEC1: Lab 1 In-Lab',
+    '',
+    '**Preamble:** Complete all parts.',
+    '',
+    '## Problem 1: Voltage divider',
+    '',
+    '### (a) Measured value [100 pts] [text]',
+    'Report the measured output voltage.',
+    '',
+    '> grader_note: Expect 2.5 V.',
+    '',
+  ].join('\n');
+  const legacy = parseMdToAssignment(legacyMd);
+  check('back-compat: a .md with no **Input:** line imports as electronic', () =>
+    assertEqual(legacy.inputMode, 'electronic', 'legacy file did not default to electronic'));
+  check('back-compat: an electronic assignment exports no **Input:** line', () =>
+    assert(!/\*\*Input:\*\*/.test(assignmentToMd(legacy)), 'the Input line leaked into an electronic file'));
+  check('back-compat: a legacy electronic .md round-trips byte-for-byte', () =>
+    assertEqual(assignmentToMd(legacy), legacyMd, 'the legacy file changed on round trip'));
+  check('back-compat: electronic rubric grading types are unchanged', () => {
+    const r = generateGradingRubric(legacy).rubrics.p0s0;
+    assertEqual(r.grading_type, 'human', 'plain text is no longer human-graded');
+    assertEqual(r.max_images, undefined, 'text parts should not carry max_images');
+  });
+}
+
+// =====================================================
+// 6. Input mode rules — what each mode offers, and what a switch does
+// =====================================================
+{
+  const ALL = ['Text', 'Image', 'Text and Image', 'AI Graded: Short', 'Handwritten'];
+
+  check('handwritten mode offers Handwritten and nothing else', () =>
+    assertEqual(ALL.filter(t => typeAllowedInMode(t, 'handwritten')), ['Handwritten'], 'wrong medium set'));
+  check('electronic mode offers every medium except Handwritten', () =>
+    assertEqual(ALL.filter(t => typeAllowedInMode(t, 'electronic')),
+      ['Text', 'Image', 'Text and Image', 'AI Graded: Short'], 'wrong medium set'));
+  check('new sub-parts default to the mode\'s medium', () => {
+    assertEqual(defaultTypeForMode('handwritten'), 'Handwritten', 'wrong handwritten default');
+    assertEqual(defaultTypeForMode('electronic'), 'Text', 'wrong electronic default');
+  });
+
+  const imageSub = {
+    id: 's1', name: 'Scope trace', description: 'Capture the waveform.', points: 10,
+    submissionType: 'Image', maxImages: 3, imageGradingMode: 'auto',
+    graderNote: 'Both cursors visible.',
+  };
+  const toHandwritten = convertSubsectionToMode(imageSub, 'handwritten');
+  check('switch to handwritten: content survives, image fields are dropped', () => {
+    assertEqual(toHandwritten.submissionType, 'Handwritten', 'wrong type');
+    assertEqual(toHandwritten.handwrittenGradingMode, 'ai', 'should default to AI');
+    assertEqual(toHandwritten.name, 'Scope trace', 'name lost');
+    assertEqual(toHandwritten.points, 10, 'points lost');
+    assertEqual(toHandwritten.graderNote, 'Both cursors visible.', 'grader note lost');
+    assert(!('maxImages' in toHandwritten), 'maxImages survived');
+    assert(!('imageGradingMode' in toHandwritten), 'imageGradingMode survived');
+  });
+
+  const handwrittenSub = {
+    id: 's2', name: 'Derivation', description: 'Derive it.', points: 20,
+    submissionType: 'Handwritten', handwrittenGradingMode: 'human',
+    aiGradingPrompt: 'Required elements: (1) the derivation.',
+  };
+  const toElectronic = convertSubsectionToMode(handwrittenSub, 'electronic');
+  check('switch to electronic: handwritten part becomes Electronic text, mode dropped', () => {
+    assertEqual(toElectronic.submissionType, 'Text', 'wrong type');
+    assert(!('handwrittenGradingMode' in toElectronic), 'handwrittenGradingMode survived');
+    assertEqual(toElectronic.aiGradingPrompt, 'Required elements: (1) the derivation.', 'rubric lost');
+    assertEqual(toElectronic.points, 20, 'points lost');
+  });
+
+  const mixed = [{ subsections: [imageSub, handwrittenSub] }];
+  check('the warning lists exactly the parts a switch would convert', () => {
+    assertEqual(strandedSubsectionLabels(mixed, 'handwritten'), ['1a. Scope trace — Image'],
+      'wrong list switching to handwritten');
+    assertEqual(strandedSubsectionLabels(mixed, 'electronic'), ['1b. Derivation — Handwritten'],
+      'wrong list switching to electronic');
+  });
+  check('an all-handwritten assignment strands nothing when set to handwritten', () =>
+    assertEqual(strandedSubsectionLabels([{ subsections: [handwrittenSub] }], 'handwritten'), [],
+      'a compatible part was listed for conversion'));
 }
 
 // ---------- report ----------

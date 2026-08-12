@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { Assignment, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
+import { Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService } from '../services/exportService';
 import {
@@ -10,8 +10,16 @@ import {
   normalizeCoursePublicKey,
   CoursePublicKeyValidation
 } from '../services/cryptoService';
+import {
+  MODE_LABEL,
+  convertSubsectionToMode,
+  defaultTypeForMode,
+  isAiHandwritten,
+  strandedSubsectionLabels,
+  typeAllowedInMode
+} from '../services/inputModeService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
-import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, ShieldCheck, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, PenLine, Keyboard } from 'lucide-react';
 
 const DEFAULT_AI_GRADING_CONFIG: AiGradingConfig = { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 };
 
@@ -51,21 +59,34 @@ const normalizePoints = (assignment: Assignment): Assignment => {
   };
 };
 
-const emptySubsection = (): Subsection => ({
-  id: uuidv4(),
-  name: '',
-  description: '',
-  points: 0,
-  submissionType: SubmissionType.TEXT,
-  maxImages: 1,
-  aiGradingPrompt: ''
-});
+// New sub-parts take the medium the assignment's input mode allows.
+const emptySubsection = (inputMode: InputMode = 'electronic'): Subsection => (
+  defaultTypeForMode(inputMode) === SubmissionType.HANDWRITTEN
+    ? {
+        id: uuidv4(),
+        name: '',
+        description: '',
+        points: 0,
+        submissionType: SubmissionType.HANDWRITTEN,
+        handwrittenGradingMode: 'ai',
+        aiGradingPrompt: ''
+      }
+    : {
+        id: uuidv4(),
+        name: '',
+        description: '',
+        points: 0,
+        submissionType: SubmissionType.TEXT,
+        maxImages: 1,
+        aiGradingPrompt: ''
+      }
+);
 
-const emptyProblem = (): Problem => ({
+const emptyProblem = (inputMode: InputMode = 'electronic'): Problem => ({
   id: uuidv4(),
   name: '',
   description: '',
-  subsections: [emptySubsection()]
+  subsections: [emptySubsection(inputMode)]
 });
 
 const Editor: React.FC = () => {
@@ -78,12 +99,16 @@ const Editor: React.FC = () => {
     id: uuidv4(),
     courseCode: '',
     title: '',
+    inputMode: 'electronic',
     preamble: '',
     problems: [emptyProblem()],
     aiGradingConfig: DEFAULT_AI_GRADING_CONFIG,
     createdAt: Date.now(),
     updatedAt: Date.now()
   });
+
+  // Assignments saved before handwritten support have no inputMode — they are electronic.
+  const inputMode: InputMode = assignment.inputMode ?? 'electronic';
 
   // Course public key is edited as raw text and only committed to the assignment once it validates.
   const [keyInput, setKeyInput] = useState('');
@@ -98,12 +123,16 @@ const Editor: React.FC = () => {
         const { dueDate: _d, dueTime: _t, ...loadedWithoutDate } = loaded as any;
         const sanitized = {
           ...loadedWithoutDate,
+          inputMode: loaded.inputMode || 'electronic',
           aiGradingConfig: loaded.aiGradingConfig || DEFAULT_AI_GRADING_CONFIG,
           problems: loaded.problems.map(p => ({
             ...p,
             subsections: p.subsections.map(s => ({
               ...s,
-              maxImages: s.maxImages || 1,
+              // Handwritten carries no per-part page count — pages are an assignment-level pool.
+              ...(s.submissionType === SubmissionType.HANDWRITTEN
+                ? { handwrittenGradingMode: s.handwrittenGradingMode || 'ai' }
+                : { maxImages: s.maxImages || 1 }),
               aiGradingPrompt: s.aiGradingPrompt || '',
               graderNote: s.graderNote || ''
             }))
@@ -192,7 +221,35 @@ const Editor: React.FC = () => {
   };
 
   const addProblem = () => {
-    setAssignment({ ...assignment, problems: [...assignment.problems, emptyProblem()] });
+    setAssignment({ ...assignment, problems: [...assignment.problems, emptyProblem(inputMode)] });
+  };
+
+  const changeInputMode = (mode: InputMode) => {
+    if (inputMode === mode) return;
+
+    const stranded = strandedSubsectionLabels(assignment.problems, mode);
+
+    if (stranded.length > 0) {
+      const target = mode === 'handwritten' ? 'Handwritten' : 'Electronic text';
+      const ok = window.confirm(
+        `Switching this assignment to "${MODE_LABEL[mode]}" will convert ${stranded.length} sub-part${stranded.length === 1 ? '' : 's'} to ${target}:\n\n` +
+        `${stranded.join('\n')}\n\n` +
+        `Names, descriptions, points, rubrics and grader notes are kept. Image page counts and the previous grading mode are dropped.\n\n` +
+        `OK to convert, Cancel to stay in "${MODE_LABEL[inputMode]}".`
+      );
+      if (!ok) return;
+    }
+
+    setAssignment({
+      ...assignment,
+      inputMode: mode,
+      problems: assignment.problems.map(p => ({
+        ...p,
+        subsections: p.subsections.map(s =>
+          typeAllowedInMode(s.submissionType, mode) ? s : convertSubsectionToMode(s, mode)
+        )
+      }))
+    });
   };
 
   const removeProblem = (index: number) => {
@@ -208,7 +265,7 @@ const Editor: React.FC = () => {
 
   const addSubsection = (pIndex: number) => {
     const newProblems = [...assignment.problems];
-    newProblems[pIndex].subsections.push(emptySubsection());
+    newProblems[pIndex].subsections.push(emptySubsection(inputMode));
     setAssignment({ ...assignment, problems: newProblems });
   };
 
@@ -366,7 +423,45 @@ const Editor: React.FC = () => {
         {/* Metadata Section */}
         <Card>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Input 
+            {/* Input mode — governs which mediums the questions below may use */}
+            <div className="md:col-span-2">
+              <div className={`rounded border p-4 space-y-2 ${
+                inputMode === 'handwritten'
+                  ? 'border-indigo-300 bg-indigo-50/70'
+                  : 'border-academic-200 bg-academic-50/60'
+              }`}>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-sm font-medium text-academic-800">How students answer</span>
+                  <div className="flex items-center gap-2">
+                    {([
+                      { mode: 'electronic'  as const, label: 'Electronic text and images', Icon: Keyboard },
+                      { mode: 'handwritten' as const, label: 'Handwritten',                Icon: PenLine  },
+                    ]).map(({ mode, label, Icon }) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => changeInputMode(mode)}
+                        className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                          inputMode === mode
+                            ? 'bg-academic-700 text-white border-academic-700'
+                            : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-xs text-academic-500 leading-relaxed">
+                  {inputMode === 'handwritten'
+                    ? 'Handwritten assignment — students write their work on paper and upload photographs of the pages, then mark the region that answers each part. Every sub-part is Handwritten; text and image mediums are not offered.'
+                    : 'Electronic assignment — students type answers and upload images. Sub-parts can be Electronic text, Image, Text + Image, or AI graded.'}
+                  {' '}Set this before adding questions; changing it later converts any sub-part the new mode cannot express.
+                </p>
+              </div>
+            </div>
+            <Input
               label="Course Code" 
               placeholder="e.g. CS101" 
               value={assignment.courseCode} 
@@ -531,23 +626,29 @@ const Editor: React.FC = () => {
                    </div>
                    {/* Type + Grading Selector */}
                    <div className="ml-8 mt-1 flex flex-wrap items-center gap-2">
-                     {/* Medium: Text, Image, or Text + Image */}
+                     {/* Medium — gated by the assignment's input mode */}
                      <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Type:</span>
                      {([
-                       { label: 'Text',        type: SubmissionType.TEXT          },
-                       { label: 'Image',       type: SubmissionType.IMAGE         },
-                       { label: 'Text + Image', type: SubmissionType.TEXT_AND_IMAGE },
-                     ] as { label: string; type: SubmissionType }[]).map(({ label, type }) => (
+                       { label: 'Electronic text', type: SubmissionType.TEXT           },
+                       { label: 'Image',           type: SubmissionType.IMAGE          },
+                       { label: 'Text + Image',    type: SubmissionType.TEXT_AND_IMAGE },
+                       { label: 'Handwritten',     type: SubmissionType.HANDWRITTEN    },
+                     ]).filter(({ type }) => typeAllowedInMode(type, inputMode)).map(({ label, type }) => (
                        <button
                          key={type}
                          type="button"
-                         onClick={() => updateSubsection(pIndex, sIndex, { submissionType: type, imageGradingMode: 'human' })}
+                         onClick={() => updateSubsection(pIndex, sIndex,
+                           type === SubmissionType.HANDWRITTEN
+                             ? { submissionType: SubmissionType.HANDWRITTEN, handwrittenGradingMode: sub.handwrittenGradingMode ?? 'ai' }
+                             : { submissionType: type, imageGradingMode: 'human' }
+                         )}
                          className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                           (type === SubmissionType.IMAGE
-                             ? sub.submissionType === SubmissionType.IMAGE
-                             : type === SubmissionType.TEXT_AND_IMAGE
-                               ? sub.submissionType === SubmissionType.TEXT_AND_IMAGE
-                               : sub.submissionType !== SubmissionType.IMAGE && sub.submissionType !== SubmissionType.TEXT_AND_IMAGE)
+                           // Text is the fallback pill: active only when no other medium claims the type
+                           (type === SubmissionType.TEXT
+                             ? sub.submissionType !== SubmissionType.IMAGE
+                               && sub.submissionType !== SubmissionType.TEXT_AND_IMAGE
+                               && sub.submissionType !== SubmissionType.HANDWRITTEN
+                             : sub.submissionType === type)
                              ? 'bg-academic-700 text-white border-academic-700'
                              : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
                          }`}
@@ -559,7 +660,26 @@ const Editor: React.FC = () => {
                      <span className="text-xs text-academic-300 mx-1">|</span>
                      <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Grading:</span>
 
-                     {sub.submissionType === SubmissionType.IMAGE ? (
+                     {sub.submissionType === SubmissionType.HANDWRITTEN ? (
+                       /* Handwritten branch — AI (OCR + grade) or Human (TA grades the crop). No page count. */
+                       ([
+                         { label: 'AI',    mode: 'ai'    as const },
+                         { label: 'Human', mode: 'human' as const },
+                       ]).map(({ label, mode }) => (
+                         <button
+                           key={mode}
+                           type="button"
+                           onClick={() => updateSubsection(pIndex, sIndex, { handwrittenGradingMode: mode })}
+                           className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
+                             (sub.handwrittenGradingMode ?? 'ai') === mode
+                               ? 'bg-academic-700 text-white border-academic-700'
+                               : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                           }`}
+                         >
+                           {label}
+                         </button>
+                       ))
+                     ) : sub.submissionType === SubmissionType.IMAGE ? (
                        /* Image branch */
                        <>
                          <div className="flex items-center gap-1.5">
@@ -652,8 +772,13 @@ const Editor: React.FC = () => {
                        </>
                      )}
                    </div>
-                   {AI_GRADED_TYPES.has(sub.submissionType) && (
+                   {(AI_GRADED_TYPES.has(sub.submissionType) || isAiHandwritten(sub)) && (
                      <div className="ml-8 mt-1 px-3 space-y-3">
+                       {isAiHandwritten(sub) && (
+                         <div className="text-xs text-purple-600 font-medium">
+                           The student's marked region is cropped and transcribed, then graded against this rubric.
+                         </div>
+                       )}
                        {AI_WORD_RANGES[sub.submissionType] && (
                          <div className="text-xs text-purple-600 font-medium">
                            Suggested length: {AI_WORD_RANGES[sub.submissionType]?.range} · suggested minimum: {AI_WORD_RANGES[sub.submissionType]?.min} words (guidance only — not enforced)
@@ -670,6 +795,8 @@ const Editor: React.FC = () => {
                          placeholder={
                            sub.submissionType === SubmissionType.AI_FORMATIVE
                              ? 'Formative grading prompt: required elements, status thresholds (Addressed/Partial/Missing), Human Review flags, and section summary instructions.'
+                             : isAiHandwritten(sub)
+                             ? 'Required elements: (1) ...; (2) ... Award full marks for ... Award partial credit for ... Award no credit for ... State the expected working and result — the grader sees only the transcription.'
                              : 'Describe how to grade this question. Use the correct number of bands for the category (Binary: 2, Short: 3, Medium: 4, Long: 5).'
                          }
                          value={sub.aiGradingPrompt || ''}
@@ -688,8 +815,10 @@ const Editor: React.FC = () => {
                              ? 'Grader note — what to look for in the submission'
                              : sub.submissionType === SubmissionType.TEXT_AND_IMAGE
                              ? 'Grader note — expected text answer + what to look for in the image'
-                             : AI_GRADED_TYPES.has(sub.submissionType)
+                             : (AI_GRADED_TYPES.has(sub.submissionType) || isAiHandwritten(sub))
                              ? 'Supplementary TA note (optional — AI rubric above is primary)'
+                             : sub.submissionType === SubmissionType.HANDWRITTEN
+                             ? 'Grader note — expected answer / worked solution (TA grades the marked region)'
                              : 'Grader note — expected answer / worked solution'}
                          </span>
                          <span className="text-xs text-amber-500 ml-1">· not shown to students</span>
@@ -699,7 +828,7 @@ const Editor: React.FC = () => {
                          placeholder={
                            sub.submissionType === SubmissionType.IMAGE
                              ? 'List what the grader should verify: topology, labels, settings visible, etc. State full / partial / no credit thresholds.'
-                             : AI_GRADED_TYPES.has(sub.submissionType)
+                             : (AI_GRADED_TYPES.has(sub.submissionType) || isAiHandwritten(sub))
                              ? 'Optional: add model answer or edge-case guidance for TAs reviewing AI-flagged submissions.'
                              : 'State the expected answer with key formula and numerical result. State what earns full / partial / no credit.'
                          }
