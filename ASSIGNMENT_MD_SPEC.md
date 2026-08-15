@@ -109,9 +109,10 @@ Notes:
 ## 6. Math notation
 
 Descriptions and other rendered text support LaTeX via KaTeX. **One module — `services/mathRender.ts`
-— owns the delimiters and every conversion.** The preview, `assignment.html`, the grader document,
-`assignment.tex` and `assignment.pdf` all call it, so math cannot render differently in one output
-than another.
+— owns every conversion**, and the delimiters themselves live in `services/mathDelimiters.ts`, which
+is **mirrored byte-for-byte into the Student Submission app**. The preview, `assignment.html`, the
+grader document, `assignment.tex`, `assignment.pdf` and the student's screen all go through it, so
+math cannot render differently in one place than another.
 
 - Inline: `$...$`. Display: `$$...$$`.
 - Single-dollar inline is supported because the app splits with its own regex
@@ -121,15 +122,16 @@ than another.
   mis-parsed. Invalid LaTeX is never dropped silently: KaTeX flags the offending part inline
   (`throwOnError: false`), and the raw text is shown with its delimiters only if rendering fails
   outright.
-- The Student Submission app (`components/KatexRenderer.tsx`) uses the same delimiters, so authored
-  math displays identically to the student. **Keep the two regexes byte-identical.**
+- The Student Submission app imports the **same file** (`services/mathDelimiters.ts`), so authored
+  math displays identically to the student. Edit one copy, copy it to the other; both repos' `npm
+  test` fails if they diverge.
 
 What each output does with a math span:
 
 | Output | Handling |
 |---|---|
 | App preview | `katex.renderToString` (bundled KaTeX, no CDN) |
-| `assignment.html`, grader document | Same call, at export time. KaTeX's stylesheet is inlined; only the glyph fonts come from the CDN. No MathJax, nothing async. |
+| `assignment.html`, grader document | Same call, at export time. KaTeX's stylesheet **and all 20 glyph fonts** are embedded, so the file needs no network at all — it costs ~360 KB and opens correctly offline. No MathJax, nothing async. |
 | `assignment.tex` | Prose is escaped, math is emitted **verbatim** so pdflatex typesets it natively |
 | `assignment.pdf` | The KaTeX HTML is rasterised through an SVG `<foreignObject>` and placed as an image; blocks with no math stay vector text. If rasterising is unavailable the block degrades to readable plain text (`6 Ohm`, `V_x`, `17/7`) — never a placeholder token. |
 
@@ -137,7 +139,9 @@ Use LaTeX for structured math (subscripts, fractions, exponentials, Greek, units
 fine for a bare symbol.
 
 `npm test` includes a math regression suite (`tests/run-tests.mjs` §7) over
-`tests/fixtures/EEC1_MathFixture.md`. Anything that touches escaping must keep it green.
+`tests/fixtures/EEC1_MathFixture.md`, a mirror check against the Student Submission repo (§8), and
+`tests/bundle-tests.mjs`, which builds for real and checks the fonts actually landed in the bundle.
+Anything that touches escaping, the delimiters, or the asset pipeline must keep all three green.
 
 ---
 

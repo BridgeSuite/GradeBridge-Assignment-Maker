@@ -400,16 +400,17 @@ export const createPDF = async (assignment: Assignment, type: 'student' | 'templ
 };
 
 // Math is rendered here, at export time, by the same KaTeX call the app preview
-// makes — so the file shows the same thing the instructor saw, with no CDN
-// script and nothing async to fail.
-export const generateHTML = (assignment: Assignment): string => {
+// makes — so the file shows the same thing the instructor saw. KaTeX's
+// stylesheet and glyph fonts are embedded: the file needs no network at all.
+export const generateHTML = async (assignment: Assignment): Promise<string> => {
+  const katexCss = await katexStylesheet();
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <title>${escapeHtml(`${assignment.courseCode} - ${assignment.title}`)}</title>
 <style>
-${katexStylesheet()}
+${katexCss}
 body { font-family: 'Georgia', serif; max-width: 800px; margin: 40px auto; line-height: 1.6; padding: 0 20px; color: #333; }
 h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
 .metadata { color: #666; font-style: italic; margin-bottom: 30px; }
@@ -740,7 +741,8 @@ export const assignmentToMd = (assignment: Assignment): string => {
 // CONFIDENTIAL — not distributed to students
 // =====================================================
 
-export const generateGraderHTML = (assignment: Assignment): string => {
+export const generateGraderHTML = async (assignment: Assignment): Promise<string> => {
+  const katexCss = await katexStylesheet();
   const totalPoints = assignment.problems.reduce((sum, prob) =>
     sum + prob.subsections.reduce((s, sub) => s + sub.points, 0), 0
   );
@@ -806,7 +808,7 @@ export const generateGraderHTML = (assignment: Assignment): string => {
 <meta charset="utf-8">
 <title>GRADER DOCUMENT — ${escapeHtml(`${assignment.courseCode}: ${assignment.title}`)}</title>
 <style>
-${katexStylesheet()}
+${katexCss}
   body { font-family: Georgia, serif; max-width: 900px; margin: 40px auto; line-height: 1.6; padding: 0 24px; color: #222; }
   .confidential-banner { background: #b91c1c; color: #fff; text-align: center; padding: 10px 0; font-weight: bold; font-size: 1.1em; letter-spacing: 0.05em; margin-bottom: 28px; border-radius: 4px; }
   h1 { font-size: 1.6em; border-bottom: 2px solid #333; padding-bottom: 8px; margin-bottom: 4px; }
@@ -890,7 +892,7 @@ export const exportService = {
     zip.file('template.pdf', templatePdf);
 
     // 4. HTML
-    const html = generateHTML(assignment);
+    const html = await generateHTML(assignment);
     zip.file('assignment.html', html);
 
     // 5. LaTeX (editable source file for instructors)
@@ -903,7 +905,7 @@ export const exportService = {
     zip.file(rubricFilename, JSON.stringify(rubric, null, 2));
 
     // 7. Grader Document HTML (private — instructor/TA reference with rubrics and answer keys)
-    const graderDoc = generateGraderHTML(assignment);
+    const graderDoc = await generateGraderHTML(assignment);
     const graderDocFilename = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_grader_document.html`;
     zip.file(graderDocFilename, graderDoc);
 
@@ -925,8 +927,8 @@ export const exportService = {
     URL.revokeObjectURL(url);
   },
 
-  downloadGraderDoc: (assignment: Assignment) => {
-    const html = generateGraderHTML(normalizePoints(assignment));
+  downloadGraderDoc: async (assignment: Assignment) => {
+    const html = await generateGraderHTML(normalizePoints(assignment));
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

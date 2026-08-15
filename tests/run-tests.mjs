@@ -25,7 +25,7 @@
 
 import { build } from 'esbuild';
 import { webcrypto, createPrivateKey, privateDecrypt, constants as cryptoConstants } from 'node:crypto';
-import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -81,19 +81,31 @@ const stubBrowserOnlyDeps = {
   },
 };
 
-// services/mathRender.ts inlines KaTeX's stylesheet with a `?raw` import, which
-// Vite understands natively and esbuild needs told about.
+// mathRender.ts inlines KaTeX's stylesheet with `?raw` (Vite built-in), and
+// katexFonts.ts turns the woff2 faces into data URIs with `?dataurl` (our own
+// plugin, see vite.config.ts). esbuild needs told about both — keep this in
+// step with the Vite plugin, and note that tests/bundle-tests.mjs is what
+// checks the *real* build rather than this stand-in.
 const requireFromRepo = createRequire(join(REPO, 'package.json'));
-const rawImports = {
-  name: 'raw-imports',
+const assetImports = {
+  name: 'asset-imports',
   setup(b) {
-    b.onResolve({ filter: /\?raw$/ }, args => ({
-      path: requireFromRepo.resolve(args.path.replace(/\?raw$/, '')),
-      namespace: 'raw',
-    }));
+    b.onResolve({ filter: /\?(raw|dataurl)$/ }, args => {
+      const [, query] = args.path.match(/\?(raw|dataurl)$/);
+      return {
+        path: requireFromRepo.resolve(args.path.replace(/\?(raw|dataurl)$/, '')),
+        namespace: query,
+      };
+    });
     b.onLoad({ filter: /.*/, namespace: 'raw' }, args => ({
       contents: readFileSync(args.path, 'utf8'),
       loader: 'text',
+    }));
+    b.onLoad({ filter: /.*/, namespace: 'dataurl' }, args => ({
+      contents: `export default ${JSON.stringify(
+        `data:font/woff2;base64,${readFileSync(args.path).toString('base64')}`
+      )};`,
+      loader: 'js',
     }));
   },
 };
@@ -109,7 +121,7 @@ const loadModule = async (entry, outName, opts = {}) => {
     bundle: true,
     absWorkingDir: dirname(entry),
     logLevel: 'silent',
-    plugins: [rawImports, ...plugins],
+    plugins: [assetImports, ...plugins],
     ...rest,
   });
   return import(pathToFileURL(outfile).href);
@@ -632,8 +644,8 @@ if (fixture) {
       'the escape braces were re-escaped'));
 
   // --- assignment.html + grader document ---
-  const html = generateHTML(mathAssignment);
-  const graderHtml = generateGraderHTML(mathAssignment);
+  const html = await generateHTML(mathAssignment);
+  const graderHtml = await generateGraderHTML(mathAssignment);
   for (const [label, doc] of [['assignment.html', html], ['grader document', graderHtml]]) {
     check(`${label}: math is rendered by KaTeX at export time`, () => {
       assert(doc.includes('class="katex"'), 'no KaTeX output in the file');
@@ -643,12 +655,24 @@ if (fixture) {
       assert(!/mathjax/i.test(doc), 'a MathJax script survived');
       assert(!doc.includes('$6\\,\\Omega$'), 'raw LaTeX was emitted instead of rendered math');
     });
-    check(`${label}: KaTeX's stylesheet is inlined, so it renders without a CDN script`, () =>
+    check(`${label}: KaTeX's stylesheet is inlined`, () =>
       assert(doc.includes('.katex{') || doc.includes('.katex {'), 'the KaTeX stylesheet is missing'));
+    // The whole point of embedding: an instructor can open the file on a plane.
+    check(`${label}: self-contained — every glyph font is a data URI, nothing is fetched`, () => {
+      const externals = [...doc.matchAll(/url\((?!data:)["']?([^"')]+)["']?\)/g)].map(m => m[1]);
+      assertEqual(externals, [], 'the file still references fonts off-document');
+      assertEqual((doc.match(/data:font\/woff2;base64,/g) || []).length, 20,
+        'not every KaTeX face was embedded');
+      assert(!/<(?:script|link|img|iframe)\b/i.test(doc), 'the file loads a subresource');
+      // The MathML namespace is an identifier, not a fetch — everything else is.
+      const remote = [...new Set([...doc.matchAll(/https?:\/\/[^\s"')]+/g)].map(m => m[0]))]
+        .filter(u => u !== 'http://www.w3.org/1998/Math/MathML');
+      assertEqual(remote, [], 'the file still points at an external host');
+    });
   }
+  const escapedHtml = await generateHTML({ ...mathAssignment, preamble: '<script>alert(1)</script> & co' });
   check('assignment.html: prose is HTML-escaped', () =>
-    assert(generateHTML({ ...mathAssignment, preamble: '<script>alert(1)</script> & co' })
-      .includes('&lt;script&gt;'), 'raw HTML from a description reached the file'));
+    assert(escapedHtml.includes('&lt;script&gt;'), 'raw HTML from a description reached the file'));
 
   // --- PDF ---
   {
@@ -721,8 +745,51 @@ if (fixture) {
   });
 }
 
+// =====================================================
+// 8. Cross-app — the mirrored delimiter file has not drifted
+// =====================================================
+// services/mathDelimiters.ts is held byte-identical in both repos. If they ever
+// differ, an instructor authors math that renders one way in the Maker and
+// another way for the student — which is how the export paths drifted apart in
+// the first place. Cheapest possible guard: compare the two files.
+{
+  const MIRROR = join('services', 'mathDelimiters.ts');
+  const here = join(REPO, MIRROR);
+  const there = resolve(REPO, '..', 'GradeBridge-Student-Submission', MIRROR);
+
+  if (existsSync(there)) {
+    // Line endings are a checkout artefact (core.autocrlf), not a divergence.
+    const norm = (p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
+    check('cross-app: services/mathDelimiters.ts is byte-identical in both repos', () =>
+      assert(norm(here) === norm(there),
+        `the mirrored file has diverged.\n          copy ${here}\n          over ${there} (or the other way) and re-run`));
+  } else {
+    skip('cross-app: services/mathDelimiters.ts is byte-identical in both repos',
+      'Student Submission repo not alongside this one');
+  }
+
+  check('the mirrored file is the only splitter in this repo', () => {
+    const offenders = [];
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (/^(node_modules|dist|\.git)$/.test(entry.name)) continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) { walk(full); continue; }
+        if (!/\.tsx?$/.test(entry.name)) continue;
+        if (full === here) continue;
+        if (/\\\$\\\$\[\\s\\S\]/.test(readFileSync(full, 'utf8'))) offenders.push(full);
+      }
+    };
+    walk(REPO);
+    assertEqual(offenders.map(f => f.slice(REPO.length + 1)), [],
+      'a second copy of the delimiter regex appeared');
+  });
+}
+
 // ---------- report ----------
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped\n`);
-rmSync(outDir, { recursive: true, force: true });
+// Windows keeps a handle on the imported bundles; a temp file left behind is
+// not a test failure.
+try { rmSync(outDir, { recursive: true, force: true }); } catch { /* ignore */ }
 process.exit(failed > 0 ? 1 : 0);
