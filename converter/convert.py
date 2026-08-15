@@ -125,7 +125,7 @@ def parse_problem_header(line):
 def parse_metadata(lines):
     """
     Parse the title line and metadata fields from the top of the file.
-    Returns dict with courseCode, title, preamble, inputMode.
+    Returns dict with courseCode, title, preamble, inputMode, pageFormatId.
     Due date is intentionally ignored — managed in Canvas.
     """
     meta = {
@@ -133,7 +133,10 @@ def parse_metadata(lines):
         'title': '',
         'preamble': '',
         # **Input:** is optional — files without it are electronic.
-        'inputMode': 'electronic'
+        'inputMode': 'electronic',
+        # **Template ID:** is optional too — absent means the QR template
+        # generator derives one from the course code and title.
+        'pageFormatId': None
     }
 
     for line in lines:
@@ -158,7 +161,35 @@ def parse_metadata(lines):
             meta['inputMode'] = 'handwritten' if m.group(1).strip().lower() == 'handwritten' else 'electronic'
             continue
 
+        # Page-format template id: **Template ID:** HW3
+        m = re.match(r'^\*\*Template ID:\*\*\s+(.+)$', line, re.IGNORECASE)
+        if m:
+            cleaned = re.sub(r'[^A-Z0-9]', '', m.group(1).strip().upper())[:12]
+            if cleaned:
+                meta['pageFormatId'] = cleaned
+            continue
+
     return meta
+
+
+def parse_template_options(lines):
+    """
+    Parse '> template: space=tall, sketch' — the printed-template settings for a
+    handwritten sub-part. Returns a dict with any of answerSpace / isDrawing that
+    were set; absent keys mean the generator derives them from the part's points.
+    """
+    raw = extract_blockquote_value('template', lines)
+    if not raw:
+        return {}
+    out = {}
+    for token in [t.strip().lower() for t in raw.split(',') if t.strip()]:
+        m = re.match(r'^space\s*=\s*(short|medium|tall|xtall)$', token)
+        if m:
+            out['answerSpace'] = m.group(1)
+            continue
+        if token in ('sketch', 'drawing'):
+            out['isDrawing'] = True
+    return out
 
 
 def extract_blockquote_value(key, lines):
@@ -302,6 +333,7 @@ def parse_md(filepath):
             if sub_meta['submissionType'] == 'Handwritten':
                 # Pages are an assignment-level pool — no per-part image count.
                 subsection['handwrittenGradingMode'] = sub_meta['handwrittenGradingMode'] or 'ai'
+                subsection.update(parse_template_options(body))
             else:
                 subsection['maxImages'] = sub_meta['maxImages']
             subsection['aiGradingPrompt'] = ai_grading_prompt
@@ -328,6 +360,9 @@ def parse_md(filepath):
         'inputMode': meta['inputMode'],
         'preamble': meta['preamble'],
         'problems': problems,
+        # Only present when the .md pinned one; otherwise the QR template
+        # generator derives it from the course code and title.
+        **({'pageFormatId': meta['pageFormatId']} if meta.get('pageFormatId') else {}),
         'aiGradingConfig': DEFAULT_AI_CONFIG,
         'createdAt': now_ms,
         'updatedAt': now_ms

@@ -34,6 +34,42 @@ against the same WebCrypto the browser uses.
   regex. The Student app runs the same check from its side, in
   `tests/math-delimiter-tests.mjs`.
 
+## `tests/templateTests.mjs`
+
+The **spec 8.7 self-test** for the GradeBridge page-format QR template, all eight
+checks. Spec: `GradeBridge2026/QR Format Page/GradeBridge_Page_Format_v1.md`.
+
+Checks 1–7 go through `services/templateSelfTest.ts` — the same code that gates
+every generation in the app, so this suite and the running app cannot disagree
+about what compliant means.
+
+Check 8 ("render the PDF and run the real detector over it") needs pixels, so it
+lives here:
+
+- **The QR.** Each page's symbol is rasterised at the canonical 300 dpi and
+  decoded with **jsQR**, a real decoder. It reports the symbol's own mode and
+  version, so check 6 is *verified* rather than asserted — alphanumeric mode at
+  version 4, decoded `k` and `N` correct, decoded `layout_id` matching the map.
+- **The marks.** The spec 3.2 detector, implemented as written: a 30 mm window on
+  each nominal centre, area 0.5x–2.0x, fill ratio ≥ 0.85 counted in **pixels**
+  (the spec is explicit that contour area nearly admits a QR finder pattern as a
+  false fiducial), aspect 0.80–1.25, 4 of 4, each centroid within 1.0 mm.
+
+That raster is built from the same constants the PDF is drawn from, so it proves
+the geometry decodes and detects — but a jsPDF drawing bug would slip past it.
+So the **PDF's own content stream** is parsed too, and its `re` operators checked
+back against those constants: four 5 mm squares per page at the Appendix A
+positions, a printed white quiet-zone field per page, every QR module inside the
+declared symbol rectangle, and exactly one text line per page in the identity
+band at the spec 8.4 anchor. Between the two halves, both "is the geometry right"
+and "did it reach the paper" are covered.
+
+The rest of the suite covers the parts a spec cannot check for you: part-id
+numbering, pagination, per-part sizing and clamping, the `layout_id` stale-map
+guard actually changing when a rectangle moves, the `.md` round trip of the new
+`**Template ID:**` and `> template:` keys, and Appendix C — that none of the exam
+generator's choices leaked into a homework template.
+
 ## `tests/bundle-tests.mjs`
 
 `npm test` then runs a real `vite build` into a temp directory and inspects the
@@ -93,3 +129,18 @@ Math rendering was exercised on 2026-08-15 (Chrome, `npm run dev`) by importing
   prose escapes (`_`, `&`, `#`, `\`) intact.
 - `assignment.tex` — compiled with `pdflatex` (TeX Live 2025): no errors, no
   placeholder token, no `«»` guillemets, all math typeset natively.
+
+The QR template was exercised on 2026-08-15 (Chrome, `npm run dev`) from
+`fixtures/EEC130B_Handwritten_HW3.md` — 5 parts over 3 pages, generated in 37 ms:
+
+- All three pages carry four corner marks and the QR; the header line reads
+  "GradeBridge {id} page k of N" and is the **only** text above y = 25 mm on any
+  page (checked by reading the PDF's own text operators, not by eye).
+- The page-1 furniture — title, name/ID/date line, print instruction — sits at
+  y = 30.1, 35.2 and 39.7 mm, all below the band.
+- The sidecar's first region starts at y = 50.0 mm on page 1 (under the
+  furniture) and 38.0 mm on pages 2–3 (clear of the QR keep-out at 37 mm).
+- The sketch part prompts "Sketch your answer below this line" and is the only
+  row with `is_drawing = 1`.
+- Exporting the ZIP adds `{id}_qr_template.pdf` and `layout_{id}.csv`; an
+  electronic assignment's ZIP is unchanged.

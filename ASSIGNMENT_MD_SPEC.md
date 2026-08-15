@@ -2,7 +2,7 @@
 
 **What this is:** the reference for the `.md` format the Assignment Maker reads with **Import Markdown** and writes with **Export .md**. If you draft an assignment as markdown to import, follow this.
 
-**Source of truth:** this document is derived from, and must stay in lockstep with, `services/mdParserService.ts` (import) and `services/exportService.ts` (export) in this repo, and their Python port `converter/convert.py`. If the code and this file disagree, the code wins, and this file is the bug. Last synced to the format as of 2026-08-11 (handwritten support).
+**Source of truth:** this document is derived from, and must stay in lockstep with, `services/mdParserService.ts` (import) and `services/exportService.ts` (export) in this repo, and their Python port `converter/convert.py`. If the code and this file disagree, the code wins, and this file is the bug. Last synced to the format as of 2026-08-15 (QR page-format templates).
 
 ---
 
@@ -34,6 +34,7 @@ Sketch the transverse E-field and justify the maximum.
 |---|---|---|
 | `# {COURSE}: {TITLE}` | **yes** | Course code and assignment title. Exactly one, first. Format: `# EEC130A: Homework 3`. |
 | `**Input:** handwritten` | no | Marks the whole assignment as handwritten. Any other value, or the line being absent, means **electronic**. Emitted by Export only for handwritten assignments, so older electronic files have no such line. |
+| `**Template ID:** {ID}` | no | Handwritten only. Goes in the printed QR as the layout key (`[A-Z0-9]{1,12}`, unique across the course). Emitted only when the author pinned one; absent means it is derived from the course code and title. |
 | `**Preamble:** {text}` | no | Instructions shown to the student. Single line. |
 | `**Due:** {anything}` | no | **Ignored on import** — due dates are managed in Canvas. Safe to include or omit. |
 
@@ -162,6 +163,23 @@ Wrap long guidance across multiple lines by starting each continuation line with
 
 A `handwritten` (AI) sub-part should carry a `> grading_prompt:`; a `handwritten:human` sub-part should carry a `> grader_note:`.
 
+A third key configures the **printed QR template** (§10) and is handwritten-only:
+
+| Key | Purpose |
+|---|---|
+| `> template: space={short\|medium\|tall\|xtall}, sketch` | How much writing room this part gets on the printed sheet, and whether it is a sketch. Both parts are optional and order does not matter — `> template: sketch` alone is valid. |
+
+Omit the line entirely and the height is derived from the part's points (5 → short, 12 → medium, 25 → tall, more → extra tall), which is what every assignment written before templates existed does.
+
+```markdown
+### (b) Field sketch [25 pts] [handwritten:human]
+Sketch the transverse field pattern.
+
+> template: space=tall, sketch
+
+> grader_note: Look for arrows normal to the walls.
+```
+
 ---
 
 ## 8. Round-trip and points
@@ -202,3 +220,23 @@ Determine the cutoff frequency of the TE10 mode.
 ### (b) Field sketch and justification [8 pts] [handwritten:human]
 > grader_note: One half-sine across the wide dimension, maximum at the center.
 ```
+
+---
+
+## 10. Handwritten templates (QR page format)
+
+A handwritten assignment can emit a printable template the student writes on and photographs. Exporting the ZIP adds two files, and the **QR Template** button in the editor emits them on their own:
+
+| File | What it is |
+|---|---|
+| `{TemplateID}_qr_template.pdf` | The printed sheet: four corner registration marks, the QR, and one ruled answer area per part, on every page. |
+| `layout_{TemplateID}.csv` | The sidecar map the Submission app crops by. Its content hash is written into every page's QR. |
+
+**The two files must travel together.** The PDF is useless without the map its QR hashes to, and the Submission app refuses to crop when the hash does not match — which is the point: a stale map would otherwise register perfectly and cut the wrong rectangles with no error anywhere.
+
+The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Page/GradeBridge_Page_Format_v1.md`, transcribed into `services/pageFormat.ts`, and enforced by the spec 8.7 self-test that runs on every generation — a template that fails any check is not emitted at all.
+
+Two consequences for authoring:
+
+- **Nothing student-identifying goes on the sheet above 25 mm.** The top band holds only the QR, one header line and the two top marks. The name/ID/date line lives below it, which the generator handles.
+- **The QR is the same on every copy.** One class-wide master, no per-student code; the app identifies the student from their login, not from the paper.

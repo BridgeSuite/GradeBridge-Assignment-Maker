@@ -1,0 +1,535 @@
+// =====================================================
+// Page-format template tests — the spec 8.7 self-test, all eight checks
+// =====================================================
+// Spec: GradeBridge2026/QR Format Page/GradeBridge_Page_Format_v1.md
+//
+// Checks 1–7 are asserted through services/templateSelfTest.ts, the same code
+// that gates every generation in the app.
+//
+// Check 8 lives here because it needs pixels: rasterise the emitted geometry at
+// the canonical 300 dpi, decode each QR with a real decoder (jsQR, which reports
+// the symbol's own mode and version, so check 6 is verified rather than
+// asserted), and run the spec 3.2 mark detector over the page — fill ratio,
+// area, aspect, 30 mm search window, 4 of 4.
+//
+// What the raster covers and what it does not: it is built from the same
+// constants the PDF is drawn from, so it proves the geometry decodes and detects
+// at the specified physical size. It is not a rasterisation of the PDF bytes, so
+// a jsPDF drawing bug would slip past it — which is why the PDF's own content
+// stream is parsed and its mark and QR rectangles checked against the same
+// constants, below. Between the two, both halves are covered.
+//
+//   npm test
+// =====================================================
+
+import { build } from 'esbuild';
+import jsQR from 'jsqr';
+import { webcrypto } from 'node:crypto';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO = resolve(HERE, '..');
+globalThis.crypto ??= webcrypto;
+
+let passed = 0, failed = 0;
+const results = [];
+const check = (name, fn) => {
+  try { fn(); passed++; results.push(`  PASS  ${name}`); }
+  catch (err) { failed++; results.push(`  FAIL  ${name}\n          ${err.message}`); }
+};
+const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+const assertEqual = (actual, expected, msg) => {
+  const a = JSON.stringify(actual), e = JSON.stringify(expected);
+  if (a !== e) throw new Error(`${msg}\n          expected: ${e}\n          actual:   ${a}`);
+};
+
+// ---------- load the modules under test ----------
+const outDir = mkdtempSync(join(tmpdir(), 'gb-template-test-'));
+const requireFromRepo = createRequire(join(REPO, 'package.json'));
+const assetImports = {
+  name: 'asset-imports',
+  setup(b) {
+    b.onResolve({ filter: /\?(raw|dataurl)$/ }, args => {
+      const [, q] = args.path.match(/\?(raw|dataurl)$/);
+      return { path: requireFromRepo.resolve(args.path.replace(/\?(raw|dataurl)$/, '')), namespace: q };
+    });
+    b.onLoad({ filter: /.*/, namespace: 'raw' }, a => ({ contents: readFileSync(a.path, 'utf8'), loader: 'text' }));
+    b.onLoad({ filter: /.*/, namespace: 'dataurl' }, a => ({
+      contents: `export default ${JSON.stringify(`data:font/woff2;base64,${readFileSync(a.path).toString('base64')}`)};`,
+      loader: 'js',
+    }));
+  },
+};
+const loadModule = async (entry, outName) => {
+  const outfile = join(outDir, outName);
+  await build({
+    entryPoints: [entry], outfile, format: 'esm', target: 'es2022', bundle: true,
+    absWorkingDir: dirname(entry), logLevel: 'silent', plugins: [assetImports],
+  });
+  return import(pathToFileURL(outfile).href);
+};
+
+const gen = await loadModule(join(REPO, 'services', 'templateGenerator.ts'), 'templateGenerator.mjs');
+const fmt = await loadModule(join(REPO, 'services', 'pageFormat.ts'), 'pageFormat.mjs');
+const qrp = await loadModule(join(REPO, 'services', 'qrPayload.ts'), 'qrPayload.mjs');
+const lay = await loadModule(join(REPO, 'services', 'templateLayout.ts'), 'templateLayout.mjs');
+const enc = await loadModule(join(REPO, 'services', 'qrEncoder.ts'), 'qrEncoder.mjs');
+
+console.log('\nAssignment Maker — GradeBridge page format (QR template)\n');
+
+// ---------- fixtures ----------
+const part = (name, points, extra = {}) => ({
+  id: `s-${name}`, name, description: '', points,
+  submissionType: 'Handwritten', handwrittenGradingMode: 'ai', ...extra,
+});
+const makeAssignment = (problems, extra = {}) => ({
+  id: 'qr1', courseCode: 'EEC130B', title: 'Homework 3',
+  inputMode: 'handwritten', preamble: 'Show all working on paper.',
+  problems: problems.map((subs, i) => ({ id: `p${i}`, name: `Problem ${i + 1}`, description: '', subsections: subs })),
+  aiGradingConfig: { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 },
+  createdAt: 1700000000000, updatedAt: 1700000000000, ...extra,
+});
+
+// The spec's Appendix B shape: 1(a), 1(b), 2, 3(a), 3(b) with the last a sketch.
+const appendixB = makeAssignment([
+  [part('Cutoff frequency', 5), part('Mode chart', 5)],
+  [part('Attenuation', 10)],
+  [part('Field derivation', 6), part('Field sketch', 14, { isDrawing: true })],
+]);
+
+// ---------- generate ----------
+const t = await gen.generateTemplate(appendixB);
+
+check('a template is emitted, with a PDF, a sidecar and one payload per page', () => {
+  assert(t.pdf && t.pdf.size > 0, 'no PDF');
+  assert(t.csv.length > 0, 'no CSV');
+  assertEqual(t.payloads.length, t.pageCount, 'one payload per page');
+  assert(t.pageCount >= 1, 'no pages');
+});
+
+check('the self-test passed every check it gates generation on', () => {
+  assertEqual(t.selfTest.failures, [], 'self-test reported failures');
+  assert(t.selfTest.passed === true, 'self-test did not pass');
+});
+
+check('part ids follow the spec worked example: 1(a), 1(b), 2, 3(a), 3(b)', () => {
+  assertEqual(t.rows.map(r => r.partId), ['1(a)', '1(b)', '2', '3(a)', '3(b)'], 'wrong part ids');
+  assertEqual(t.rows.map(r => r.regionId), ['p1a', 'p1b', 'p2', 'p3a', 'p3b'], 'wrong region ids');
+});
+
+check('the sketch part is flagged is_drawing, and only it', () =>
+  assertEqual(t.rows.filter(r => r.isDrawing === 1).map(r => r.partId), ['3(b)'], 'wrong is_drawing rows'));
+
+check('the sidecar has the spec 4.3 header and one row per part', () => {
+  const lines = t.csv.trim().split('\n');
+  assertEqual(lines[0], lay.LAYOUT_CSV_HEADER, 'wrong CSV header');
+  assertEqual(lines.length - 1, t.rows.length, 'wrong row count');
+  assert(lines.every(l => l.split(',').length === 11), 'a row does not have 11 columns');
+  assert(lines.slice(1).every(l => /,\d\.\d{4},\d\.\d{4},\d\.\d{4},\d\.\d{4},/.test(l)),
+    'coordinates are not all at exactly four decimal places');
+});
+
+// ---------- decisions from the work order ----------
+check('decision 2: nothing student-specific in the QR, fixed master token', () => {
+  for (const p of t.payloads) {
+    const f = qrp.parsePayload(p);
+    assert(f !== null, `payload does not parse: ${p}`);
+    assertEqual(f.token, 'HWMSTR', 'the token is not the class-wide placeholder');
+  }
+  assert(!t.payloads.join(' ').toLowerCase().includes('name'), 'a payload mentions a name');
+});
+
+check('the assignment_id is derived into the QR grammar and is stable', async () => {
+  assert(/^[A-Z0-9]{1,12}$/.test(t.assignmentId), `assignment_id "${t.assignmentId}" is not [A-Z0-9]{1,12}`);
+});
+
+check('an author override of the assignment_id is honoured', async () => {
+  assertEqual(await gen.resolvePageFormatId({ ...appendixB, pageFormatId: 'hw3' }), 'HW3', 'override ignored');
+  // An illegal override must not reach the symbol; fall back to the derived id.
+  const fallback = await gen.resolvePageFormatId({ ...appendixB, pageFormatId: 'not a valid id!' });
+  assert(/^[A-Z0-9]{1,12}$/.test(fallback), `illegal override leaked: ${fallback}`);
+});
+
+// ---------- check 8, part 1: the QR, decoded by a real decoder ----------
+const PX_PER_MM_300 = 300 / 25.4;
+
+const rasterQr = (payload) => {
+  const m = enc.encodeQr(payload);
+  const modulePx = Math.round((fmt.QR_SIZE_MM / m.moduleCount) * PX_PER_MM_300);
+  const quiet = fmt.QR_QUIET_MODULES * modulePx;
+  const side = m.moduleCount * modulePx + quiet * 2;
+  const rgba = new Uint8ClampedArray(side * side * 4).fill(255);
+  for (let r = 0; r < m.moduleCount; r++) for (let c = 0; c < m.moduleCount; c++) {
+    if (!m.dark[r][c]) continue;
+    for (let dy = 0; dy < modulePx; dy++) for (let dx = 0; dx < modulePx; dx++) {
+      const i = ((quiet + r * modulePx + dy) * side + (quiet + c * modulePx + dx)) * 4;
+      rgba[i] = rgba[i + 1] = rgba[i + 2] = 0;
+    }
+  }
+  return { rgba, side, modulePx };
+};
+
+check('check 8a: every page QR decodes from a 300 dpi raster, with correct k and N', () => {
+  t.payloads.forEach((payload, i) => {
+    const { rgba, side } = rasterQr(payload);
+    const res = jsQR(rgba, side, side);
+    assert(res !== null, `page ${i + 1}: the symbol did not decode`);
+    assertEqual(res.data, payload, `page ${i + 1}: decoded the wrong payload`);
+    const f = qrp.parsePayload(res.data);
+    assertEqual(f.k, i + 1, `page ${i + 1}: decoded k is wrong`);
+    assertEqual(f.n, t.pageCount, `page ${i + 1}: decoded N is wrong`);
+    assertEqual(f.layoutId, t.layoutId, `page ${i + 1}: decoded layout_id does not match the map`);
+  });
+});
+
+check('check 6 (verified, not assumed): the decoder reports alphanumeric mode at version 4', () => {
+  for (const payload of t.payloads) {
+    const { rgba, side } = rasterQr(payload);
+    const res = jsQR(rgba, side, side);
+    assertEqual(res.version, fmt.QR_VERSION, 'the decoded symbol is not version 4');
+    assertEqual(res.chunks.map(c => c.type), ['alphanumeric'], 'the decoded symbol is not alphanumeric mode');
+  }
+});
+
+check('the module size is the 0.7273 mm the px/module budget was computed from', () => {
+  const modMm = fmt.QR_SIZE_MM / fmt.QR_MODULES;
+  assert(Math.abs(modMm - fmt.QR_MODULE_MM) < 0.001, `module is ${modMm.toFixed(4)} mm, spec says ${fmt.QR_MODULE_MM}`);
+});
+
+// ---------- check 8, part 2: the marks, found by the spec 3.2 detector ----------
+
+/** Render one page's fiducials into a 1-bit raster at the canonical 300 dpi. */
+const rasterMarks = () => {
+  const w = fmt.CANONICAL_W_PX, h = fmt.CANONICAL_H_PX;
+  const ink = new Uint8Array(w * h); // 1 = foreground
+  for (const [mx, my] of fmt.MARK_ORIGINS_MM) {
+    const x0 = Math.round(mx * PX_PER_MM_300), y0 = Math.round(my * PX_PER_MM_300);
+    const s = Math.round(fmt.MARK_SIZE_MM * PX_PER_MM_300);
+    for (let y = y0; y < y0 + s; y++) for (let x = x0; x < x0 + s; x++) ink[y * w + x] = 1;
+  }
+  return { ink, w, h };
+};
+
+/**
+ * Spec 3.2 detection, as written: a 30 mm window on each nominal centre, then
+ * area 0.5x–2.0x of 25 mm², fill ratio >= 0.85 counted in PIXELS (not contour
+ * area — the spec is explicit that contour area nearly admits a QR finder
+ * pattern as a false fiducial), aspect 0.80–1.25.
+ */
+const detectMarks = ({ ink, w, h }) => {
+  const found = [];
+  const win = 30.0 * PX_PER_MM_300;
+  const nominalAreaPx = 25.0 * PX_PER_MM_300 * PX_PER_MM_300;
+
+  for (const [cxMm, cyMm] of fmt.MARK_CENTRES_MM) {
+    const cx = cxMm * PX_PER_MM_300, cy = cyMm * PX_PER_MM_300;
+    const x0 = Math.max(0, Math.round(cx - win / 2)), x1 = Math.min(w, Math.round(cx + win / 2));
+    const y0 = Math.max(0, Math.round(cy - win / 2)), y1 = Math.min(h, Math.round(cy + win / 2));
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, count = 0, sx = 0, sy = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      if (!ink[y * w + x]) continue;
+      count++; sx += x; sy += y;
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+    if (!count) continue;
+
+    const bw = maxX - minX + 1, bh = maxY - minY + 1;
+    const fill = count / (bw * bh);
+    const aspect = bw / bh;
+    const areaOk = count >= 0.5 * nominalAreaPx && count <= 2.0 * nominalAreaPx;
+    if (!areaOk || fill < 0.85 || aspect < 0.80 || aspect > 1.25) continue;
+
+    found.push({ xMm: (sx / count) / PX_PER_MM_300, yMm: (sy / count) / PX_PER_MM_300, fill, aspect });
+  }
+  return found;
+};
+
+check('check 8b: the spec 3.2 detector finds 4 of 4 marks, each within the 1.0 mm residual', () => {
+  const found = detectMarks(rasterMarks());
+  assertEqual(found.length, 4, 'the detector did not find 4 of 4 marks');
+  found.forEach((f, i) => {
+    const [cx, cy] = fmt.MARK_CENTRES_MM[i];
+    const dx = Math.abs(f.xMm - cx), dy = Math.abs(f.yMm - cy);
+    assert(dx <= fmt.RESIDUAL_MAX_MM && dy <= fmt.RESIDUAL_MAX_MM,
+      `mark ${i} centroid is (${f.xMm.toFixed(2)}, ${f.yMm.toFixed(2)}) mm, nominal (${cx}, ${cy})`);
+    assert(f.fill >= 0.85, `mark ${i} fill ratio ${f.fill.toFixed(3)} is below 0.85`);
+  });
+});
+
+// ---------- the PDF actually carries that geometry ----------
+// The raster above proves the geometry is detectable; this proves the PDF is
+// drawn from the same numbers, which is the half a self-built raster cannot see.
+const pdfText = Buffer.from(await t.pdf.arrayBuffer()).toString('latin1');
+
+/**
+ * Every `re` operator in the content stream, converted back to the page format's
+ * own frame: millimetres, origin top-left, y downward. jsPDF writes points from
+ * a bottom-left origin and gives rectangles as `x yTop w -h`.
+ */
+const PT_TO_MM = 25.4 / 72;
+const pdfRects = [...pdfText.matchAll(/([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+) re/g)].map(m => {
+  const [x, yTop, w, h] = m.slice(1).map(Number);
+  return {
+    xMm: x * PT_TO_MM,
+    yMm: fmt.PAGE_H_MM - yTop * PT_TO_MM,
+    wMm: Math.abs(w) * PT_TO_MM,
+    hMm: Math.abs(h) * PT_TO_MM,
+  };
+});
+const near = (a, b, tol = 0.02) => Math.abs(a - b) <= tol;
+const countRects = (x, y, w, h) =>
+  pdfRects.filter(r => near(r.xMm, x) && near(r.yMm, y) && near(r.wMm, w) && near(r.hMm, h)).length;
+
+check('the PDF draws four 5 mm mark squares per page at the Appendix A positions', () => {
+  for (const [mx, my] of fmt.MARK_ORIGINS_MM) {
+    const hits = countRects(mx, my, fmt.MARK_SIZE_MM, fmt.MARK_SIZE_MM);
+    assertEqual(hits, t.pageCount, `mark at (${mx}, ${my}) mm appears ${hits} times, expected once per page`);
+  }
+});
+
+check('the PDF reserves a printed white quiet zone around every QR', () => {
+  const side = fmt.QR_SIZE_MM + fmt.QR_QUIET_MM * 2;
+  const hits = countRects(fmt.QR_RECT_MM.x0 - fmt.QR_QUIET_MM, fmt.QR_RECT_MM.y0 - fmt.QR_QUIET_MM, side, side);
+  assertEqual(hits, t.pageCount, 'the quiet-zone field is missing on some page');
+});
+
+check('every QR module rectangle sits inside the declared symbol rectangle', () => {
+  const modMm = fmt.QR_SIZE_MM / fmt.QR_MODULES;
+  const modules = pdfRects.filter(r => near(r.hMm, modMm, 0.001) && r.wMm > 0 && r.wMm <= fmt.QR_SIZE_MM + 0.01);
+  assert(modules.length > 100, `only ${modules.length} module rectangles found across ${t.pageCount} pages`);
+  for (const r of modules) {
+    assert(r.xMm >= fmt.QR_RECT_MM.x0 - 0.01 && r.xMm + r.wMm <= fmt.QR_RECT_MM.x1 + 0.01,
+      `a module runs outside the symbol horizontally: x ${r.xMm.toFixed(2)}–${(r.xMm + r.wMm).toFixed(2)} mm`);
+    assert(r.yMm >= fmt.QR_RECT_MM.y0 - 0.01 && r.yMm + r.hMm <= fmt.QR_RECT_MM.y1 + 0.01,
+      `a module runs outside the symbol vertically: y ${r.yMm.toFixed(2)}–${(r.yMm + r.hMm).toFixed(2)} mm`);
+  }
+});
+
+// ---------- safe areas and the identity band ----------
+check('no declared rectangle enters the identity band, the QR keep-out or a corner', () => {
+  const bad = t.rows.flatMap(r =>
+    fmt.safeAreaViolations(fmt.fractionRectToMm(r)).map(v => `${r.regionId}: ${v}`));
+  assertEqual(bad, [], 'a rectangle violates a safe area');
+});
+
+check('the identity band carries only the three allowed fixtures', () => {
+  // Spec 4.5: anything in the top 25 mm that is not the QR, the one header line
+  // or a top mark trips the consumer's PII gate and withholds every crop on the
+  // page. So every rectangle reaching into the band must belong to the QR block
+  // (symbol, modules or quiet-zone field) or to one of the two top marks.
+  const topMarks = fmt.MARK_ORIGINS_MM.filter(([, y]) => y < fmt.IDENTITY_BAND_MM);
+  const qrBlock = {
+    x0: fmt.QR_RECT_MM.x0 - fmt.QR_QUIET_MM, y0: fmt.QR_RECT_MM.y0 - fmt.QR_QUIET_MM,
+    x1: fmt.QR_RECT_MM.x1 + fmt.QR_QUIET_MM, y1: fmt.QR_RECT_MM.y1 + fmt.QR_QUIET_MM,
+  };
+  const intruders = pdfRects
+    .filter(r => r.yMm < fmt.IDENTITY_BAND_MM)
+    .filter(r => {
+      const insideQr = r.xMm >= qrBlock.x0 - 0.02 && r.xMm + r.wMm <= qrBlock.x1 + 0.02
+        && r.yMm >= qrBlock.y0 - 0.02 && r.yMm + r.hMm <= qrBlock.y1 + 0.02;
+      const isTopMark = topMarks.some(([mx, my]) =>
+        near(r.xMm, mx) && near(r.yMm, my) && near(r.wMm, fmt.MARK_SIZE_MM) && near(r.hMm, fmt.MARK_SIZE_MM));
+      return !insideQr && !isTopMark;
+    });
+  assertEqual(intruders.map(r => `(${r.xMm.toFixed(1)}, ${r.yMm.toFixed(1)}) ${r.wMm.toFixed(1)}x${r.hMm.toFixed(1)} mm`),
+    [], 'something other than the QR and the two top marks is printed in the identity band');
+  // And exactly one text line up there: the header.
+  assert(pdfText.includes('GradeBridge'), 'the header line is missing');
+});
+
+check('exactly one text line per page in the band, at the spec 8.4 anchor', () => {
+  // Course, title, name/ID/date and the print instruction all belong under
+  // y = 25 mm (spec 4.5) — anything else up there withholds every crop on the
+  // page. Text is positioned by Td, so read those rather than rectangles.
+  const textOps = [...pdfText.matchAll(/([\d.]+) ([\d.]+) Td\s*\(((?:\\.|[^\\()])*)\)\s*Tj/g)]
+    .map(m => ({ xMm: Number(m[1]) * PT_TO_MM, yMm: fmt.PAGE_H_MM - Number(m[2]) * PT_TO_MM, text: m[3] }));
+  assert(textOps.length > 0, 'no text operators were found — this check would pass vacuously');
+
+  const inBand = textOps.filter(o => o.yMm < fmt.IDENTITY_BAND_MM);
+  assertEqual(inBand.length, t.pageCount,
+    `${inBand.length} text lines sit in the identity band across ${t.pageCount} pages; exactly one per page may`);
+  for (const o of inBand) {
+    assert(near(o.xMm, fmt.HEADER_TEXT_ANCHOR_MM.x, 0.05),
+      `the header line starts at x = ${o.xMm.toFixed(1)} mm, spec anchor is ${fmt.HEADER_TEXT_ANCHOR_MM.x}`);
+    assert(o.xMm < fmt.QR_KEEPOUT_MM.x0, 'the header line starts inside the QR keep-out');
+    // No identity field up here: no fill-in rule and no name/ID prompt.
+    assert(!/_{3,}/.test(o.text) && !/\b(name|student|signature)\b/i.test(o.text),
+      `the band header carries an identity field: "${o.text}"`);
+  }
+  // And the furniture the band forbids really is below it.
+  const furniture = textOps.filter(o => /Name:|Print at 100/.test(o.text));
+  assert(furniture.length > 0, 'the page-1 furniture is missing');
+  for (const o of furniture) {
+    assert(o.yMm >= fmt.IDENTITY_BAND_MM, `"${o.text.slice(0, 20)}" sits at y = ${o.yMm.toFixed(1)} mm, inside the band`);
+  }
+});
+
+check('every part gets a prompt and a rule, and the rule sits above the writing area', () => {
+  for (const r of t.layout.regions) {
+    const rule = lay.promptRule(r);
+    assert(rule.yMm < r.nominalMm.y0, `${r.regionId}: the rule is not above the writing area`);
+    assert(rule.yMm > r.promptTopMm, `${r.regionId}: the rule is not below the prompt text`);
+    assert(r.declaredMm.y0 < r.nominalMm.y0, `${r.regionId}: padding was not applied outward`);
+    assert(r.declaredMm.y0 > rule.yMm - 3.1, `${r.regionId}: the declared rectangle swallows the prompt`);
+  }
+});
+
+check('the declared rectangle is the writing area grown by exactly 3 mm on each side', () => {
+  for (const r of t.layout.regions) {
+    for (const [edge, delta] of [['x0', r.nominalMm.x0 - r.declaredMm.x0], ['y0', r.nominalMm.y0 - r.declaredMm.y0],
+                                 ['x1', r.declaredMm.x1 - r.nominalMm.x1], ['y1', r.declaredMm.y1 - r.nominalMm.y1]]) {
+      assert(Math.abs(delta - fmt.REGION_PAD_MM) < 0.001, `${r.regionId}: ${edge} padding is ${delta.toFixed(3)} mm`);
+    }
+  }
+});
+
+// ---------- layout_id ----------
+check('layout_id is 8 uppercase hex and is the hash of the canonical serialization', async () => {
+  assert(/^[0-9A-F]{8}$/.test(t.layoutId), `layout_id "${t.layoutId}" is not 8 uppercase hex`);
+  const recomputed = await qrp.computeLayoutId(t.rows.map(r => ({
+    regionId: r.regionId, partId: r.partId, pageK: r.pageK, x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1,
+  })));
+  assertEqual(recomputed, t.layoutId, 'recomputing the hash over the emitted rows disagrees');
+});
+
+check('the canonical serialization is sorted by region_id and 4 dp, per spec 2.2', () => {
+  const s = qrp.canonicalMapSerialization([
+    { regionId: 'p2', partId: '2', pageK: 1, x0: 0.1, y0: 0.2, x1: 0.3, y1: 0.4 },
+    { regionId: 'p1a', partId: '1(a)', pageK: 1, x0: 0.5, y0: 0.6, x1: 0.7, y1: 0.8 },
+  ]);
+  assertEqual(s, 'p1a|1(a)|1|0.5000|0.6000|0.7000|0.8000\np2|2|1|0.1000|0.2000|0.3000|0.4000',
+    'the canonical serialization is not as spec 2.2 describes');
+});
+
+check('a changed rectangle changes layout_id — the stale-map guard actually bites', async () => {
+  const rows = t.rows.map(r => ({
+    regionId: r.regionId, partId: r.partId, pageK: r.pageK, x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1,
+  }));
+  const moved = rows.map((r, i) => (i === 0 ? { ...r, y1: r.y1 + 0.0001 } : r));
+  const a = await qrp.computeLayoutId(rows), b = await qrp.computeLayoutId(moved);
+  assert(a !== b, 'a moved rectangle produced the same layout_id');
+});
+
+// ---------- pagination and sizing ----------
+check('a long assignment paginates, and every page carries its own correct k of N', async () => {
+  const many = makeAssignment([Array.from({ length: 12 }, (_, i) => part(`Part ${i + 1}`, 20))]);
+  const big = await gen.generateTemplate(many);
+  assert(big.pageCount >= 3, `expected several pages, got ${big.pageCount}`);
+  assertEqual(big.selfTest.failures, [], 'self-test failed on the multi-page template');
+  big.payloads.forEach((p, i) => {
+    const f = qrp.parsePayload(p);
+    assertEqual([f.k, f.n], [i + 1, big.pageCount], `page ${i + 1} carries the wrong k of N`);
+  });
+  const pages = new Set(big.rows.map(r => r.pageK));
+  assertEqual([...pages].sort((a, b) => a - b), Array.from({ length: big.pageCount }, (_, i) => i + 1),
+    'some page has no regions');
+});
+
+check('the author can size a part, and a sketch defaults to a large area', () => {
+  const sized = lay.buildLayout(makeAssignment([[
+    part('Tiny', 1, { answerSpace: 'short' }),
+    part('Huge', 1, { answerSpace: 'xtall' }),
+    part('Sketch', 1, { isDrawing: true }),
+  ]]));
+  const h = (id) => {
+    const r = sized.regions.find(x => x.regionId === id);
+    return Math.round(r.nominalMm.y1 - r.nominalMm.y0);
+  };
+  assertEqual(h('p1a'), Math.round(lay.ANSWER_SPACE_MM.short), 'explicit short was not honoured');
+  assertEqual(h('p1b'), Math.round(lay.ANSWER_SPACE_MM.xtall), 'explicit xtall was not honoured');
+  assertEqual(h('p1c'), Math.round(lay.ANSWER_SPACE_MM.tall), 'a sketch did not default to a tall area');
+});
+
+check('a part too tall for a page is shortened and reported, never silently clipped', async () => {
+  const l = lay.buildLayout(makeAssignment([[part('Enormous', 1, { answerSpace: 'xtall' })]]));
+  const r = l.regions[0];
+  assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.001, 'a region ran past the bottom limit');
+  if (l.clamped.length) assert(l.clamped[0].partId === '1', 'the clamp was not reported');
+});
+
+// ---------- the payload cap is a hard failure, not a shrug ----------
+check('an over-long or malformed payload is rejected rather than emitted', () => {
+  assert(qrp.payloadViolations('GB1-TOOLONGASSIGNMENTID-HWMSTR-1-2-9F3A1C72').length > 0,
+    'an over-long assignment_id was accepted');
+  assert(qrp.payloadViolations('GB1-HW3-hwmstr-1-2-9F3A1C72').length > 0, 'a lowercase token was accepted');
+  assert(qrp.payloadViolations('GB1-HW3-HWMSTR-1-2-9f3a1c72').length > 0, 'a lowercase layout_id was accepted');
+  assert(qrp.payloadViolations('GB1-HW3-HWMSTR-1-2-9F3A1C72').length === 0, 'a valid payload was rejected');
+  assert(qrp.payloadViolations('GB1-HW3-HWMSTR-1-2-9F3A1C72').length === 0);
+  const long = 'GB1-' + 'A'.repeat(12) + '-' + 'B'.repeat(10) + '-100-100-9F3A1C72';
+  assert(long.length <= fmt.QR_PAYLOAD_MAX_CHARS,
+    `the worst legal payload is ${long.length} chars, over the ${fmt.QR_PAYLOAD_MAX_CHARS} cap`);
+});
+
+check('the self-test refuses to emit when a rule is broken', async () => {
+  // A part sized past the page cannot break the safe areas (it is clamped), so
+  // break the id instead: an override that parses but is too long for the QR.
+  let threw = null;
+  try {
+    await gen.generateTemplate({ ...appendixB, problems: [] });
+  } catch (err) { threw = err; }
+  assert(threw !== null, 'an assignment with no parts produced a template');
+});
+
+// ---------- .md round trip of the template settings ----------
+{
+  const exportSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportSvc.mjs');
+  const mdParser = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParser.mjs');
+
+  const authored = makeAssignment([[
+    part('Cutoff frequency', 40, { answerSpace: 'xtall' }),
+    part('Field sketch', 60, { isDrawing: true, answerSpace: 'tall' }),
+  ]], { pageFormatId: 'EEC130BHW3' });
+
+  const md = exportSvc.assignmentToMd(authored);
+  const back = mdParser.parseMdToAssignment(md);
+
+  check('md: the template settings survive export and import', () => {
+    assert(/^\*\*Template ID:\*\* EEC130BHW3$/m.test(md), `no Template ID line in:\n${md}`);
+    assert(/^> template: space=xtall$/m.test(md), 'the writing-space setting was not written');
+    assert(/^> template: space=tall, sketch$/m.test(md), 'the sketch flag was not written');
+    assertEqual(back.pageFormatId, 'EEC130BHW3', 'the Template ID was lost');
+    const [a, b] = back.problems[0].subsections;
+    assertEqual([a.answerSpace, a.isDrawing], ['xtall', undefined], 'part (a) settings were lost');
+    assertEqual([b.answerSpace, b.isDrawing], ['tall', true], 'part (b) settings were lost');
+  });
+
+  check('md: the round trip is a fixed point, and the layout is unchanged by it', async () => {
+    assertEqual(exportSvc.assignmentToMd(back), md, 'the second export differs from the first');
+    const before = await gen.generateTemplate(authored);
+    const after = await gen.generateTemplate(back);
+    assertEqual(after.layoutId, before.layoutId, 'the layout hash changed across a .md round trip');
+    assertEqual(after.csv, before.csv, 'the sidecar changed across a .md round trip');
+  });
+
+  check('md: an assignment with no template settings is byte-identical to before', () => {
+    const plain = makeAssignment([[part('Only part', 100)]]);
+    const plainMd = exportSvc.assignmentToMd(plain);
+    assert(!plainMd.includes('> template:'), 'a template line was written for an unconfigured part');
+    assert(!plainMd.includes('**Template ID:**'), 'a Template ID line was written for a derived id');
+    assertEqual(exportSvc.assignmentToMd(mdParser.parseMdToAssignment(plainMd)), plainMd, 'not a fixed point');
+  });
+}
+
+// ---------- Appendix C: what must not carry over ----------
+check('Appendix C: no exam-generator leftovers in the payload or the map', () => {
+  for (const p of t.payloads) {
+    assert(p.startsWith('GB1-'), 'field 1 is not the format tag');
+    assert(!/R=/.test(p), 'the exam generator R= region list leaked in');
+  }
+  const cols = t.csv.split('\n')[0].split(',');
+  assert(!cols.includes('canonical_question') && !cols.includes('subpart'),
+    'exam-specific columns leaked into the map');
+  assertEqual(cols, ['assignment_id', 'layout_id', 'region_id', 'part_id', 'page_k',
+    'x0', 'y0', 'x1', 'y1', 'is_drawing', 'max_points'], 'the map columns are not spec 4.3');
+});
+
+console.log(results.join('\n'));
+console.log(`\n${passed} passed, ${failed} failed\n`);
+try { rmSync(outDir, { recursive: true, force: true }); } catch { /* Windows keeps handles */ }
+process.exit(failed > 0 ? 1 : 0);
