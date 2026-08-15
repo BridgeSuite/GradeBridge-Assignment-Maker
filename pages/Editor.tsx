@@ -206,8 +206,11 @@ const Editor: React.FC = () => {
       alert(
         `QR template ready — ${result.pageCount} page${result.pageCount === 1 ? '' : 's'}, ` +
         `${result.rows.length} answer region${result.rows.length === 1 ? '' : 's'}.\n\n` +
-        `Assignment id in the QR: ${result.assignmentId}\nLayout id: ${result.layoutId}\n\n` +
-        `Two files downloaded — keep them together:\n  ${result.pdfFilename}\n  ${result.csvFilename}` +
+        `Template id in the QR: ${result.assignmentId}\nLayout id: ${result.layoutId}\n\n` +
+        `Downloaded ${result.zipFilename}, containing:\n` +
+        `  ${result.pdfFilename}   — print this\n  ${result.csvFilename}   — the Submission app reads this\n\n` +
+        `Keep the two together. Regenerating after any edit changes the layout id, ` +
+        `and a template will not crop against a map it does not match.` +
         (warnings.length ? `\n\nNotes:\n${warnings.map(w => `  • ${w}`).join('\n')}` : '')
       );
     } catch (err) {

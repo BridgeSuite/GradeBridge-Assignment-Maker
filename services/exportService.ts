@@ -969,23 +969,30 @@ export const exportService = {
   },
 
   /**
-   * The printable QR template and its sidecar, on their own. Both files must
-   * travel together: the PDF is useless to the Submission app without the map
-   * its QR hashes to. Returns the self-test report so the caller can surface any
-   * warnings (a shortened writing area, say) that did not block emission.
+   * The printable QR template and its sidecar, on their own.
+   *
+   * **One ZIP, not two downloads.** The PDF is useless to the Submission app
+   * without the map its QR hashes to, and two `a.click()` calls in a row trip
+   * Chrome's "Download multiple files?" prompt — decline it, or miss it, and you
+   * are left holding a template whose map silently never arrived. That failure
+   * would surface at grading time, not at download time. A single archive cannot
+   * come apart.
+   *
+   * Returns the self-test report so the caller can surface warnings (a shortened
+   * writing area, say) that did not block emission.
    */
   downloadQrTemplate: async (assignment: Assignment) => {
     const template = await generateTemplate(normalizePoints(assignment));
-    const drop = (data: Blob | string, filename: string, type: string) => {
-      const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-    drop(template.pdf, template.pdfFilename, 'application/pdf');
-    drop(template.csv, template.csvFilename, 'text/csv');
-    return template;
+
+    const zip = new JSZip();
+    zip.file(template.pdfFilename, template.pdf);
+    zip.file(template.csvFilename, template.csv);
+    const zipFilename = `${template.assignmentId}_qr_template.zip`;
+    const content = await zip.generateAsync({ type: 'blob' });
+
+    const save = (FileSaver as any).saveAs || FileSaver;
+    save(content, zipFilename);
+
+    return { ...template, zipFilename };
   }
 };
