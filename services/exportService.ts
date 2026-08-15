@@ -2,6 +2,7 @@
 import { Assignment, SubmissionType } from '../types';
 import { encryptJson, normalizeCoursePublicKey, validateCoursePublicKey } from './cryptoService';
 import { escapeHtml, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
+import { generateTemplate } from './templateGenerator';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
@@ -672,6 +673,12 @@ export const assignmentToMd = (assignment: Assignment): string => {
     lines.push(`**Input:** handwritten`);
     lines.push('');
   }
+  // Only when the author overrode it — a derived id is recomputed on import, so
+  // writing it would pin a value that is meant to follow the course code and title.
+  if (normalized.pageFormatId) {
+    lines.push(`**Template ID:** ${normalized.pageFormatId}`);
+    lines.push('');
+  }
   if (normalized.preamble) {
     lines.push(`**Preamble:** ${normalized.preamble}`);
   }
@@ -703,6 +710,18 @@ export const assignmentToMd = (assignment: Assignment): string => {
 
       if (sub.description) {
         lines.push(sub.description);
+      }
+
+      // Printed-template settings, only when the author set them. A separate key
+      // rather than more colons in the type tag, so the tag grammar is untouched
+      // and a file written before templates existed round-trips byte-for-byte.
+      if (isHandwritten && (sub.answerSpace || sub.isDrawing)) {
+        const opts = [
+          ...(sub.answerSpace ? [`space=${sub.answerSpace}`] : []),
+          ...(sub.isDrawing ? ['sketch'] : []),
+        ];
+        lines.push('');
+        lines.push(`> template: ${opts.join(', ')}`);
       }
 
       if ((AI_GRADED_TYPES.has(sub.submissionType) || isAiHandwritten) && sub.aiGradingPrompt) {
@@ -909,6 +928,17 @@ export const exportService = {
     const graderDocFilename = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_grader_document.html`;
     zip.file(graderDocFilename, graderDoc);
 
+    // 8. Page-format QR template + its sidecar map — handwritten assignments only.
+    //    This is the sheet the student prints, writes on and photographs; the
+    //    sidecar is what the Submission app crops by. generateTemplate() runs the
+    //    spec 8.7 self-test and throws rather than emitting a bad template, so a
+    //    failure here stops the whole export, which is the intent.
+    if (assignment.inputMode === 'handwritten') {
+      const template = await generateTemplate(assignment);
+      zip.file(template.pdfFilename, template.pdf);
+      zip.file(template.csvFilename, template.csv);
+    }
+
     const content = await zip.generateAsync({ type: 'blob' });
 
     // Handle file-saver import differences (default export vs named export property)
@@ -936,5 +966,26 @@ export const exportService = {
     a.download = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_grader_document.html`;
     a.click();
     URL.revokeObjectURL(url);
+  },
+
+  /**
+   * The printable QR template and its sidecar, on their own. Both files must
+   * travel together: the PDF is useless to the Submission app without the map
+   * its QR hashes to. Returns the self-test report so the caller can surface any
+   * warnings (a shortened writing area, say) that did not block emission.
+   */
+  downloadQrTemplate: async (assignment: Assignment) => {
+    const template = await generateTemplate(normalizePoints(assignment));
+    const drop = (data: Blob | string, filename: string, type: string) => {
+      const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    drop(template.pdf, template.pdfFilename, 'application/pdf');
+    drop(template.csv, template.csvFilename, 'text/csv');
+    return template;
   }
 };

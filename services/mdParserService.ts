@@ -5,7 +5,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
+import { AnswerSpace, Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
 
 const DEFAULT_AI_CONFIG: AiGradingConfig = {
   model: 'claude-haiku-4-5-20251001',
@@ -97,10 +97,13 @@ function parseProblemHeader(line: string): ProblemHeaderMeta | null {
   return m ? { name: m[1].trim(), maxImages: 1 } : null;
 }
 
-function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'> {
+function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'>
+    & { pageFormatId?: string } {
   // **Input:** is optional — files without it are electronic, which keeps every
-  // pre-handwritten .md byte-identical on round trip.
-  const meta = { courseCode: '', title: '', preamble: '', inputMode: 'electronic' as InputMode };
+  // pre-handwritten .md byte-identical on round trip. **Template ID:** is the
+  // same: absent means "derive it from the course code and title".
+  const meta: Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'> & { pageFormatId?: string } =
+    { courseCode: '', title: '', preamble: '', inputMode: 'electronic' as InputMode };
   for (const line of lines) {
     const l = line.trim();
     let m = l.match(/^#\s+([^:]+):\s+(.+)$/);
@@ -110,8 +113,31 @@ function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title'
     if (m) { meta.preamble = m[1].trim(); continue; }
     m = l.match(/^\*\*Input:\*\*\s+(.+)$/i);
     if (m) { meta.inputMode = m[1].trim().toLowerCase() === 'handwritten' ? 'handwritten' : 'electronic'; continue; }
+    m = l.match(/^\*\*Template ID:\*\*\s+(.+)$/i);
+    if (m) {
+      const id = m[1].trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+      if (id) meta.pageFormatId = id;
+      continue;
+    }
   }
   return meta;
+}
+
+/**
+ * `> template: space=tall, sketch` — the printed-template settings for a
+ * handwritten sub-part. Absent means both are unset, and the generator derives
+ * the writing-area height from the part's points.
+ */
+function parseTemplateOptions(body: string[]): { answerSpace?: AnswerSpace; isDrawing?: boolean } {
+  const raw = extractBlockquoteValue('template', body);
+  if (!raw) return {};
+  const out: { answerSpace?: AnswerSpace; isDrawing?: boolean } = {};
+  for (const token of raw.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)) {
+    const space = token.match(/^space\s*=\s*(short|medium|tall|xtall)$/);
+    if (space) { out.answerSpace = space[1] as AnswerSpace; continue; }
+    if (token === 'sketch' || token === 'drawing') out.isDrawing = true;
+  }
+  return out;
 }
 
 function extractBlockquoteValue(key: string, lines: string[]): string {
@@ -196,7 +222,7 @@ export function parseMdToAssignment(content: string): Assignment {
             submissionType: prob.submissionType,
             // Handwritten pages are an assignment-level pool — no per-part image count.
             ...(isHandwritten
-              ? { handwrittenGradingMode: prob.handwrittenGradingMode ?? 'ai' }
+              ? { handwrittenGradingMode: prob.handwrittenGradingMode ?? 'ai', ...parseTemplateOptions(body) }
               : { maxImages: prob.maxImages }),
             aiGradingPrompt,
             ...(graderNote && { graderNote }),
@@ -226,7 +252,7 @@ export function parseMdToAssignment(content: string): Assignment {
         submissionType,
         // Handwritten pages are an assignment-level pool — no per-part image count.
         ...(isHandwritten
-          ? { handwrittenGradingMode: subMeta.handwrittenGradingMode ?? 'ai' }
+          ? { handwrittenGradingMode: subMeta.handwrittenGradingMode ?? 'ai', ...parseTemplateOptions(body) }
           : { maxImages: subMeta.maxImages }),
         aiGradingPrompt,
         ...(graderNote && { graderNote }),
@@ -244,6 +270,7 @@ export function parseMdToAssignment(content: string): Assignment {
     courseCode: meta.courseCode,
     title: meta.title,
     inputMode: meta.inputMode,
+    ...(meta.pageFormatId ? { pageFormatId: meta.pageFormatId } : {}),
     preamble: meta.preamble,
     problems,
     aiGradingConfig: DEFAULT_AI_CONFIG,

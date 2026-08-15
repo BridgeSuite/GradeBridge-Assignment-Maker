@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
+import { Assignment, AnswerSpace, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService } from '../services/exportService';
 import {
@@ -18,8 +18,10 @@ import {
   strandedSubsectionLabels,
   typeAllowedInMode
 } from '../services/inputModeService';
+import { ANSWER_SPACE_MM, defaultAnswerSpace } from '../services/templateLayout';
+import { derivePageFormatId } from '../services/qrPayload';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
-import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, PenLine, Keyboard } from 'lucide-react';
+import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, PenLine, Keyboard, QrCode } from 'lucide-react';
 
 const DEFAULT_AI_GRADING_CONFIG: AiGradingConfig = { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 };
 
@@ -110,6 +112,20 @@ const Editor: React.FC = () => {
   // Assignments saved before handwritten support have no inputMode — they are electronic.
   const inputMode: InputMode = assignment.inputMode ?? 'electronic';
 
+  // What the QR would carry if the author leaves the Template ID blank.
+  const [qrIdPreview, setQrIdPreview] = useState('');
+  useEffect(() => {
+    let live = true;
+    if (inputMode !== 'handwritten' || (!assignment.courseCode && !assignment.title)) {
+      setQrIdPreview('');
+      return;
+    }
+    derivePageFormatId(assignment.courseCode, assignment.title)
+      .then(id => { if (live) setQrIdPreview(id); })
+      .catch(() => { if (live) setQrIdPreview(''); });
+    return () => { live = false; };
+  }, [inputMode, assignment.courseCode, assignment.title]);
+
   // Course public key is edited as raw text and only committed to the assignment once it validates.
   const [keyInput, setKeyInput] = useState('');
   const [keyStatus, setKeyStatus] = useState<CoursePublicKeyValidation | null>(null);
@@ -175,6 +191,29 @@ const Editor: React.FC = () => {
 
     setKeyStatus(result);
     setCourseKeyOnAssignment(result.ok ? pem : null);
+  };
+
+  /**
+   * Emit the printable page-format template and its sidecar map. The generator
+   * runs the spec 8.7 self-test and refuses to produce a non-compliant template,
+   * so a failure here is surfaced verbatim rather than swallowed — a template
+   * that registers but crops the wrong rectangles is worse than no template.
+   */
+  const handleDownloadQrTemplate = async () => {
+    try {
+      const result = await exportService.downloadQrTemplate(assignment);
+      const warnings = result.selfTest.warnings;
+      alert(
+        `QR template ready — ${result.pageCount} page${result.pageCount === 1 ? '' : 's'}, ` +
+        `${result.rows.length} answer region${result.rows.length === 1 ? '' : 's'}.\n\n` +
+        `Assignment id in the QR: ${result.assignmentId}\nLayout id: ${result.layoutId}\n\n` +
+        `Two files downloaded — keep them together:\n  ${result.pdfFilename}\n  ${result.csvFilename}` +
+        (warnings.length ? `\n\nNotes:\n${warnings.map(w => `  • ${w}`).join('\n')}` : '')
+      );
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Failed to build the QR template.');
+    }
   };
 
   const handleSave = async () => {
@@ -416,6 +455,12 @@ const Editor: React.FC = () => {
             <Lock className="w-4 h-4 mr-2" />
             Grader Doc
           </Button>
+          {inputMode === 'handwritten' && (
+            <Button variant="secondary" onClick={handleDownloadQrTemplate}>
+              <QrCode className="w-4 h-4 mr-2" />
+              QR Template
+            </Button>
+          )}
           <Button variant="secondary" onClick={() => navigate('/')}>Cancel</Button>
           <Button onClick={handleSave}>
             <Save className="w-4 h-4 mr-2" />
@@ -464,6 +509,26 @@ const Editor: React.FC = () => {
                     : 'Electronic assignment — students type answers and upload images. Sub-parts can be Electronic text, Image, Text + Image, or AI graded.'}
                   {' '}Set this before adding questions; changing it later converts any sub-part the new mode cannot express.
                 </p>
+                {inputMode === 'handwritten' && (
+                  <div className="mt-3 pt-3 border-t border-academic-200">
+                    <label className="block text-xs font-medium text-academic-700 mb-1">
+                      Template ID <span className="font-normal text-academic-500">— goes in the printed QR code</span>
+                    </label>
+                    <input
+                      value={assignment.pageFormatId ?? ''}
+                      placeholder={qrIdPreview ? `${qrIdPreview} (derived)` : 'derived from course code + title'}
+                      onChange={e => setAssignment({
+                        ...assignment,
+                        pageFormatId: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || undefined,
+                      })}
+                      className="w-56 text-sm border border-academic-300 rounded px-2 py-1 font-mono uppercase focus:outline-none focus:border-academic-500"
+                    />
+                    <p className="text-xs text-academic-500 mt-1 leading-relaxed">
+                      Up to 12 characters, A–Z and 0–9. Must be unique across the course — the Submission app uses it
+                      to find this assignment's layout map. Leave blank to derive one automatically.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
             <Input
@@ -667,23 +732,57 @@ const Editor: React.FC = () => {
 
                      {sub.submissionType === SubmissionType.HANDWRITTEN ? (
                        /* Handwritten branch — AI (OCR + grade) or Human (TA grades the crop). No page count. */
-                       ([
-                         { label: 'AI',    mode: 'ai'    as const },
-                         { label: 'Human', mode: 'human' as const },
-                       ]).map(({ label, mode }) => (
+                       <>
+                         {([
+                           { label: 'AI',    mode: 'ai'    as const },
+                           { label: 'Human', mode: 'human' as const },
+                         ]).map(({ label, mode }) => (
+                           <button
+                             key={mode}
+                             type="button"
+                             onClick={() => updateSubsection(pIndex, sIndex, { handwrittenGradingMode: mode })}
+                             className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
+                               (sub.handwrittenGradingMode ?? 'ai') === mode
+                                 ? 'bg-academic-700 text-white border-academic-700'
+                                 : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                             }`}
+                           >
+                             {label}
+                           </button>
+                         ))}
+
+                         {/* Printed-template controls: how much room this part gets on the
+                             QR template, and whether it is a sketch. Both only affect the
+                             printed sheet and the layout map. */}
+                         <span className="text-xs text-academic-300 mx-1">|</span>
+                         <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Writing space:</span>
+                         <select
+                           value={sub.answerSpace ?? ''}
+                           onChange={e => updateSubsection(pIndex, sIndex, {
+                             answerSpace: (e.target.value || undefined) as AnswerSpace | undefined,
+                           })}
+                           className="text-xs border border-academic-300 rounded px-2 py-1 bg-white focus:outline-none focus:border-academic-500"
+                           title="Height of this part's answer area on the printed template"
+                         >
+                           <option value="">Auto ({ANSWER_SPACE_MM[defaultAnswerSpace(sub)]} mm)</option>
+                           <option value="short">Short ({ANSWER_SPACE_MM.short} mm)</option>
+                           <option value="medium">Medium ({ANSWER_SPACE_MM.medium} mm)</option>
+                           <option value="tall">Tall ({ANSWER_SPACE_MM.tall} mm)</option>
+                           <option value="xtall">Extra tall ({ANSWER_SPACE_MM.xtall} mm)</option>
+                         </select>
                          <button
-                           key={mode}
                            type="button"
-                           onClick={() => updateSubsection(pIndex, sIndex, { handwrittenGradingMode: mode })}
+                           onClick={() => updateSubsection(pIndex, sIndex, { isDrawing: !sub.isDrawing })}
                            className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                             (sub.handwrittenGradingMode ?? 'ai') === mode
+                             sub.isDrawing
                                ? 'bg-academic-700 text-white border-academic-700'
                                : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
                            }`}
+                           title="Sketch part — sized for a drawing and flagged is_drawing in the layout map"
                          >
-                           {label}
+                           Sketch
                          </button>
-                       ))
+                       </>
                      ) : sub.submissionType === SubmissionType.IMAGE ? (
                        /* Image branch */
                        <>
