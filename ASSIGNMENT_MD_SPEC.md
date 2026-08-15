@@ -106,7 +106,26 @@ Notes:
 
 ---
 
-## 6. Grading instructions (blockquotes)
+## 6. Math notation
+
+Descriptions and other rendered text support LaTeX via KaTeX. Delimiters, verified against
+`components/FormattedText.tsx` (preview) and `services/exportService.ts` (PDF export):
+
+- Inline: `$...$`. Display: `$$...$$`.
+- Single-dollar inline is supported because the app splits with its own regex
+  (`/(\$\$[\s\S]+?\$\$|\$[^\$]+?\$)/g`) and calls `katex.renderToString`, rather than using KaTeX
+  auto-render.
+- Every `$` must be paired, an inline span may not contain a `$`, and a literal dollar in prose is
+  mis-parsed. On a render error the raw text is shown with its delimiters.
+- The Student Submission app (`components/KatexRenderer.tsx`) uses the same delimiters, so authored
+  math displays identically to the student.
+
+Use LaTeX for structured math (subscripts, fractions, exponentials, Greek, units); plain text is
+fine for a bare symbol.
+
+---
+
+## 7. Grading instructions (blockquotes)
 
 Attach grading guidance to a sub-part with a blockquote **immediately under** it. Two keys, and which one you use depends on how the sub-part is graded:
 
@@ -125,14 +144,14 @@ A `handwritten` (AI) sub-part should carry a `> grading_prompt:`; a `handwritten
 
 ---
 
-## 7. Round-trip and points
+## 8. Round-trip and points
 
 - **Export .md → Import Markdown is stable**: importing an exported file and re-exporting yields the same file. A legacy electronic file that has no `**Input:**` line round-trips unchanged.
 - On export, sub-part points are **normalised** to the assignment's target total (default 100), so the numbers you write are relative weights; the exported file shows the scaled values.
 
 ---
 
-## 8. Two complete examples
+## 9. Two complete examples
 
 **Electronic assignment (mixed mediums):**
 ```markdown

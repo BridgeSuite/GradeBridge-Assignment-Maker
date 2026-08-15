@@ -128,7 +128,7 @@ Two equivalent formats are supported — use whichever is more natural:
 Optional problem description shared across subsections.
 
 ### ({letter}) {Subsection Name} [{points} pts] [{type}]
-Subsection description. LaTeX supported.
+Subsection description. LaTeX supported (see Math notation).
 
 > grading_prompt: Rubric text here. (ai-graded subsections only)
 ```
@@ -136,7 +136,7 @@ Subsection description. LaTeX supported.
 **Flat single-subsection problems** (shorthand — points and type on the `##` line):
 ```markdown
 ## Problem {N}: {Problem Name} [{points} pts] [{type}]
-Subsection description. LaTeX supported.
+Subsection description. LaTeX supported (see Math notation).
 
 > grading_prompt: Rubric text here. (ai-graded subsections only)
 ```
@@ -157,6 +157,24 @@ The parser auto-promotes a flat problem into a single `(a)` subsection on import
 | `[ai-graded:medium]` | Medium free-text, AI graded | 100 word min; 4 grading bands |
 | `[ai-graded:long]` | Long free-text, AI graded | 150 word min; 5 grading bands |
 | `[ai-graded:formative]` | Report section, AI formative feedback | No enforced word min; no score emitted |
+
+### Math notation (LaTeX)
+
+Subsection descriptions support LaTeX math, rendered with KaTeX.
+
+- **Inline:** single dollars, `$...$` — e.g. `$V_x = 6\,\text{V}$`, `$I = 0.1\,V_x$`.
+- **Display:** double dollars, `$$...$$` — a centered block equation.
+- Use LaTeX for anything with structure: subscripts `$V_x$`, fractions `$\frac{17}{7}$`,
+  exponentials `$e^{-0.2(t-8)}$`, Greek and units `$\Omega$`. Plain text is fine for a bare symbol
+  with no structure.
+- Every `$` must be paired; an inline expression may not contain a `$`; a literal dollar sign in
+  prose will be mis-parsed as a delimiter. If an expression is invalid it renders as raw text with
+  its delimiters (visible, not dropped), so keep the LaTeX valid.
+
+Single-dollar inline works because rendering uses a custom splitter (`components/FormattedText.tsx`),
+not KaTeX auto-render. The exported PDF (`services/exportService.ts`) uses the same `$...$` and
+`$$...$$` delimiters, and the Student Submission app uses the same convention, so what you preview is
+what the student sees.
 
 ### Grading Prompt Format
 
