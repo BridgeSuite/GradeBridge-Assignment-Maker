@@ -116,7 +116,9 @@ Descriptions and other rendered text support LaTeX via KaTeX. Delimiters, verifi
   (`/(\$\$[\s\S]+?\$\$|\$[^\$]+?\$)/g`) and calls `katex.renderToString`, rather than using KaTeX
   auto-render.
 - Every `$` must be paired, an inline span may not contain a `$`, and a literal dollar in prose is
-  mis-parsed. On a render error the raw text is shown with its delimiters.
+  mis-parsed. Invalid LaTeX is never dropped silently: KaTeX flags the offending part inline
+  (`throwOnError: false`), and the raw text is shown with its delimiters only if rendering fails
+  outright.
 - The Student Submission app (`components/KatexRenderer.tsx`) uses the same delimiters, so authored
   math displays identically to the student.
 

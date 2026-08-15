@@ -168,8 +168,9 @@ Subsection descriptions support LaTeX math, rendered with KaTeX.
   exponentials `$e^{-0.2(t-8)}$`, Greek and units `$\Omega$`. Plain text is fine for a bare symbol
   with no structure.
 - Every `$` must be paired; an inline expression may not contain a `$`; a literal dollar sign in
-  prose will be mis-parsed as a delimiter. If an expression is invalid it renders as raw text with
-  its delimiters (visible, not dropped), so keep the LaTeX valid.
+  prose will be mis-parsed as a delimiter. Invalid LaTeX is never dropped silently: KaTeX flags the
+  offending part in the rendered output (rendering uses `throwOnError: false`), and if rendering fails
+  outright the raw expression is shown with its delimiters. Keep the LaTeX valid.
 
 Single-dollar inline works because rendering uses a custom splitter (`components/FormattedText.tsx`),
 not KaTeX auto-render. The exported PDF (`services/exportService.ts`) uses the same `$...$` and
