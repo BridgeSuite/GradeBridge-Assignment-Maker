@@ -407,7 +407,12 @@ const Editor: React.FC = () => {
             <FileDown className="w-4 h-4 mr-2" />
             Export .md
           </Button>
-          <Button variant="secondary" onClick={() => exportService.downloadGraderDoc(assignment)}>
+          <Button variant="secondary" onClick={() => {
+            exportService.downloadGraderDoc(assignment).catch(err => {
+              console.error(err);
+              alert('Failed to build the grader document.');
+            });
+          }}>
             <Lock className="w-4 h-4 mr-2" />
             Grader Doc
           </Button>

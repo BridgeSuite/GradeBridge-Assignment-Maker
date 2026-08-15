@@ -8,52 +8,21 @@
  * is the bug class that kept leaking `<<MATH_BLOCK_0>>` into .tex (and, via the
  * T1 `<<` ligature, `«MATH_BLOCK_0»` into the PDF compiled from it).
  *
- * Delimiter rules (documented in ASSIGNMENT_MD_SPEC.md §6, and identical to the
- * Student Submission app's components/KatexRenderer.tsx — keep them in lockstep):
- *   - inline `$...$`, display `$$...$$`
- *   - every `$` must be paired; an inline span may not contain a `$`
- *   - invalid LaTeX is never dropped: KaTeX renders its own inline error
- *     (`throwOnError: false`), and only a hard failure falls back to raw text.
+ * The delimiters themselves live in services/mathDelimiters.ts, which is
+ * mirrored byte-for-byte into the Student Submission app so authored math
+ * renders identically on both sides. Everything below is Maker-only: how each
+ * output turns those segments into HTML, LaTeX, plain text or pixels.
+ *
+ * Invalid LaTeX is never dropped: KaTeX renders its own inline error
+ * (`throwOnError: false`), and only a hard failure falls back to raw text.
  */
 
 import katex from 'katex';
 import katexCss from 'katex/dist/katex.min.css?raw';
+import { splitMath } from './mathDelimiters';
 
-// -----------------------------------------------------
-// The splitter
-// -----------------------------------------------------
-
-export type MathSeg =
-  | { kind: 'text'; value: string }
-  | { kind: 'inline'; tex: string }
-  | { kind: 'display'; tex: string };
-
-/**
- * The one delimiter regex of record. Byte-identical to the Student Submission
- * app's splitter so authored math renders the same on both sides.
- */
-export const MATH_DELIMITER_RE = /(\$\$[\s\S]+?\$\$|\$[^$]+?\$)/g;
-
-export const splitMath = (input: string): MathSeg[] => {
-  if (!input) return [];
-  const segs: MathSeg[] = [];
-  // String.split with a capturing group keeps the delimiters as their own parts.
-  for (const part of input.split(MATH_DELIMITER_RE)) {
-    if (!part) continue;
-    if (part.length >= 4 && part.startsWith('$$') && part.endsWith('$$')) {
-      segs.push({ kind: 'display', tex: part.slice(2, -2) });
-    } else if (part.length >= 3 && part.startsWith('$') && part.endsWith('$')) {
-      segs.push({ kind: 'inline', tex: part.slice(1, -1) });
-    } else {
-      segs.push({ kind: 'text', value: part });
-    }
-  }
-  return segs;
-};
-
-/** True when the text has at least one math span the emitters would render. */
-export const hasMath = (input: string): boolean =>
-  !!input && splitMath(input).some(s => s.kind !== 'text');
+export { MATH_DELIMITER_RE, splitMath, hasMath, segToSource } from './mathDelimiters';
+export type { MathSeg } from './mathDelimiters';
 
 // -----------------------------------------------------
 // HTML (app preview, assignment.html, grader document)
@@ -96,13 +65,31 @@ export const toHtml = (input: string): string => {
 };
 
 /**
- * KaTeX's own stylesheet, inlined so an exported file lays math out correctly
- * with no network. Only the glyph fonts stay on the CDN (embedding all 20 woff2
- * files would add ~340 KB of base64 to every export); without them the layout is
- * still correct and the browser substitutes a serif face.
+ * KaTeX's own stylesheet with every glyph font embedded as a data URI, so an
+ * exported file renders correctly with no network of any kind. Two consumers
+ * need it: the HTML exports, and the PDF rasteriser (an SVG <foreignObject>
+ * image may not fetch anything, so a linked font would silently fall back).
+ *
+ * ~360 KB. The font module is imported dynamically so it lands in its own chunk
+ * and is fetched only on the first export; the result is cached per session.
  */
-export const katexStylesheet = (): string =>
-  katexCss.replace(/url\(fonts\//g, 'url(https://cdn.jsdelivr.net/npm/katex@0.16/dist/fonts/');
+let embeddedCss: Promise<string> | null = null;
+
+export const katexStylesheet = (): Promise<string> => {
+  if (embeddedCss) return embeddedCss;
+  embeddedCss = (async () => {
+    const { KATEX_FONT_DATA_URIS } = await import('./katexFonts');
+    return katexCss
+      // The woff/ttf fallbacks would still point off-document — drop them and
+      // leave woff2, which every browser that can run this app supports.
+      .replace(/,?\s*url\(fonts\/[^)]+\.(?:woff|ttf)\)\s*format\(["'][^"']*["']\)/g, '')
+      .replace(/url\(fonts\/([^)]+\.woff2)\)/g, (whole, file: string) => {
+        const dataUri = KATEX_FONT_DATA_URIS[file];
+        return dataUri ? `url(${dataUri})` : whole;
+      });
+  })();
+  return embeddedCss;
+};
 
 // -----------------------------------------------------
 // Raster (PDF) — the same KaTeX HTML, drawn to a canvas
@@ -124,56 +111,6 @@ export interface RasterOptions {
   scale?: number;
 }
 
-const fontUrlPattern = () => /url\(["']?([^"')]+\.woff2)["']?\)/g;
-
-/** Every KaTeX rule the running page has, whatever URLs the build gave them. */
-const katexCssFromDocument = (): string => {
-  let css = '';
-  for (const sheet of Array.from(document.styleSheets)) {
-    let rules: CSSRuleList;
-    try { rules = sheet.cssRules; } catch { continue; } // cross-origin sheet
-    for (const rule of Array.from(rules)) {
-      if (/katex/i.test(rule.cssText)) css += rule.cssText + '\n';
-    }
-  }
-  return css;
-};
-
-const blobToDataUrl = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-
-let embeddedCss: Promise<string> | null = null;
-
-/**
- * KaTeX's stylesheet with the font files embedded as data URIs. An SVG image is
- * not allowed to fetch anything, so without this the raster would fall back to
- * a system serif. Built once per session (~360 KB) and cached.
- */
-export const katexStylesheetWithFonts = (): Promise<string> => {
-  if (embeddedCss) return embeddedCss;
-  embeddedCss = (async () => {
-    let css = typeof document !== 'undefined' ? katexCssFromDocument() : '';
-    if (!fontUrlPattern().test(css)) css = katexStylesheet();
-
-    const urls = [...new Set([...css.matchAll(fontUrlPattern())].map(m => m[1]))];
-    await Promise.all(urls.map(async url => {
-      try {
-        const dataUrl = await blobToDataUrl(await (await fetch(url)).blob());
-        css = css.split(url).join(dataUrl);
-      } catch {
-        // Leave the URL as-is: the glyphs degrade, the layout does not.
-      }
-    }));
-    // Drop the woff/ttf fallbacks — they would still point off-document.
-    return css.replace(/url\(["']?[^"')]+\.(?:woff|ttf)["']?\)\s*format\(["'][^"']*["']\)\s*,?/g, '');
-  })();
-  return embeddedCss;
-};
 
 /**
  * Render authored text (prose + math) to a canvas. Returns null wherever there
@@ -218,7 +155,7 @@ export const renderTextToCanvas = async (
   }
   if (!heightPx) return null;
 
-  const css = await katexStylesheetWithFonts();
+  const css = await katexStylesheet();
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${opts.widthPx.toFixed(2)}" height="${heightPx}">` +
       '<foreignObject width="100%" height="100%">' +

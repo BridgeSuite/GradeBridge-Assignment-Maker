@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node tests/run-tests.mjs",
+    "test": "node tests/run-tests.mjs && node tests/bundle-tests.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "predeploy": "npm run build",

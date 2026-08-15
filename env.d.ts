@@ -6,3 +6,10 @@ declare module '*?raw' {
   const src: string;
   export default src;
 }
+
+// `?dataurl` is our own Vite plugin (see vite.config.ts): the asset's bytes as a
+// base64 data URI. services/katexFonts.ts embeds KaTeX's glyph fonts with it.
+declare module '*?dataurl' {
+  const src: string;
+  export default src;
+}
