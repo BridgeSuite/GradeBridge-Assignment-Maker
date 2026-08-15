@@ -1,8 +1,8 @@
-# coursePublicKey (gb2) tests
+# Assignment Maker tests
 
 `npm test` runs `run-tests.mjs`. Plain Node (>= 18), no test framework: it
 transpiles the source with the esbuild that ships inside Vite and runs it
-against the same WebCrypto the browser uses. 30 checks:
+against the same WebCrypto the browser uses.
 
 - **`validateCoursePublicKey()`** — the fixture key reports 2048-bit; 2048 and
   4096 pass clean; an off-contract 3072-bit key warns but is not hard-blocked;
@@ -16,9 +16,27 @@ against the same WebCrypto the browser uses. 30 checks:
   `encryptJsonGb2()`, and the fixture private key opens the result. This is the
   check that would catch the two apps drifting apart.
 
-`exportService.ts` imports jspdf / jszip / file-saver at module scope; none are
-on the `buildAssignmentSpec` path and jspdf does not load outside a browser, so
-the runner stubs them.
+- **Handwritten input mode** — the `[handwritten]` / `[handwritten:human]` media
+  round-trip through `.md` export, `.md` import and `grading_rubric.json`, and a
+  pre-handwritten electronic `.md` still round-trips byte-for-byte.
+- **Math rendering** (§7) — the regression suite for the recurring
+  `<<MATH_BLOCK_N>>` leak. Over `fixtures/EEC1_MathFixture.md` it asserts that no
+  output contains a placeholder token in any form, that `.tex` keeps `$...$` /
+  `$$...$$` verbatim while escaping only the surrounding prose, that
+  `assignment.html` and the grader document carry real KaTeX output and no
+  MathJax, that a real jsPDF document degrades to WinAnsi-safe text with no
+  UTF-16 strings, and that `.md` round-trips every math span byte-for-byte.
+  Anything that touches escaping must keep this green.
+
+`exportService.ts` imports jspdf / jszip / file-saver at module scope. The main
+load stubs all three; the math suite loads it a second time with a real jsPDF
+(which does run under Node) so it can inspect an actual PDF, stubbing only
+file-saver. The runner also teaches esbuild the `?raw` import that
+`mathRender.ts` uses to inline KaTeX's stylesheet.
+
+The PDF's math **rasteriser** needs a browser and so is not covered here — Node
+exercises the plain-text fallback. It was verified in Chrome against the same
+fixture (see "UI verification" below).
 
 ## The fixture
 
@@ -48,3 +66,14 @@ exported specs will carry it"; a private key, a PKCS#1 key, garbage, and a
 truncated paste each show their specific error; an empty box reports the gb1
 default. The key saves to localStorage, survives a reload into the editor, and
 re-validates on load without needing another blur.
+
+Math rendering was exercised on 2026-08-15 (Chrome, `npm run dev`) by importing
+`fixtures/EEC1_MathFixture.md` and generating every output:
+
+- `assignment.pdf` / `template.pdf` — fractions, roots, sub/superscripts, Greek
+  and the display equation all typeset correctly; escaped set braces survive;
+  the answer-region box still fills the page. Both PDFs in ~0.7 s.
+- `assignment.html` — renders offline-correct with the inlined KaTeX stylesheet;
+  prose escapes (`_`, `&`, `#`, `\`) intact.
+- `assignment.tex` — compiled with `pdflatex` (TeX Live 2025): no errors, no
+  placeholder token, no `«»` guillemets, all math typeset natively.

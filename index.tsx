@@ -1,5 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+// Bundled rather than loaded from a CDN: the preview must render math offline,
+// and the PDF exporter rasterises KaTeX output from this same stylesheet.
+import 'katex/dist/katex.min.css';
 import App from './App';
 
 const rootElement = document.getElementById('root');

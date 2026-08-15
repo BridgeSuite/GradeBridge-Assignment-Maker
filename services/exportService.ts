@@ -1,6 +1,7 @@
 
 import { Assignment, SubmissionType } from '../types';
 import { encryptJson, normalizeCoursePublicKey, validateCoursePublicKey } from './cryptoService';
+import { escapeHtml, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
@@ -153,64 +154,149 @@ const convertToStudentSubmissionFormat = (assignment: Assignment): StudentSubmis
   };
 };
 
-// Strip LaTeX math delimiters for plain-text PDF rendering (jsPDF cannot render math)
-const stripLatexForPDF = (text: string): string => {
-  if (!text) return '';
-  return text
-    .replace(/\$\$([\s\S]*?)\$\$/g, '$1')
-    .replace(/\$(.*?)\$/g, '$1');
+// =====================================================
+// PDF EXPORT
+// =====================================================
+// jsPDF cannot typeset LaTeX, so any block that contains math is rendered by
+// the shared KaTeX renderer (services/mathRender.ts — the same one the HTML
+// export and the app preview use), rasterised, and placed as an image. Blocks
+// without math stay vector text, so the common case keeps crisp, selectable
+// output. If rasterisation is unavailable (no DOM, the browser refused the
+// image), the block falls back to toPdfText() — readable plain text, never a
+// leaked token.
+//
+// Every y in this section is the TOP of the block, for text and images alike;
+// jsPDF's default is the text baseline, hence the explicit `baseline: 'top'`.
+
+const PX_PER_MM = 96 / 25.4;
+const RASTER_SCALE = 3;          // ~288 dpi
+const PAGE_BOTTOM_MARGIN = 20;   // mm
+const DESC_PREVIEW_LINES = 2;    // problem description repeats on every page — keep it short
+const NAME_ID_LINE = 'Student Name: ______________________________   Student ID: __________________';
+const TOP: { baseline: 'top' } = { baseline: 'top' };
+
+interface RichStyle {
+  fontPt: number;
+  bold?: boolean;
+  italic?: boolean;
+  grey?: number; // jsPDF greyscale 0–255; undefined means black
+}
+
+const applyStyle = (doc: jsPDF, style: RichStyle) => {
+  doc.setFont('times', style.bold ? 'bold' : style.italic ? 'italic' : 'normal');
+  doc.setFontSize(style.fontPt);
+  doc.setTextColor(style.grey ?? 0);
 };
 
-// Helper to add text with automatic page wrapping
-const addWrappedText = (doc: jsPDF, text: string, x: number, y: number, maxWidth: number, lineHeight: number, margin: number): number => {
-  const lines = doc.splitTextToSize(text, maxWidth);
+/** Copy a horizontal band out of a canvas so a tall block can span pages. */
+const sliceCanvas = (src: HTMLCanvasElement, topPx: number, heightPx: number): string => {
+  const slice = document.createElement('canvas');
+  slice.width = src.width;
+  slice.height = Math.max(1, Math.round(heightPx));
+  const ctx = slice.getContext('2d');
+  if (!ctx) return src.toDataURL('image/png');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, slice.width, slice.height);
+  ctx.drawImage(src, 0, topPx, src.width, slice.height, 0, 0, src.width, slice.height);
+  return slice.toDataURL('image/png');
+};
+
+/** Starts a new page carrying the name/ID line, and returns the y to resume at. */
+type PageBreak = () => number;
+
+// Vector text with automatic page wrapping.
+const addWrappedText = (
+  doc: jsPDF, text: string, x: number, y: number, maxWidth: number, lineHeight: number, newPage: PageBreak
+): number => {
+  const lines: string[] = doc.splitTextToSize(text, maxWidth);
   const pageHeight = doc.internal.pageSize.height;
-  
   let currentY = y;
-  lines.forEach((line: string) => {
-    if (currentY > pageHeight - 20) {
-      doc.addPage();
-      
-      // Header on wrapped pages - consistent position
-      doc.setFont("times", "normal");
-      doc.setFontSize(10);
-      doc.text("Student Name: ______________________________   Student ID: __________________", margin, 15);
-      
-      currentY = 30;
-    }
-    doc.text(line, x, currentY);
+  for (const line of lines) {
+    if (currentY > pageHeight - PAGE_BOTTOM_MARGIN) currentY = newPage();
+    doc.text(line, x, currentY, TOP);
     currentY += lineHeight;
-  });
+  }
   return currentY;
 };
 
-const generatePDFContent = (doc: jsPDF, assignment: Assignment, isTemplate: boolean) => {
+/**
+ * Place one authored text block. Math-bearing blocks go through KaTeX; plain
+ * blocks stay vector text. Either way the caller gets back the new y.
+ */
+const addRichText = async (
+  doc: jsPDF, text: string, x: number, y: number,
+  maxWidthMm: number, lineHeightMm: number, style: RichStyle, newPage: PageBreak
+): Promise<number> => {
+  if (!text) return y;
+  const pageHeight = doc.internal.pageSize.height;
+
+  if (hasMath(text)) {
+    const grey = style.grey ?? 0;
+    const canvas = await renderTextToCanvas(text, {
+      widthPx: maxWidthMm * PX_PER_MM,
+      fontSizePx: style.fontPt * 96 / 72,
+      lineHeightPx: lineHeightMm * PX_PER_MM,
+      bold: style.bold,
+      italic: style.italic,
+      color: `rgb(${grey},${grey},${grey})`,
+      scale: RASTER_SCALE,
+    });
+    if (canvas) {
+      const pxPerMm = RASTER_SCALE * PX_PER_MM;
+      let takenPx = 0;
+      while (takenPx < canvas.height) {
+        let availableMm = pageHeight - PAGE_BOTTOM_MARGIN - y;
+        if (availableMm < lineHeightMm * 2) {
+          y = newPage();
+          availableMm = pageHeight - PAGE_BOTTOM_MARGIN - y;
+        }
+        const slicePx = Math.min(availableMm * pxPerMm, canvas.height - takenPx);
+        const sliceMm = slicePx / pxPerMm;
+        doc.addImage(sliceCanvas(canvas, takenPx, slicePx), 'PNG', x, y, maxWidthMm, sliceMm, undefined, 'FAST');
+        y += sliceMm;
+        takenPx += slicePx;
+        if (takenPx < canvas.height) y = newPage();
+      }
+      applyStyle(doc, style);
+      return y;
+    }
+  }
+
+  applyStyle(doc, style);
+  return addWrappedText(doc, toPdfText(text), x, y, maxWidthMm, lineHeightMm, newPage);
+};
+
+const generatePDFContent = async (doc: jsPDF, assignment: Assignment, isTemplate: boolean) => {
   const pageWidth = doc.internal.pageSize.width;
   const pageHeight = doc.internal.pageSize.height;
   const margin = 20;
   const contentWidth = pageWidth - (margin * 2);
-  
+
+  const nameIdLine = () => {
+    doc.setFont('times', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text(NAME_ID_LINE, margin, 15, TOP);
+  };
+  const newPage: PageBreak = () => {
+    doc.addPage();
+    nameIdLine();
+    return 30;
+  };
+
   // --- COVER PAGE ---
-  
-  // Student Name/ID Fields - At the very top of the first page
-  doc.setFont("times", "normal");
-  doc.setFontSize(10);
-  doc.text("Student Name: ______________________________   Student ID: __________________", margin, 15);
-  
+
+  nameIdLine();
   let y = 30;
 
-  doc.setFont("times", "bold");
+  doc.setFont('times', 'bold');
   doc.setFontSize(18);
-  doc.text(`${assignment.courseCode}: ${assignment.title}`, margin, y);
-  y += 10;
+  doc.text(`${assignment.courseCode}: ${assignment.title}`, margin, y, TOP);
+  y += 20;
 
-  y += 10;
-
-  // Preamble
   if (assignment.preamble) {
-    doc.setFont("times", "italic");
-    doc.setFontSize(11);
-    y = addWrappedText(doc, stripLatexForPDF(assignment.preamble), margin, y, contentWidth, 6, margin);
+    y = await addRichText(doc, assignment.preamble, margin, y, contentWidth, 6,
+      { fontPt: 11, italic: true }, newPage);
     y += 10;
   }
 
@@ -218,10 +304,9 @@ const generatePDFContent = (doc: jsPDF, assignment: Assignment, isTemplate: bool
   // Each problem and subsection starts on a new page.
   // For Image types, we might generate multiple pages.
 
-  assignment.problems.forEach((prob, pIndex) => {
-    
-    prob.subsections.forEach((sub, sIndex) => {
-      
+  for (const [pIndex, prob] of assignment.problems.entries()) {
+    for (const [sIndex, sub] of prob.subsections.entries()) {
+
       // Determine how many pages this subsection gets.
       // TEXT_AND_IMAGE: 1 text page + N image pages.
       const isTextAndImageSub = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
@@ -233,113 +318,98 @@ const generatePDFContent = (doc: jsPDF, assignment: Assignment, isTemplate: bool
 
       for (let i = 0; i < pageCount; i++) {
         doc.addPage(); // STRICT PAGE BREAK FOR EVERY ITEM
-        
-        // Name and ID fields on every page - consistent position
-        doc.setFont("times", "normal");
-        doc.setFontSize(10);
-        doc.text("Student Name: ______________________________   Student ID: __________________", margin, 15);
-        
+        nameIdLine();
         y = 30;
 
         // Header: Problem info (Repeated on every page for clarity)
-        doc.setFont("times", "bold");
-        doc.setFontSize(14);
-        doc.text(`Problem ${pIndex + 1}: ${stripLatexForPDF(prob.name)}`, margin, y);
-        y += 7;
+        y = await addRichText(doc, `Problem ${pIndex + 1}: ${prob.name}`, margin, y, contentWidth, 7,
+          { fontPt: 14, bold: true }, newPage);
 
-        // Problem description (only on first page of the subsection, or repeated?
-        // Usually helpful to see it, but let's keep it compact if it's long.
-        // We will show it on the first page of the first subsection of the problem,
-        // OR just show it on every page to be safe for the student context).
+        // Problem description, kept compact — it repeats on every page of the problem.
         if (prob.description && y < 50) {
-             doc.setFont("times", "normal");
-             doc.setFontSize(10);
-             doc.setTextColor(100);
-             // Just show first line to save space if it's a repeat page
-             const cleanDesc = stripLatexForPDF(prob.description);
-             const descText = (cleanDesc.length > 100) ? cleanDesc.substring(0, 100) + "..." : cleanDesc;
-             doc.text(descText, margin, y);
-             doc.setTextColor(0);
-             y += 8;
+          const style: RichStyle = { fontPt: 10, grey: 100 };
+          applyStyle(doc, style);
+          const wrapped: string[] = doc.splitTextToSize(toPdfText(prob.description), contentWidth);
+          if (wrapped.length > DESC_PREVIEW_LINES) {
+            // Truncating rendered math would cut mid-expression, so a shortened
+            // description is always the plain-text form.
+            wrapped.slice(0, DESC_PREVIEW_LINES).forEach((line, n) => {
+              doc.text(n === DESC_PREVIEW_LINES - 1 ? `${line} ...` : line, margin, y + n * 5, TOP);
+            });
+            y += DESC_PREVIEW_LINES * 5 + 3;
+          } else {
+            y = await addRichText(doc, prob.description, margin, y, contentWidth, 5, style, newPage);
+            y += 3;
+          }
+          doc.setTextColor(0);
         }
 
         // Subsection Info
-        doc.setFont("times", "bold");
-        doc.setFontSize(12);
         const subLabel = String.fromCharCode(97 + sIndex); // a, b, c...
-
-        let title = `(${subLabel}) [${sub.points} pts] ${stripLatexForPDF(sub.name)}`;
+        let title = `(${subLabel}) [${sub.points} pts] ${sub.name}`;
         if (pageCount > 1) {
-            title += ` (Page ${i + 1} of ${pageCount})`;
+          title += ` (Page ${i + 1} of ${pageCount})`;
         }
-
-        doc.text(title, margin + 5, y);
-        y += 6;
+        y = await addRichText(doc, title, margin + 5, y, contentWidth - 5, 6,
+          { fontPt: 12, bold: true }, newPage);
 
         if (sub.description) {
-            doc.setFont("times", "normal");
-            doc.setFontSize(11);
-            y = addWrappedText(doc, stripLatexForPDF(sub.description), margin + 5, y, contentWidth - 5, 5, margin);
-            y += 5;
+          y = await addRichText(doc, sub.description, margin + 5, y, contentWidth - 5, 5,
+            { fontPt: 11 }, newPage);
+          y += 5;
         }
 
         // Submission Type Indicator
-        doc.setFont("courier", "normal");
+        doc.setFont('courier', 'normal');
         doc.setFontSize(9);
         doc.setTextColor(100);
-        doc.text(`[Submission: ${sub.submissionType}]`, margin + 5, y);
+        doc.text(`[Submission: ${sub.submissionType}]`, margin + 5, y, TOP);
         doc.setTextColor(0);
         y += 5;
 
         // Answer Region
         if (isTemplate) {
-            // Draw box taking up rest of page minus bottom margin
-            const bottomMargin = 20;
-            const boxHeight = pageHeight - y - bottomMargin;
-            
-            if (boxHeight > 20) {
-                doc.setDrawColor(200);
-                doc.rect(margin + 5, y, contentWidth - 5, boxHeight);
-                
-                doc.setFontSize(8);
-                doc.setTextColor(150);
-                const regionText = sub.submissionType === SubmissionType.IMAGE
-                    ? `Attach Image ${i + 1} Here`
-                    : isTextAndImageSub && i > 0
-                      ? `Attach Image ${i} Here`
-                      : "Gradescope Answer Region";
-                doc.text(regionText, margin + 7, y + 5);
-                doc.setTextColor(0);
-                doc.setDrawColor(0);
-            }
+          // Draw box taking up rest of page minus bottom margin
+          const boxHeight = pageHeight - y - PAGE_BOTTOM_MARGIN;
+
+          if (boxHeight > 20) {
+            doc.setDrawColor(200);
+            doc.rect(margin + 5, y, contentWidth - 5, boxHeight);
+
+            doc.setFontSize(8);
+            doc.setTextColor(150);
+            const regionText = sub.submissionType === SubmissionType.IMAGE
+              ? `Attach Image ${i + 1} Here`
+              : isTextAndImageSub && i > 0
+                ? `Attach Image ${i} Here`
+                : 'Gradescope Answer Region';
+            doc.text(regionText, margin + 7, y + 4, TOP);
+            doc.setTextColor(0);
+            doc.setDrawColor(0);
+          }
         }
       }
-    });
-  });
+    }
+  }
 };
 
-const createPDF = (assignment: Assignment, type: 'student' | 'template'): Blob => {
+export const createPDF = async (assignment: Assignment, type: 'student' | 'template'): Promise<Blob> => {
   const doc = new jsPDF();
-  generatePDFContent(doc, assignment, type === 'template');
+  await generatePDFContent(doc, assignment, type === 'template');
   return doc.output('blob');
 };
 
-const generateHTML = (assignment: Assignment): string => {
-  return `
-<!DOCTYPE html>
+// Math is rendered here, at export time, by the same KaTeX call the app preview
+// makes — so the file shows the same thing the instructor saw, with no CDN
+// script and nothing async to fail.
+export const generateHTML = (assignment: Assignment): string => {
+  return `<!DOCTYPE html>
 <html>
 <head>
-<title>${assignment.courseCode} - ${assignment.title}</title>
-<script>
-  window.MathJax = {
-    tex: {
-      inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
-      displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']]
-    }
-  };
-</script>
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+<meta charset="utf-8">
+<title>${escapeHtml(`${assignment.courseCode} - ${assignment.title}`)}</title>
 <style>
+${katexStylesheet()}
 body { font-family: 'Georgia', serif; max-width: 800px; margin: 40px auto; line-height: 1.6; padding: 0 20px; color: #333; }
 h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
 .metadata { color: #666; font-style: italic; margin-bottom: 30px; }
@@ -347,23 +417,24 @@ h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
 .subsection { margin-left: 20px; margin-top: 20px; }
 .submission-type { font-family: monospace; background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
 .points { font-weight: bold; color: #0056b3; }
+.authored { white-space: pre-wrap; }
 </style>
 </head>
 <body>
-  <h1>${assignment.courseCode}: ${assignment.title}</h1>
-  <div class="metadata">${assignment.courseCode}</div>
-  <p>${assignment.preamble}</p>
+  <h1>${toHtml(`${assignment.courseCode}: ${assignment.title}`)}</h1>
+  <div class="metadata">${escapeHtml(assignment.courseCode)}</div>
+  <p class="authored">${toHtml(assignment.preamble || '')}</p>
 
   ${assignment.problems.map((p, i) => `
     <div class="problem">
-      <h3>Problem ${i + 1}: ${p.name}</h3>
-      <p>${p.description}</p>
+      <h3>Problem ${i + 1}: ${toHtml(p.name)}</h3>
+      <p class="authored">${toHtml(p.description || '')}</p>
       ${p.subsections.map((s, j) => `
         <div class="subsection">
-          <h4>(${String.fromCharCode(97 + j)}) ${s.name} <span class="points">[${s.points} pts]</span></h4>
-          <p>${s.description}</p>
+          <h4>(${String.fromCharCode(97 + j)}) ${toHtml(s.name)} <span class="points">[${s.points} pts]</span></h4>
+          <p class="authored">${toHtml(s.description || '')}</p>
           <div class="submission-type">
-            Submission: ${s.submissionType}
+            Submission: ${escapeHtml(s.submissionType)}
             ${s.submissionType === 'Image' && s.maxImages ? `(Max ${s.maxImages} pages)` : ''}
           </div>
         </div>
@@ -380,42 +451,12 @@ h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
 // =====================================================
 // Generates a compilable .tex file that instructors can edit
 
-// Escape special LaTeX characters (but preserve math delimiters)
-const escapeLatex = (text: string): string => {
-  if (!text) return '';
+// Prose is escaped and math is passed through verbatim by toLatexBody(), so
+// pdflatex typesets `$...$` natively. There is no placeholder token to corrupt:
+// the `<<MATH_BLOCK_N>>` scheme this replaced was rewritten by its own
+// underscore escape and leaked into every export.
 
-  // First, protect math content by replacing $ delimiters temporarily
-  const mathBlocks: string[] = [];
-  let protected_text = text.replace(/\$\$[\s\S]*?\$\$/g, (match) => {
-    mathBlocks.push(match);
-    return `<<MATH_BLOCK_${mathBlocks.length - 1}>>`;
-  });
-  protected_text = protected_text.replace(/\$[^$]+\$/g, (match) => {
-    mathBlocks.push(match);
-    return `<<MATH_BLOCK_${mathBlocks.length - 1}>>`;
-  });
-
-  // Escape LaTeX special characters (outside math)
-  protected_text = protected_text
-    .replace(/\\/g, '\\textbackslash{}')
-    .replace(/&/g, '\\&')
-    .replace(/%/g, '\\%')
-    .replace(/#/g, '\\#')
-    .replace(/_/g, '\\_')
-    .replace(/\{/g, '\\{')
-    .replace(/\}/g, '\\}')
-    .replace(/~/g, '\\textasciitilde{}')
-    .replace(/\^/g, '\\textasciicircum{}');
-
-  // Restore math blocks
-  mathBlocks.forEach((block, idx) => {
-    protected_text = protected_text.replace(`<<MATH_BLOCK_${idx}>>`, block);
-  });
-
-  return protected_text;
-};
-
-const generateLaTeX = (assignment: Assignment): string => {
+export const generateLaTeX = (assignment: Assignment): string => {
   // Calculate total points
   const totalPoints = assignment.problems.reduce((sum, prob) =>
     sum + prob.subsections.reduce((s, sub) => s + sub.points, 0), 0
@@ -447,8 +488,8 @@ const generateLaTeX = (assignment: Assignment): string => {
 \\geometry{margin=1in}
 \\pagestyle{fancy}
 \\fancyhf{}
-\\lhead{${escapeLatex(assignment.courseCode)}}
-\\rhead{${escapeLatex(assignment.title)}}
+\\lhead{${toLatexBody(assignment.courseCode)}}
+\\rhead{${toLatexBody(assignment.title)}}
 \\cfoot{\\thepage}
 
 % ---- Custom Commands ----
@@ -460,7 +501,7 @@ const generateLaTeX = (assignment: Assignment): string => {
 
 % ---- Title Section ----
 \\begin{center}
-{\\LARGE\\bfseries ${escapeLatex(assignment.courseCode)}: ${escapeLatex(assignment.title)}}\\\\[0.5em]
+{\\LARGE\\bfseries ${toLatexBody(assignment.courseCode)}: ${toLatexBody(assignment.title)}}\\\\[0.5em]
 {\\large Total Points: ${totalPoints}}
 \\end{center}
 
@@ -476,7 +517,7 @@ const generateLaTeX = (assignment: Assignment): string => {
   // Preamble
   if (assignment.preamble) {
     latex += `% ---- Preamble / Instructions ----
-\\noindent\\textit{${escapeLatex(assignment.preamble)}}
+\\noindent\\textit{${toLatexBody(assignment.preamble)}}
 
 \\vspace{1.5em}
 \\hrule
@@ -492,12 +533,12 @@ const generateLaTeX = (assignment: Assignment): string => {
     latex += `% ============================================================
 % Problem ${pIndex + 1}
 % ============================================================
-\\section*{Problem ${pIndex + 1}: ${escapeLatex(prob.name)} \\hfill \\normalsize{(${problemPoints} points)}}
+\\section*{Problem ${pIndex + 1}: ${toLatexBody(prob.name)} \\hfill \\normalsize{(${problemPoints} points)}}
 
 `;
 
     if (prob.description) {
-      latex += `${escapeLatex(prob.description)}
+      latex += `${toLatexBody(prob.description)}
 
 `;
     }
@@ -506,12 +547,12 @@ const generateLaTeX = (assignment: Assignment): string => {
     prob.subsections.forEach((sub, sIndex) => {
       const subLabel = String.fromCharCode(97 + sIndex); // a, b, c...
 
-      latex += `\\subsection*{(${subLabel}) ${escapeLatex(sub.name)} \\pts{${sub.points}}}
+      latex += `\\subsection*{(${subLabel}) ${toLatexBody(sub.name)} \\pts{${sub.points}}}
 
 `;
 
       if (sub.description) {
-        latex += `${escapeLatex(sub.description)}
+        latex += `${toLatexBody(sub.description)}
 
 `;
       }
@@ -699,7 +740,7 @@ export const assignmentToMd = (assignment: Assignment): string => {
 // CONFIDENTIAL — not distributed to students
 // =====================================================
 
-const generateGraderHTML = (assignment: Assignment): string => {
+export const generateGraderHTML = (assignment: Assignment): string => {
   const totalPoints = assignment.problems.reduce((sum, prob) =>
     sum + prob.subsections.reduce((s, sub) => s + sub.points, 0), 0
   );
@@ -716,13 +757,13 @@ const generateGraderHTML = (assignment: Assignment): string => {
       const isTextAndImageRubric = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
       let referenceBlock = '';
       if ((isAi || isAiHandwritten) && sub.aiGradingPrompt) {
-        referenceBlock = `<div class="ref-block ai-ref"><span class="ref-label">AI Rubric</span><p>${sub.aiGradingPrompt}</p></div>`;
+        referenceBlock = `<div class="ref-block ai-ref"><span class="ref-label">AI Rubric</span><p>${toHtml(sub.aiGradingPrompt)}</p></div>`;
       } else if (sub.graderNote) {
         const label = isImage ? 'What to look for'
           : isTextAndImageRubric ? 'Expected answer + what to look for in image'
           : isHandwritten ? 'Expected answer — grade from the marked region'
           : 'Expected answer';
-        referenceBlock = `<div class="ref-block human-ref"><span class="ref-label">${label}</span><p>${sub.graderNote}</p></div>`;
+        referenceBlock = `<div class="ref-block human-ref"><span class="ref-label">${label}</span><p>${toHtml(sub.graderNote)}</p></div>`;
       } else {
         referenceBlock = `<div class="ref-block empty-ref"><span class="ref-label">No grader note</span><p>Human review required — no reference answer provided.</p></div>`;
       }
@@ -739,11 +780,11 @@ const generateGraderHTML = (assignment: Assignment): string => {
         <div class="subsection">
           <div class="sub-header">
             <span class="sub-id">(${letter})</span>
-            <span class="sub-name">${sub.name}</span>
+            <span class="sub-name">${toHtml(sub.name)}</span>
             <span class="sub-pts">${sub.points} pts</span>
-            <span class="sub-type">${typeLabel}</span>
+            <span class="sub-type">${escapeHtml(typeLabel)}</span>
           </div>
-          ${sub.description ? `<p class="sub-desc">${sub.description}</p>` : ''}
+          ${sub.description ? `<p class="sub-desc">${toHtml(sub.description)}</p>` : ''}
           ${referenceBlock}
         </div>`;
     }).join('');
@@ -751,10 +792,10 @@ const generateGraderHTML = (assignment: Assignment): string => {
     return `
       <div class="problem">
         <div class="prob-header">
-          <span class="prob-num">Problem ${pIdx + 1}: ${prob.name}</span>
+          <span class="prob-num">Problem ${pIdx + 1}: ${toHtml(prob.name)}</span>
           <span class="prob-pts">${problemPoints} pts</span>
         </div>
-        ${prob.description ? `<p class="prob-desc">${prob.description}</p>` : ''}
+        ${prob.description ? `<p class="prob-desc">${toHtml(prob.description)}</p>` : ''}
         ${subsRows}
       </div>`;
   }).join('');
@@ -763,14 +804,9 @@ const generateGraderHTML = (assignment: Assignment): string => {
 <html>
 <head>
 <meta charset="utf-8">
-<title>GRADER DOCUMENT — ${assignment.courseCode}: ${assignment.title}</title>
-<script>
-  window.MathJax = {
-    tex: { inlineMath: [['$','$'],['\\\\(','\\\\)']], displayMath: [['$$','$$'],['\\\\[','\\\\]']] }
-  };
-</script>
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+<title>GRADER DOCUMENT — ${escapeHtml(`${assignment.courseCode}: ${assignment.title}`)}</title>
 <style>
+${katexStylesheet()}
   body { font-family: Georgia, serif; max-width: 900px; margin: 40px auto; line-height: 1.6; padding: 0 24px; color: #222; }
   .confidential-banner { background: #b91c1c; color: #fff; text-align: center; padding: 10px 0; font-weight: bold; font-size: 1.1em; letter-spacing: 0.05em; margin-bottom: 28px; border-radius: 4px; }
   h1 { font-size: 1.6em; border-bottom: 2px solid #333; padding-bottom: 8px; margin-bottom: 4px; }
@@ -786,7 +822,8 @@ const generateGraderHTML = (assignment: Assignment): string => {
   .sub-name { font-weight: bold; flex: 1; }
   .sub-pts { font-size: 0.9em; color: #555; white-space: nowrap; }
   .sub-type { font-size: 0.82em; font-family: monospace; background: #f0f0f0; padding: 1px 6px; border-radius: 3px; color: #444; }
-  .sub-desc { color: #555; font-size: 0.93em; margin: 2px 0 8px 28px; }
+  .sub-desc { color: #555; font-size: 0.93em; margin: 2px 0 8px 28px; white-space: pre-wrap; }
+  .prob-desc, .sub-name { white-space: pre-wrap; }
   .ref-block { margin: 8px 0 0 28px; padding: 10px 14px; border-radius: 4px; font-size: 0.93em; }
   .ref-label { display: inline-block; font-weight: bold; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
   .ai-ref { background: #eff6ff; border-left: 4px solid #2563eb; }
@@ -805,9 +842,9 @@ const generateGraderHTML = (assignment: Assignment): string => {
 </head>
 <body>
   <div class="confidential-banner">CONFIDENTIAL — INSTRUCTOR / TA USE ONLY — NOT FOR DISTRIBUTION</div>
-  <h1>${assignment.courseCode}: ${assignment.title} — Grader Reference</h1>
+  <h1>${toHtml(`${assignment.courseCode}: ${assignment.title}`)} — Grader Reference</h1>
   <div class="meta">Total: ${totalPoints} pts &nbsp;|&nbsp; Generated by GradeBridge Assignment Maker &nbsp;|&nbsp; Blue = AI rubric &nbsp;|&nbsp; Green = Answer key / What to look for</div>
-  ${assignment.preamble ? `<p><em>${assignment.preamble}</em></p>` : ''}
+  ${assignment.preamble ? `<p class="prob-desc"><em>${toHtml(assignment.preamble)}</em></p>` : ''}
   ${subsectionRows}
 </body>
 </html>`;
@@ -845,11 +882,11 @@ export const exportService = {
     zip.file('assignment_spec.json', await encryptJson(await buildAssignmentSpec(assignment)));
 
     // 2. Student PDF
-    const studentPdf = createPDF(assignment, 'student');
+    const studentPdf = await createPDF(assignment, 'student');
     zip.file('assignment.pdf', studentPdf);
 
     // 3. Template PDF
-    const templatePdf = createPDF(assignment, 'template');
+    const templatePdf = await createPDF(assignment, 'template');
     zip.file('template.pdf', templatePdf);
 
     // 4. HTML
