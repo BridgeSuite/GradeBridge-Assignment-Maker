@@ -108,22 +108,36 @@ Notes:
 
 ## 6. Math notation
 
-Descriptions and other rendered text support LaTeX via KaTeX. Delimiters, verified against
-`components/FormattedText.tsx` (preview) and `services/exportService.ts` (PDF export):
+Descriptions and other rendered text support LaTeX via KaTeX. **One module — `services/mathRender.ts`
+— owns the delimiters and every conversion.** The preview, `assignment.html`, the grader document,
+`assignment.tex` and `assignment.pdf` all call it, so math cannot render differently in one output
+than another.
 
 - Inline: `$...$`. Display: `$$...$$`.
 - Single-dollar inline is supported because the app splits with its own regex
-  (`/(\$\$[\s\S]+?\$\$|\$[^\$]+?\$)/g`) and calls `katex.renderToString`, rather than using KaTeX
-  auto-render.
+  (`/(\$\$[\s\S]+?\$\$|\$[^\$]+?\$)/g`, `splitMath()`) and calls `katex.renderToString`, rather than
+  using KaTeX auto-render.
 - Every `$` must be paired, an inline span may not contain a `$`, and a literal dollar in prose is
   mis-parsed. Invalid LaTeX is never dropped silently: KaTeX flags the offending part inline
   (`throwOnError: false`), and the raw text is shown with its delimiters only if rendering fails
   outright.
 - The Student Submission app (`components/KatexRenderer.tsx`) uses the same delimiters, so authored
-  math displays identically to the student.
+  math displays identically to the student. **Keep the two regexes byte-identical.**
+
+What each output does with a math span:
+
+| Output | Handling |
+|---|---|
+| App preview | `katex.renderToString` (bundled KaTeX, no CDN) |
+| `assignment.html`, grader document | Same call, at export time. KaTeX's stylesheet is inlined; only the glyph fonts come from the CDN. No MathJax, nothing async. |
+| `assignment.tex` | Prose is escaped, math is emitted **verbatim** so pdflatex typesets it natively |
+| `assignment.pdf` | The KaTeX HTML is rasterised through an SVG `<foreignObject>` and placed as an image; blocks with no math stay vector text. If rasterising is unavailable the block degrades to readable plain text (`6 Ohm`, `V_x`, `17/7`) — never a placeholder token. |
 
 Use LaTeX for structured math (subscripts, fractions, exponentials, Greek, units); plain text is
 fine for a bare symbol.
+
+`npm test` includes a math regression suite (`tests/run-tests.mjs` §7) over
+`tests/fixtures/EEC1_MathFixture.md`. Anything that touches escaping must keep it green.
 
 ---
 

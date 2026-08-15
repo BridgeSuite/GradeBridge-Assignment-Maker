@@ -26,6 +26,7 @@
 import { build } from 'esbuild';
 import { webcrypto, createPrivateKey, privateDecrypt, constants as cryptoConstants } from 'node:crypto';
 import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -67,8 +68,39 @@ const stubHeavyDeps = {
   },
 };
 
+// jsPDF and JSZip run fine under Node; file-saver needs a real browser. The
+// PDF regression test uses this so it can inspect a real document.
+const stubBrowserOnlyDeps = {
+  name: 'stub-browser-only-deps',
+  setup(b) {
+    b.onResolve({ filter: /^(file-saver)$/ }, args => ({ path: args.path, namespace: 'stub' }));
+    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
+      contents: 'const stub = new Proxy(function(){}, { get: () => stub, apply: () => stub, construct: () => stub }); export default stub;',
+      loader: 'js',
+    }));
+  },
+};
+
+// services/mathRender.ts inlines KaTeX's stylesheet with a `?raw` import, which
+// Vite understands natively and esbuild needs told about.
+const requireFromRepo = createRequire(join(REPO, 'package.json'));
+const rawImports = {
+  name: 'raw-imports',
+  setup(b) {
+    b.onResolve({ filter: /\?raw$/ }, args => ({
+      path: requireFromRepo.resolve(args.path.replace(/\?raw$/, '')),
+      namespace: 'raw',
+    }));
+    b.onLoad({ filter: /.*/, namespace: 'raw' }, args => ({
+      contents: readFileSync(args.path, 'utf8'),
+      loader: 'text',
+    }));
+  },
+};
+
 const loadModule = async (entry, outName, opts = {}) => {
   const outfile = join(outDir, outName);
+  const { plugins = [], ...rest } = opts;
   await build({
     entryPoints: [entry],
     outfile,
@@ -77,7 +109,8 @@ const loadModule = async (entry, outName, opts = {}) => {
     bundle: true,
     absWorkingDir: dirname(entry),
     logLevel: 'silent',
-    ...opts,
+    plugins: [rawImports, ...plugins],
+    ...rest,
   });
   return import(pathToFileURL(outfile).href);
 };
@@ -89,11 +122,19 @@ const exportSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), '
 
 const mdParser = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParserService.mjs');
 const inputModeSvc = await loadModule(join(REPO, 'services', 'inputModeService.ts'), 'inputModeService.mjs');
+const mathRender = await loadModule(join(REPO, 'services', 'mathRender.ts'), 'mathRender.mjs');
+
+// Same module, but with a real jsPDF so the PDF can actually be inspected.
+const exportPdfSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportServicePdf.mjs', {
+  plugins: [stubBrowserOnlyDeps],
+});
 
 const { validateCoursePublicKey, normalizeCoursePublicKey, looksLikeCoursePublicKey, encryptJson, decryptJson } = crypto_;
-const { buildAssignmentSpec, assignmentToMd, generateGradingRubric, convertSubmissionType } = exportSvc;
+const { buildAssignmentSpec, assignmentToMd, generateGradingRubric, convertSubmissionType,
+        generateHTML, generateLaTeX, generateGraderHTML } = exportSvc;
 const { parseMdToAssignment } = mdParser;
 const { typeAllowedInMode, defaultTypeForMode, convertSubsectionToMode, strandedSubsectionLabels } = inputModeSvc;
+const { splitMath, toHtml, toLatexBody, toPlainUnicode, toPdfText, hasMath } = mathRender;
 
 // ---------- helpers ----------
 const spkiPem = (der) =>
@@ -506,6 +547,178 @@ if (fixture) {
   check('an all-handwritten assignment strands nothing when set to handwritten', () =>
     assertEqual(strandedSubsectionLabels([{ subsections: [handwrittenSub] }], 'handwritten'), [],
       'a compatible part was listed for conversion'));
+}
+
+// =====================================================
+// 7. Math rendering — one module, every output
+// =====================================================
+// The bug this guards: services/exportService.ts used to protect math behind a
+// `<<MATH_BLOCK_N>>` placeholder, then escape underscores — which rewrote the
+// placeholder to `<<MATH\_BLOCK\_N>>` so the restore never matched. The token
+// leaked into assignment.tex, and T1 fontenc turned the `<<` `>>` into
+// guillemets in the compiled PDF. There is no placeholder any more; this suite
+// exists so nobody reintroduces one.
+{
+  const mathAssignment = {
+    id: 'm1',
+    courseCode: 'EEC1',
+    title: 'Lab 4 In-Lab',
+    preamble: 'Bring a calculator; the divider uses $6\\,\\Omega$ resistors.',
+    problems: [{
+      id: 'p1',
+      name: 'Resistor network with $V_{out}$',
+      description: 'The bench kit holds six resistors of $6\\,\\Omega$, $\\{3\\,\\Omega, 5\\,\\Omega\\}$ and one 50% tolerance part.',
+      subsections: [
+        {
+          id: 's1',
+          name: 'Divider ratio',
+          description: 'Show that $\\frac{17}{7}$ follows from $V_x$ and $V_{out}$, then evaluate $e^{-0.2(t-8)}$ at $t=8$.\n\n$$V_{out} = V_{in}\\frac{R_2}{R_1+R_2}$$',
+          points: 60,
+          submissionType: 'AI Graded: Medium',
+          aiGradingPrompt: 'Required elements: (1) the ratio $\\frac{17}{7}$; (2) the $6\\,\\Omega$ value. Award full marks for both.',
+        },
+        {
+          id: 's2',
+          name: 'Bench photo',
+          description: 'Photograph the board. Underscores_in_prose and 100% of the & symbols must survive.',
+          points: 40,
+          submissionType: 'Image',
+          maxImages: 2,
+          graderNote: 'Both leads visible; measured $6\\,\\Omega$ legible on the meter.',
+        },
+      ],
+    }],
+    aiGradingConfig: { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 },
+    createdAt: 1700000000000,
+    updatedAt: 1700000000000,
+  };
+
+  // --- the splitter ---
+  check('splitMath separates inline, display and prose', () => {
+    assertEqual(splitMath('a $x$ b $$y$$ c'), [
+      { kind: 'text', value: 'a ' },
+      { kind: 'inline', tex: 'x' },
+      { kind: 'text', value: ' b ' },
+      { kind: 'display', tex: 'y' },
+      { kind: 'text', value: ' c' },
+    ], 'wrong segmentation');
+  });
+  check('splitMath leaves prose with no math untouched', () => {
+    assertEqual(splitMath('plain prose'), [{ kind: 'text', value: 'plain prose' }], 'prose was split');
+    assert(hasMath('a $x$ b') === true, 'math not detected');
+    assert(hasMath('50% and $5') === false, 'an unpaired dollar counted as math');
+  });
+
+  // --- .tex ---
+  const tex = generateLaTeX(mathAssignment);
+  check('tex: no MATH_BLOCK placeholder in any form', () => {
+    assert(!/MATH.?_?BLOCK/.test(tex), 'a placeholder token leaked into the .tex');
+    assert(!tex.includes('<<') && !tex.includes('>>'), 'raw << >> would become guillemets under T1');
+  });
+  check('tex: math spans are preserved verbatim', () => {
+    assert(tex.includes('$6\\,\\Omega$'), 'inline math was altered');
+    assert(tex.includes('$\\frac{17}{7}$'), 'a fraction was altered');
+    assert(tex.includes('$e^{-0.2(t-8)}$'), 'an exponential was altered');
+    assert(tex.includes('$V_{out}$'), 'the underscore-bearing span was altered');
+    assert(tex.includes('$$V_{out} = V_{in}\\frac{R_2}{R_1+R_2}$$'), 'display math was altered');
+    assert(tex.includes('$\\{3\\,\\Omega, 5\\,\\Omega\\}$'), 'set braces were altered');
+  });
+  check('tex: only the surrounding prose is escaped', () => {
+    assert(tex.includes('Underscores\\_in\\_prose'), 'prose underscores were not escaped');
+    assert(tex.includes('100\\% of the \\& symbols'), 'prose percent/ampersand were not escaped');
+  });
+  check('tex: a literal backslash in prose escapes once, not twice', () =>
+    assertEqual(toLatexBody('path C:\\temp'), 'path C:\\textbackslash{}temp',
+      'the escape braces were re-escaped'));
+
+  // --- assignment.html + grader document ---
+  const html = generateHTML(mathAssignment);
+  const graderHtml = generateGraderHTML(mathAssignment);
+  for (const [label, doc] of [['assignment.html', html], ['grader document', graderHtml]]) {
+    check(`${label}: math is rendered by KaTeX at export time`, () => {
+      assert(doc.includes('class="katex"'), 'no KaTeX output in the file');
+      assert(!/MATH.?_?BLOCK/.test(doc), 'a placeholder token leaked in');
+    });
+    check(`${label}: no CDN MathJax and no leftover raw delimiters`, () => {
+      assert(!/mathjax/i.test(doc), 'a MathJax script survived');
+      assert(!doc.includes('$6\\,\\Omega$'), 'raw LaTeX was emitted instead of rendered math');
+    });
+    check(`${label}: KaTeX's stylesheet is inlined, so it renders without a CDN script`, () =>
+      assert(doc.includes('.katex{') || doc.includes('.katex {'), 'the KaTeX stylesheet is missing'));
+  }
+  check('assignment.html: prose is HTML-escaped', () =>
+    assert(generateHTML({ ...mathAssignment, preamble: '<script>alert(1)</script> & co' })
+      .includes('&lt;script&gt;'), 'raw HTML from a description reached the file'));
+
+  // --- PDF ---
+  {
+    const pdf = await exportPdfSvc.createPDF(mathAssignment, 'student');
+    const bytes = Buffer.from(await pdf.arrayBuffer()).toString('latin1');
+    check('pdf: a real document is produced with no leaked token', () => {
+      assert(bytes.startsWith('%PDF'), 'not a PDF');
+      assert(!/MATH.?_?BLOCK/.test(bytes), 'a placeholder token leaked into the PDF');
+    });
+    // Node has no DOM, so this exercises the no-rasteriser fallback path.
+    check('pdf: without a rasteriser, math degrades to readable WinAnsi text', () => {
+      assert(bytes.includes('6 Ohm'), 'the ohm value is not readable in the PDF text');
+      assert(!bytes.includes('\\Omega'), 'raw LaTeX was written into the PDF');
+    });
+    check('pdf: every string stays single-byte (jsPDF would garble UTF-16 in a standard font)', () => {
+      const strings = bytes.match(/\(((?:\\.|[^\\()])*)\) Tj/g) || [];
+      assert(strings.length > 0, 'no text operators found');
+      const bad = strings.find(s => /\u0000/.test(s));
+      assert(!bad, `a string was re-encoded as UTF-16BE: ${JSON.stringify(bad)}`);
+    });
+  }
+
+  // --- plain-text conversions ---
+  check('toPlainUnicode turns LaTeX into readable Unicode', () => {
+    assertEqual(toPlainUnicode('six $6\\,\\Omega$ parts'), 'six 6 Ω parts', 'ohm form wrong');
+    assertEqual(toPlainUnicode('$V_x$ and $V_{out}$'), 'Vₓ and Vₒᵤₜ', 'subscript handling wrong');
+    assertEqual(toPlainUnicode('$R_{ab}$'), 'R_(ab)', 'an unmappable subscript should stay textual');
+    assertEqual(toPlainUnicode('$\\frac{17}{7}$'), '17/7', 'fraction handling wrong');
+    assertEqual(toPlainUnicode('$e^{-0.2(t-8)}$'), 'e^(-0.2(t-8))', 'exponent handling wrong');
+    assertEqual(toPlainUnicode('$3 \\times 10^{8}$'), '3 × 10⁸', 'times/superscript handling wrong');
+    assertEqual(toPlainUnicode('$\\{3\\,\\Omega, 5\\,\\Omega\\}$'), '{3 Ω, 5 Ω}',
+      'escaped set braces should survive as literal characters');
+    assertEqual(toPlainUnicode('$\\sqrt{x+1}$ and $\\text{RMS}$'), '√(x+1) and RMS', 'sqrt/text handling wrong');
+  });
+  check('toPdfText stays inside what jsPDF standard fonts can encode', () => {
+    const out = toPdfText('six $6\\,\\Omega$ at $3 \\times 10^{8}$, $\\mu$F, $\\approx$ done — really');
+    assert(!/[^\u0000-\u00FF]/.test(out), `non-Latin-1 characters survived: ${JSON.stringify(out)}`);
+    assert(out.includes('6 Ohm'), `ohm not transliterated: ${out}`);
+    assert(out.includes('~='), `approx not transliterated: ${out}`);
+  });
+  check('an unpaired dollar is left alone rather than swallowed', () => {
+    assertEqual(toLatexBody('costs $5 and 50%'), 'costs \\$5 and 50\\%', 'stray dollar mishandled');
+    assertEqual(toPdfText('costs $5 and 50%'), 'costs $5 and 50%', 'stray dollar mishandled');
+  });
+
+  // --- markdown round trip ---
+  const mathMd = assignmentToMd(mathAssignment);
+  check('md export: math is byte-identical to what was authored', () => {
+    assert(mathMd.includes('$6\\,\\Omega$'), 'inline math changed on export');
+    assert(mathMd.includes('$$V_{out} = V_{in}\\frac{R_2}{R_1+R_2}$$'), 'display math changed on export');
+    assert(!/MATH.?_?BLOCK/.test(mathMd), 'a placeholder token leaked into the .md');
+  });
+  // The .md parser collapses blank lines inside a description — a pre-existing
+  // format behaviour, unrelated to math. What must hold is that every math span
+  // survives byte-for-byte, and that a second pass is a fixed point.
+  const mathSpans = (s) => splitMath(s).filter(x => x.kind !== 'text')
+    .map(x => (x.kind === 'display' ? `$$${x.tex}$$` : `$${x.tex}$`));
+  check('md round trip: every math span survives byte-for-byte', () => {
+    const back = parseMdToAssignment(mathMd);
+    const before = mathAssignment.problems[0].subsections[0].description;
+    const after = back.problems[0].subsections[0].description;
+    assertEqual(mathSpans(after), mathSpans(before), 'a math span changed on round trip');
+    assertEqual(mathSpans(back.preamble), mathSpans(mathAssignment.preamble), 'preamble math changed');
+    assertEqual(mathSpans(back.problems[0].subsections[0].aiGradingPrompt),
+      mathSpans(mathAssignment.problems[0].subsections[0].aiGradingPrompt), 'rubric math changed');
+  });
+  check('md round trip: a second pass is a fixed point', () => {
+    const once = assignmentToMd(parseMdToAssignment(mathMd));
+    assertEqual(assignmentToMd(parseMdToAssignment(once)), once, 'the export is not stable');
+  });
 }
 
 // ---------- report ----------
