@@ -260,17 +260,18 @@ Those reservations are estimated from character count rather than measured. The 
 
 **There is no name, student ID or date field, deliberately.** Identity comes from Gradescope authenticating the upload, so a blank for it is redundant; students are told not to write their name on the pages, so a labelled blank is a mixed message; a filled-in name is exactly the PII the band gate exists to keep out; and grading is meant to be blind to identity. Appendix C of the page-format spec says the same — because the app authenticates the student, there is no identity page.
 
-### How much room a part gets
+### How the pages are laid out
 
-**At most two answer regions per page**, set by rule rather than derived from points:
+By rule, not derived from points:
 
-| Setting | Effect |
-|---|---|
-| `half` (default) | Shares the page with one other part. The two split the usable height by points, bounded so neither drops below 35%. |
-| `full` | The part takes a page to itself. |
-| a sketch | Always `full`. |
+1. **Every problem starts a new page**, and that page carries **one sub-part only** — it is also carrying the problem heading and the shared setup.
+2. The problem's remaining sub-parts follow, **at most two to a page**.
+3. A sketch, or a part marked `full`, is **alone on its page**.
+4. **A problem with a single sub-part gets a second page**: the question with some writing space, then a full page of writing space for the same answer. A lone question is usually the long one.
 
-Points influence the split within a shared page but never the page count, which is what keeps the sheets predictable.
+Where two parts do share a page they split the usable height by points, bounded so neither drops below 35%. Points influence that split but never the page count.
+
+**Rule 4 means a part can own more than one region.** The continuation row carries the same `part_id` and a `region_id` suffixed `x2`, so the Submission app receives two crops for one answer. The spec allows this — `region_id` is unique, `part_id` is a display string — but a consumer that assumed one crop per part will be surprised, so: **group crops by `part_id`, and grade the part once.**
 
 ### Two more things to know
 
