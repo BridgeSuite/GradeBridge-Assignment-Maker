@@ -602,6 +602,166 @@ check('item 4: authored text with Greek and math is not silently garbled', async
   assert(!/\\delta|\\Omega|\\frac/.test(bytes), 'raw LaTeX was written onto the template');
 });
 
+// ---------- what Export ZIP actually contains ----------
+{
+  const exportSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportEntries.mjs');
+
+  const hwEntries = await exportSvc.buildExportEntries(appendixB);
+  const elEntries = await exportSvc.buildExportEntries({
+    ...appendixB, inputMode: 'electronic',
+    problems: appendixB.problems.map(p => ({
+      ...p, subsections: p.subsections.map(s => ({ ...s, submissionType: 'Text', maxImages: 1 })),
+    })),
+  });
+
+  check('handwritten: assignment.pdf IS the QR template, and there is no second PDF', async () => {
+    const pdfs = Object.keys(hwEntries).filter(n => n.endsWith('.pdf'));
+    assertEqual(pdfs, ['assignment.pdf'], 'a handwritten export should contain exactly one PDF');
+    // Same bytes as the standalone generator produces — not a lookalike.
+    const direct = await gen.generateTemplate(appendixB);
+    const a = Buffer.from(await hwEntries['assignment.pdf'].arrayBuffer());
+    const b = Buffer.from(await direct.pdf.arrayBuffer());
+    assertEqual(a.length, b.length, 'assignment.pdf is not the template PDF');
+    assert(a.subarray(0, 2000).equals(b.subarray(0, 2000)), 'assignment.pdf differs from the template PDF');
+  });
+
+  check('handwritten: no template.pdf — it serves no purpose on a page-format sheet', () =>
+    assert(!('template.pdf' in hwEntries), 'the boxed answer-region sheet is still being exported'));
+
+  check('handwritten: the sidecar travels with it, under the name the QR points at', () => {
+    const csv = Object.keys(hwEntries).filter(n => n.endsWith('.csv'));
+    assertEqual(csv, [`layout_${t.assignmentId}.csv`], 'the layout map is missing or misnamed');
+  });
+
+  check('handwritten: the QR template PDF really does carry a QR and four marks', async () => {
+    const bytes = Buffer.from(await hwEntries['assignment.pdf'].arrayBuffer()).toString('latin1');
+    const rects = [...bytes.matchAll(/([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+) re/g)];
+    assert(rects.length > 100, 'assignment.pdf has too few drawing ops to contain a QR');
+    assert(!/Gradescope Answer Region/.test(bytes), 'the old boxed answer region leaked into it');
+  });
+
+  check('electronic exports are untouched: assignment.pdf, template.pdf, no layout map', () => {
+    assertEqual(Object.keys(elEntries).filter(n => n.endsWith('.pdf')).sort(),
+      ['assignment.pdf', 'template.pdf'], 'the electronic PDF pair changed');
+    assertEqual(Object.keys(elEntries).filter(n => n.endsWith('.csv')), [],
+      'an electronic export gained a layout map');
+  });
+
+  check('both modes still carry the spec, the html, the tex, the rubric and the grader doc', () => {
+    for (const [label, entries] of [['handwritten', hwEntries], ['electronic', elEntries]]) {
+      for (const name of ['assignment_spec.json', 'assignment.html', 'assignment.tex']) {
+        assert(name in entries, `${label}: ${name} is missing`);
+      }
+      assert(Object.keys(entries).some(n => n.endsWith('_grading_rubric.json')), `${label}: no rubric`);
+      assert(Object.keys(entries).some(n => n.endsWith('_grader_document.html')), `${label}: no grader doc`);
+    }
+  });
+}
+
+// ---------- the sheet is self-contained ----------
+check('the sheet carries the whole question: preamble, problem setup, part text', async () => {
+  const full = {
+    ...makeAssignment([
+      [{ ...part('First', 30), description: 'State the value of R1.' },
+       { ...part('Second', 30), description: 'Now state R2.' }],
+      [{ ...part('Only', 40), description: 'And finally R3.' }],
+    ]),
+    preamble: 'Answer every part in the space provided. Show your working.',
+  };
+  full.problems[0].name = 'Resistor network';
+  full.problems[0].description = 'The network below uses six identical resistors in series.';
+  full.problems[1].name = 'Power';
+  full.problems[1].description = 'Assume the source is ideal.';
+
+  const g = await gen.generateTemplate(full);
+
+  // Preamble: reserved on page 1 and actually drawn.
+  assert(g.layout.preambleBoxMm, 'no room was reserved for the preamble');
+  assert(g.ink.some(b => b.what === 'preamble'), 'the preamble was not drawn');
+
+  // Each problem gets a heading and its shared setup, above its first part.
+  const headings = g.ink.filter(b => /^problem heading/.test(b.what));
+  const texts = g.ink.filter(b => /^problem text/.test(b.what));
+  assertEqual(headings.length, 2, 'expected one heading per problem');
+  assertEqual(texts.length, 2, 'expected one shared-setup block per problem');
+
+  // The heading belongs to the problem's first part only, and sits above it.
+  const openers = g.layout.regions.filter(r => r.problemBlock);
+  assertEqual(openers.map(r => r.partId), ['1(a)', '2'], 'the wrong parts opened a problem block');
+  for (const r of openers) {
+    assert(r.problemBlock.boxMm.y1 <= r.promptTopMm + 0.01,
+      `${r.regionId}: the problem block overlaps the prompt row`);
+    assert(r.problemBlock.heading.startsWith(`Problem ${r.problemIndex + 1}`), 'wrong heading text');
+  }
+  // And every part still carries its own question text.
+  for (const r of g.layout.regions) assert(r.descBoxMm, `${r.regionId}: no question text box`);
+});
+
+check('a problem continued on a later page repeats the heading, not the setup', () => {
+  // Three parts: 1(a) and 1(b) on page 1, 1(c) on page 2.
+  const l = lay.buildLayout(makeAssignment([[
+    { ...part('A', 10), description: 'a' },
+    { ...part('B', 10), description: 'b' },
+    { ...part('C', 10), description: 'c' },
+  ]]));
+  l.problems = undefined;
+  const opener = l.regions.find(r => r.pageK === 2 && r.problemBlock);
+  assert(opener, 'the continued problem got no heading on its second page');
+  assert(opener.problemBlock.continued, 'the second page was not marked as a continuation');
+  assertEqual(opener.problemBlock.text, '', 'the shared setup was repeated on the continuation page');
+  assert(/continued/.test(opener.problemBlock.heading), 'the heading does not say continued');
+});
+
+check('long prose is squeezed before the writing area is, and never overflows', () => {
+  const wordy = 'A '.repeat(400);
+  const l = lay.buildLayout({
+    ...makeAssignment([[{ ...part('Wordy one', 50), description: wordy },
+                        { ...part('Wordy two', 50), description: wordy }]]),
+    preamble: wordy,
+  });
+  l.problems = undefined;
+  for (const r of l.regions) {
+    const h = r.nominalMm.y1 - r.nominalMm.y0;
+    assert(h >= lay.MIN_REGION_MM - 0.01, `${r.regionId}: writing area collapsed to ${h.toFixed(1)} mm`);
+    assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.01,
+      `${r.regionId}: ran past the bottom limit at ${r.declaredMm.y1.toFixed(1)} mm`);
+  }
+  // Regions still must not overlap once prose has eaten into the page.
+  const [a, b] = l.regions;
+  assert(a.declaredMm.y1 <= b.promptTopMm + 0.01, 'the first region runs into the second prompt');
+});
+
+// ---------- question text sizes to fit, since the sheet is the assignment ----------
+check('a long question reserves more room than a short one, deterministically', () => {
+  const short = 'Find alpha.';
+  const long = 'A uniform plane wave at 1 GHz propagates in a medium with sigma = 4 S/m and mu_r = 1. '
+    + 'Determine the skin depth, the attenuation constant, the phase constant, and the intrinsic '
+    + 'impedance, stating units for each and showing the formula you used at every step.';
+  const wide = lay.COLUMN_X1_MM - lay.COLUMN_X0_MM;
+  assert(lay.estimateDescLines(short, wide) === 1, 'a one-line question took more than one line');
+  assert(lay.estimateDescLines(long, wide) >= 2, 'a long question was estimated as one line');
+  assert(lay.descBlockMm(long) > lay.descBlockMm(short), 'a long question reserved no extra room');
+  assertEqual(lay.estimateDescLines('', wide), 0, 'an empty description reserved a line');
+  // Deterministic: the map is hashed into the QR, so this must not vary by host.
+  assertEqual(lay.descBlockMm(long), lay.descBlockMm(long), 'not deterministic');
+  assert(lay.estimateDescLines('x'.repeat(100000), wide) === lay.DESC_MAX_LINES,
+    'an enormous description was not capped');
+});
+
+check('the question text box always sits between the prompt row and the rule', () => {
+  const withText = lay.buildLayout(makeAssignment([[
+    { ...part('Long one', 50), description: 'A '.repeat(300) },
+    { ...part('Short one', 50), description: 'Brief.' },
+  ]]));
+  for (const r of withText.regions) {
+    assert(r.descBoxMm, `${r.regionId}: no description box`);
+    assert(r.descBoxMm.y0 >= r.promptTopMm + lay.PROMPT_ROW_MM - 0.01, `${r.regionId}: box overlaps the prompt row`);
+    assert(r.descBoxMm.y1 <= r.ruleYMm + 0.01, `${r.regionId}: box runs past the rule`);
+    assert(r.nominalMm.y0 > r.ruleYMm, `${r.regionId}: the writing area starts above the rule`);
+    assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.01, `${r.regionId}: ran past the bottom limit`);
+  }
+});
+
 // ---------- .md round trip of the template settings ----------
 {
   const exportSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportSvc.mjs');

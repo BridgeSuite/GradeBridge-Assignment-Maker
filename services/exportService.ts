@@ -892,53 +892,62 @@ export const buildAssignmentSpec = async (assignment: Assignment): Promise<Assig
   return { ...(withoutKey as Assignment), coursePublicKey: pem };
 };
 
+/**
+ * Everything that goes in the export ZIP, as filename → content. Split out from
+ * the download so the contents can be asserted without a browser.
+ *
+ * **`assignment.pdf` is the one PDF.** For a handwritten assignment it *is* the
+ * page-format sheet — the QR, the marks, the question text and the ruled writing
+ * areas. There is deliberately no second PDF to choose between: the instructor
+ * prints `assignment.pdf` and that is the whole story.
+ */
+export const buildExportEntries = async (
+  assignment: Assignment
+): Promise<Record<string, Blob | string>> => {
+  const stem = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}`;
+  const handwritten = assignment.inputMode === 'handwritten';
+
+  const entries: Record<string, Blob | string> = {
+    // Spec JSON — encoded with AES-256-GCM so students cannot read or edit it.
+    // The Student Submission app decodes it transparently on load; Import JSON
+    // here handles encoded files too.
+    'assignment_spec.json': await encryptJson(await buildAssignmentSpec(assignment)),
+    'assignment.html': await generateHTML(assignment),
+    // Editable LaTeX source, for an instructor who wants to hand-tune the paper.
+    'assignment.tex': generateLaTeX(assignment),
+    // Private — for the autograder only.
+    [`${stem}_grading_rubric.json`]: JSON.stringify(generateGradingRubric(assignment), null, 2),
+    // Private — instructor/TA reference with rubrics and answer keys.
+    [`${stem}_grader_document.html`]: await generateGraderHTML(assignment),
+  };
+
+  if (handwritten) {
+    // The page-format sheet is the assignment. generateTemplate() runs the spec
+    // 8.7 self-test and throws rather than emitting a non-compliant template, so
+    // a failure stops the whole export — which is the intent.
+    const template = await generateTemplate(assignment);
+    entries['assignment.pdf'] = template.pdf;
+    // The sidecar the Submission app crops by. Its filename carries the template
+    // id because that is what the printed QR points at; do not rename it.
+    entries[template.csvFilename] = template.csv;
+  } else {
+    entries['assignment.pdf'] = await createPDF(assignment, 'student');
+    // The boxed answer-region sheet, for setting up the Gradescope outline.
+    // Handwritten has no use for it — the page-format sheet already is the
+    // answer surface, and a second boxed one only invites printing the wrong PDF.
+    entries['template.pdf'] = await createPDF(assignment, 'template');
+  }
+
+  return entries;
+};
+
 export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
-    const zip = new JSZip();
     assignment = normalizePoints(assignment);
-
-    // 1. Spec JSON — encoded with AES-256-GCM so students cannot read or edit it.
-    //    The Student Submission app decodes it transparently on load.
-    //    Assignment Maker's "Import JSON" also handles encoded files.
-    zip.file('assignment_spec.json', await encryptJson(await buildAssignmentSpec(assignment)));
-
-    // 2. Student PDF
-    const studentPdf = await createPDF(assignment, 'student');
-    zip.file('assignment.pdf', studentPdf);
-
-    // 3. Template PDF
-    const templatePdf = await createPDF(assignment, 'template');
-    zip.file('template.pdf', templatePdf);
-
-    // 4. HTML
-    const html = await generateHTML(assignment);
-    zip.file('assignment.html', html);
-
-    // 5. LaTeX (editable source file for instructors)
-    const latex = generateLaTeX(assignment);
-    zip.file('assignment.tex', latex);
-
-    // 6. Grading Rubric JSON (private — for autograder only)
-    const rubric = generateGradingRubric(assignment);
-    const rubricFilename = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_grading_rubric.json`;
-    zip.file(rubricFilename, JSON.stringify(rubric, null, 2));
-
-    // 7. Grader Document HTML (private — instructor/TA reference with rubrics and answer keys)
-    const graderDoc = await generateGraderHTML(assignment);
-    const graderDocFilename = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_grader_document.html`;
-    zip.file(graderDocFilename, graderDoc);
-
-    // 8. Page-format QR template + its sidecar map — handwritten assignments only.
-    //    This is the sheet the student prints, writes on and photographs; the
-    //    sidecar is what the Submission app crops by. generateTemplate() runs the
-    //    spec 8.7 self-test and throws rather than emitting a bad template, so a
-    //    failure here stops the whole export, which is the intent.
-    if (assignment.inputMode === 'handwritten') {
-      const template = await generateTemplate(assignment);
-      zip.file(template.pdfFilename, template.pdf);
-      zip.file(template.csvFilename, template.csv);
+    const zip = new JSZip();
+    for (const [name, content] of Object.entries(await buildExportEntries(assignment))) {
+      zip.file(name, content);
     }
-
     const content = await zip.generateAsync({ type: 'blob' });
 
     // Handle file-saver import differences (default export vs named export property)

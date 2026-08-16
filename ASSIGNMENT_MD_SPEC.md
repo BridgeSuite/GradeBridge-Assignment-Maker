@@ -225,22 +225,38 @@ Determine the cutoff frequency of the TE10 mode.
 
 ## 10. Handwritten templates (QR page format)
 
-A handwritten assignment can emit a printable template the student writes on and photographs. Exporting the ZIP adds two files, and the **QR Template** button in the editor emits them on their own:
+For a handwritten assignment, **the page-format sheet is the assignment**. Export ZIP puts it in as `assignment.pdf` — there is no separate template to go and find, and no second PDF to pick between:
 
-| File | What it is |
-|---|---|
-| `{TemplateID}_qr_template.pdf` | The printed sheet: four corner registration marks, the QR, and one ruled answer area per part, on every page. |
-| `layout_{TemplateID}.csv` | The sidecar map the Submission app crops by. Its content hash is written into every page's QR. |
+| File in the ZIP | Handwritten | Electronic |
+|---|---|---|
+| `assignment.pdf` | **The page-format sheet**: four corner marks, the QR, the question text and one ruled answer area per part, on every page. Print this. | The usual assignment paper. |
+| `layout_{TemplateID}.csv` | The sidecar map the Submission app crops by. Its content hash is written into every page's QR. | — |
+| `template.pdf` | — *(not exported: the sheet above already is the answer surface, and a second boxed one only invites printing the wrong PDF)* | The boxed answer-region sheet, for the Gradescope outline. |
 
-**The two files must travel together.** The PDF is useless without the map its QR hashes to, and the Submission app refuses to crop when the hash does not match — which is the point: a stale map would otherwise register perfectly and cut the wrong rectangles with no error anywhere.
+`assignment_spec.json`, `assignment.html`, `assignment.tex`, the grading rubric and the grader document are unchanged in both modes.
+
+The editor's **QR Template** button emits the same sheet plus its map as a standalone ZIP, for regenerating after a layout edit without rebuilding the whole export.
+
+**The PDF and the map must travel together.** The PDF is useless without the map its QR hashes to, and the Submission app refuses to crop when the hash does not match — which is the point: a stale map would otherwise register perfectly and cut the wrong rectangles with no error anywhere.
 
 The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Page/GradeBridge_Page_Format_v1.md`, transcribed into `services/pageFormat.ts`, and enforced by the spec 8.7 self-test that runs on every generation — a template that fails any check is not emitted at all.
 
 ### What the printed sheet holds
 
-Per page: the four corner marks, the QR, one header line in the top 25 mm, and one or two answer regions. Page 1 also carries the course and title and a print instruction, below the band.
+**The sheet is the whole assignment.** A student prints it, reads it, writes on it and photographs it — there is no companion document, so everything they need to answer is on the paper:
 
-Per region: `1(a).` and the sub-part title, the points, the question text, a rule, then blank writing space. Prompt and question text go through the same KaTeX renderer as the other exports, so `$\delta_s$` and a bare `ω` print as glyphs rather than being garbled by jsPDF's Latin-1 fonts.
+| Where | What |
+|---|---|
+| Top 25 mm, every page | The QR, the four corner marks, one header line. Nothing else, ever. |
+| Page 1, under the band | Course and title, the print instruction, then the assignment **preamble**. |
+| Above each problem's first part | `Problem 2: Rectangular waveguide` and the problem's **shared setup text**. On a later page the heading repeats as `(continued)`; the setup does not. |
+| Each region | `1(a).`, the sub-part title, the points, the **question text**, a rule, then blank writing space. |
+
+Prompt, problem and question text all go through the same KaTeX renderer as the other exports, so `$\delta_s$` and a bare `ω` print as glyphs rather than being garbled by jsPDF's Latin-1 fonts.
+
+Prose competes with writing space, and prose can be arbitrarily long. When a page cannot hold both, **the prose is squeezed first** — down to a single line per block if it comes to that — so a writing area never falls below 22 mm and never runs past the bottom of the page. The rendered text is scaled into whatever box survives, so nothing is silently cut off.
+
+Those reservations are estimated from character count rather than measured. The map is hashed into every page's QR, so a millimetre of difference between a browser and a test would change `layout_id` and make the template refuse to crop.
 
 **There is no name, student ID or date field, deliberately.** Identity comes from Gradescope authenticating the upload, so a blank for it is redundant; students are told not to write their name on the pages, so a labelled blank is a mixed message; a filled-in name is exactly the PII the band gate exists to keep out; and grading is meant to be blind to identity. Appendix C of the page-format spec says the same — because the app authenticates the student, there is no identity page.
 
