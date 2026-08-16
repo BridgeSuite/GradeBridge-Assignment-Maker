@@ -40,7 +40,8 @@ import {
 } from './qrPayload';
 import {
   COLUMN_X0_MM, COLUMN_X1_MM, FURNITURE_MAX_WIDTH_MM, LayoutRow, PAGE1_FURNITURE_TOP_MM,
-  DESC_FONT_PT, PROBLEM_HEADING_MM, PROMPT_ROW_MM, PlacedRegion, TemplateLayout,
+  DESC_FONT_PT, PAGE1_INSTRUCTION_LINE_MM, PAGE1_INSTRUCTION_LINES, PAGE1_INSTRUCTION_TOP_MM,
+  PAGE1_TITLE_H_MM, PROBLEM_HEADING_MM, PROMPT_ROW_MM, PlacedRegion, TemplateLayout,
   buildLayout, toLayoutCsv, toLayoutRows,
 } from './templateLayout';
 import { SelfTestReport, runInkChecks, runSelfTest } from './templateSelfTest';
@@ -223,15 +224,15 @@ const drawPage1Furniture = async (
 ) => {
   await drawAuthoredText(
     doc, `${assignment.courseCode}: ${assignment.title}`,
-    { x0: COLUMN_X0_MM, y0: PAGE1_FURNITURE_TOP_MM, x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM, y1: PAGE1_FURNITURE_TOP_MM + 6.5 },
+    { x0: COLUMN_X0_MM, y0: PAGE1_FURNITURE_TOP_MM, x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM, y1: PAGE1_FURNITURE_TOP_MM + PAGE1_TITLE_H_MM },
     { fontPt: 12, bold: true }, ink, 1, 'course and title'
   );
 
   applyText(doc, 7.5, false, 110);
   const instruction = 'Print at 100%, not "fit to page". Check all four corner squares are on the paper before you start, and write only inside the ruled areas.';
   const lines: string[] = doc.splitTextToSize(instruction, FURNITURE_MAX_WIDTH_MM);
-  lines.slice(0, 2).forEach((line, i) => {
-    drawPlain(doc, line, COLUMN_X0_MM, PAGE1_FURNITURE_TOP_MM + 8.0 + i * 3.4,
+  lines.slice(0, PAGE1_INSTRUCTION_LINES).forEach((line, i) => {
+    drawPlain(doc, line, COLUMN_X0_MM, PAGE1_INSTRUCTION_TOP_MM + i * PAGE1_INSTRUCTION_LINE_MM,
       { fontPt: 7.5, grey: 110 }, ink, 1, 'print instruction');
   });
 
@@ -274,7 +275,9 @@ const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
   const labelW = drawPlain(doc, label, COLUMN_X0_MM, r.promptTopMm, { fontPt: 10, bold: true }, ink, r.pageK, 'part label') + 2.0;
 
   // Joiner is a period, not an em-dash (correction item 5).
-  const tail = r.isDrawing ? 'Sketch your answer below this line.' : 'Write your answer below this line.';
+  const tail = r.isContinuation
+    ? 'Continued. Keep writing below this line.'
+    : r.isDrawing ? 'Sketch your answer below this line.' : 'Write your answer below this line.';
   const titleText = r.name.trim() ? `${r.name.trim()}. ${tail}` : tail;
   await drawAuthoredText(
     doc, titleText,

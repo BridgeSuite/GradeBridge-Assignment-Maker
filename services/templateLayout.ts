@@ -40,9 +40,19 @@ export const FIRST_PROMPT_TOP_MM = QR_KEEPOUT_MM.y1 + 1.0; // 38.0
  * between the identity band and the first prompt row, and both are held left of
  * the QR keep-out, so this strip is reserved rather than measured.
  */
-export const PAGE1_FURNITURE_TOP_MM = 26.0;
-/** Title + print instruction. The preamble, when there is one, extends past this. */
-export const PAGE1_FURNITURE_BASE_BOTTOM_MM = 40.0;
+// Page 1's furniture is a stack with explicit tops and heights, so a block can
+// never be positioned relative to a guess about the one above it. Getting this
+// wrong put the print instruction's second line inside the preamble.
+export const PAGE1_TITLE_TOP_MM = 26.0;
+export const PAGE1_TITLE_H_MM = 6.5;
+export const PAGE1_INSTRUCTION_TOP_MM = PAGE1_TITLE_TOP_MM + PAGE1_TITLE_H_MM;   // 32.5
+export const PAGE1_INSTRUCTION_LINE_MM = 3.4;
+export const PAGE1_INSTRUCTION_LINES = 2;
+export const PAGE1_INSTRUCTION_H_MM = PAGE1_INSTRUCTION_LINES * PAGE1_INSTRUCTION_LINE_MM + 1.2; // 8.0
+export const PAGE1_PREAMBLE_TOP_MM = PAGE1_INSTRUCTION_TOP_MM + PAGE1_INSTRUCTION_H_MM;          // 40.5
+
+/** Kept for the generator's title box; the stack above is the source of truth. */
+export const PAGE1_FURNITURE_TOP_MM = PAGE1_TITLE_TOP_MM;
 
 /** Widest any page-1 furniture line may be — keeps it out of the QR column. */
 export const FURNITURE_MAX_WIDTH_MM = QR_KEEPOUT_MM.x0 - COLUMN_X0_MM - 2.0; // 141.0
@@ -82,9 +92,14 @@ export const estimateDescLines = (text: string, widthMm: number): number => {
   return Math.min(lines, DESC_MAX_LINES);
 };
 
-/** Vertical space reserved for a part's question text. Zero when it has none. */
-export const descBlockMm = (text: string): number =>
-  round4(estimateDescLines(text, COLUMN_X1_MM - COLUMN_X0_MM) * DESC_LINE_MM);
+/**
+ * Vertical space reserved for a block of prose. Zero when there is none.
+ * `widthMm` must be the width it will actually be *rendered* at — reserving
+ * against a wider column than the renderer uses under-reserves, and the text
+ * then gets scaled down to fit a box that was always too small.
+ */
+export const descBlockMm = (text: string, widthMm: number = COLUMN_X1_MM - COLUMN_X0_MM): number =>
+  round4(estimateDescLines(text, widthMm) * DESC_LINE_MM);
 
 /** Height of everything printed above a writing area, for a given part. */
 export const headerHeightMm = (description: string): number =>
@@ -136,6 +151,8 @@ export interface TemplatePart {
   problemHeading: string;
   /** The problem's shared setup text, printed once under its heading. */
   problemDescription: string;
+  /** A second writing area for the same part, on the page after it. */
+  isContinuation?: boolean;
 }
 
 /**
@@ -223,32 +240,54 @@ const pad = (r: RectMm): RectMm => ({
 });
 
 /**
- * Group the parts into pages: full-page parts alone, everything else in twos.
- * A problem with exactly two parts is kept together when that only costs
- * starting a new page — which is what "naturally" means here; nothing is
- * reordered and no page is left empty to achieve it.
+ * A part's second writing area, on the page that follows it. Same `part_id`, so
+ * the two crops belong to the same answer; a new `region_id`, because that is
+ * the map's unique key.
+ */
+export const continuationOf = (p: TemplatePart): TemplatePart => ({
+  ...p,
+  regionId: `${p.regionId}x2`,
+  name: '',
+  description: '',
+  isContinuation: true,
+});
+
+/**
+ * Group the parts into pages.
+ *
+ * 1. **Every problem starts a new page**, and that page carries **one sub-part
+ *    only** — it is also carrying the problem heading and the shared setup, so
+ *    a second answer area on it would be cramped.
+ * 2. The problem's remaining sub-parts follow, at most two to a page.
+ * 3. A sketch, or a part marked `full`, is alone on its page.
+ * 4. **A problem with a single sub-part gets a second page** — the question and
+ *    some writing space, then a full page of writing space for the same part.
+ *    A lone question is usually the long one.
  */
 export const paginate = (parts: TemplatePart[]): TemplatePart[][] => {
   const pages: TemplatePart[][] = [];
-  let current: TemplatePart[] = [];
-  const flush = () => { if (current.length) { pages.push(current); current = []; } };
 
-  parts.forEach((part, i) => {
-    if (part.fullPage) { flush(); pages.push([part]); return; }
+  const byProblem = new Map<number, TemplatePart[]>();
+  for (const p of parts) byProblem.set(p.problemIndex, [...(byProblem.get(p.problemIndex) || []), p]);
 
-    // Would this part start a two-part problem as the *second* region on a page,
-    // splitting it across the break? Start a fresh page instead.
-    const startsPairedProblem =
-      part.problemPartCount === 2 &&
-      parts[i - 1]?.problemIndex !== part.problemIndex &&
-      !parts[i + 1]?.fullPage &&
-      parts[i + 1]?.problemIndex === part.problemIndex;
-    if (current.length === 1 && startsPairedProblem) flush();
+  for (const [, group] of [...byProblem].sort((a, b) => a[0] - b[0])) {
+    pages.push([group[0]]);                                   // rule 1
 
-    current.push(part);
-    if (current.length === MAX_REGIONS_PER_PAGE) flush();
-  });
-  flush();
+    if (group.length === 1) {
+      pages.push([continuationOf(group[0])]);                 // rule 4
+      continue;
+    }
+
+    let current: TemplatePart[] = [];
+    const flush = () => { if (current.length) { pages.push(current); current = []; } };
+    for (const p of group.slice(1)) {
+      if (p.fullPage) { flush(); pages.push([p]); continue; } // rule 3
+      current.push(p);
+      if (current.length === MAX_REGIONS_PER_PAGE) flush();   // rule 2
+    }
+    flush();
+  }
+
   return pages;
 };
 
@@ -271,14 +310,17 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
   const clamped: TemplateLayout['clamped'] = [];
   const columnWidth = COLUMN_X1_MM - COLUMN_X0_MM;
 
-  // Page 1's furniture: title, print instruction, then the assignment preamble.
-  const preambleMm = descBlockMm(assignment.preamble || '');
-  const furnitureBottom = PAGE1_FURNITURE_BASE_BOTTOM_MM + preambleMm;
-  const page1Top = Math.max(FIRST_PROMPT_TOP_MM, furnitureBottom);
+  // Page 1's furniture stack: title, print instruction, then the preamble. The
+  // preamble is *rendered* at the narrower furniture width (it must stay clear
+  // of the QR column at this height), so it is *reserved* at that width too —
+  // estimating against the full column would under-reserve and shrink the text.
+  const preambleMm = descBlockMm(assignment.preamble || '', FURNITURE_MAX_WIDTH_MM);
   const preambleBoxMm: RectMm | undefined = preambleMm > 0 ? {
-    x0: COLUMN_X0_MM, y0: round4(PAGE1_FURNITURE_BASE_BOTTOM_MM - 1.5),
-    x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM, y1: round4(PAGE1_FURNITURE_BASE_BOTTOM_MM - 1.5 + preambleMm),
+    x0: COLUMN_X0_MM, y0: PAGE1_PREAMBLE_TOP_MM,
+    x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM, y1: round4(PAGE1_PREAMBLE_TOP_MM + preambleMm),
   } : undefined;
+  const furnitureBottom = (preambleBoxMm ? preambleBoxMm.y1 : PAGE1_PREAMBLE_TOP_MM) + 2.0;
+  const page1Top = round4(Math.max(FIRST_PROMPT_TOP_MM, furnitureBottom));
 
   const seenProblem = new Set<number>();
 

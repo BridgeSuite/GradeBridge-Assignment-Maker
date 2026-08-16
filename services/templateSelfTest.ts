@@ -63,17 +63,29 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
   const add = (id: number, name: string, problems: string[]) =>
     checks.push({ id, name, passed: problems.length === 0, detail: problems.join('; ') || undefined });
 
-  // 1. Every part in the source assignment appears exactly once; no extra rows.
+  // 1. Every part in the source assignment is in the map, nothing else is, and
+  //    no region_id repeats.
+  //
+  //    Note the shape: a part may own MORE THAN ONE region. A problem with a
+  //    single sub-part gets a second page of writing space for the same answer,
+  //    so two rows share that `part_id` and differ by `region_id`. The spec
+  //    requires region_id unique and treats part_id as a display string, so this
+  //    is legal — but a consumer that assumed one crop per part would be
+  //    surprised, which is why it is called out here and in the map's docs.
   {
-    const expected = enumerateParts(assignment).map(p => p.regionId).sort();
-    const got = rows.map(r => r.regionId).sort();
+    const expected = enumerateParts(assignment);
+    const expectedParts = new Set(expected.map(p => p.partId));
     const problems: string[] = [];
-    const counts = new Map<string, number>();
-    for (const id of got) counts.set(id, (counts.get(id) || 0) + 1);
-    for (const [id, n] of counts) if (n > 1) problems.push(`${id} appears ${n} times`);
-    for (const id of expected) if (!counts.has(id)) problems.push(`${id} is missing from the map`);
-    for (const id of counts.keys()) if (!expected.includes(id)) problems.push(`${id} is in the map but not in the assignment`);
-    add(1, 'every part appears exactly once, and the map has no extra rows', problems);
+
+    const seen = new Map<string, number>();
+    for (const r of rows) seen.set(r.regionId, (seen.get(r.regionId) || 0) + 1);
+    for (const [id, n] of seen) if (n > 1) problems.push(`region_id ${id} appears ${n} times`);
+
+    const gotParts = new Set(rows.map(r => r.partId));
+    for (const p of expectedParts) if (!gotParts.has(p)) problems.push(`part ${p} is missing from the map`);
+    for (const p of gotParts) if (!expectedParts.has(p)) problems.push(`part ${p} is in the map but not in the assignment`);
+
+    add(1, 'every part is in the map, nothing extra is, and every region_id is unique', problems);
   }
 
   // 2. max_points present and positive on every row.
@@ -209,6 +221,26 @@ export const runInkChecks = (ink: InkRect[], base: SelfTestReport): SelfTestRepo
     ink.filter(b => b.what !== 'header line')
       .filter(b => b.x0 < REGION_X_MIN_MM - 0.01 || b.x1 > REGION_X_MAX_MM + 0.01)
       .map(describe));
+
+  // Ink against ink. The zone checks above compare what was drawn to fixed
+  // rectangles; they cannot see two blocks landing on top of each other, which
+  // is how the print instruction ended up inside the preamble. Tolerance is
+  // 0.5 mm because vector-text boxes are estimated from font metrics, not
+  // measured — enough slack to avoid noise, far less than a real collision.
+  {
+    const TOL = 0.5;
+    const clashes: string[] = [];
+    for (let i = 0; i < ink.length; i++) {
+      for (let j = i + 1; j < ink.length; j++) {
+        const a = ink[i], b = ink[j];
+        if (a.pageK !== b.pageK) continue;
+        if (a.x0 < b.x1 - TOL && a.x1 > b.x0 + TOL && a.y0 < b.y1 - TOL && a.y1 > b.y0 + TOL) {
+          clashes.push(`${describe(a)} overlaps ${describe(b)}`);
+        }
+      }
+    }
+    add('no two printed blocks overlap each other', clashes);
+  }
 
   const failures = checks.filter(c => !c.passed).map(c => `check ${c.id || '–'} — ${c.name}: ${c.detail}`);
   return { passed: failures.length === 0, checks, failures, warnings: base.warnings };

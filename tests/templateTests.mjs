@@ -37,10 +37,21 @@ globalThis.crypto ??= webcrypto;
 
 let passed = 0, failed = 0;
 const results = [];
+// Async-aware: an `async` check that rejects must be reported as a FAIL, not
+// escape as an unhandled rejection and take the whole run down with it.
 const check = (name, fn) => {
-  try { fn(); passed++; results.push(`  PASS  ${name}`); }
-  catch (err) { failed++; results.push(`  FAIL  ${name}\n          ${err.message}`); }
+  const ok = () => { passed++; results.push(`  PASS  ${name}`); };
+  const bad = (err) => { failed++; results.push(`  FAIL  ${name}\n          ${err.message}`); };
+  try {
+    const out = fn();
+    if (out && typeof out.then === 'function') {
+      pending.push(out.then(ok, bad));
+      return;
+    }
+    ok();
+  } catch (err) { bad(err); }
 };
+const pending = [];
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
 const assertEqual = (actual, expected, msg) => {
   const a = JSON.stringify(actual), e = JSON.stringify(expected);
@@ -117,8 +128,11 @@ check('the self-test passed every check it gates generation on', () => {
 });
 
 check('part ids follow the spec worked example: 1(a), 1(b), 2, 3(a), 3(b)', () => {
-  assertEqual(t.rows.map(r => r.partId), ['1(a)', '1(b)', '2', '3(a)', '3(b)'], 'wrong part ids');
-  assertEqual(t.rows.map(r => r.regionId), ['p1a', 'p1b', 'p2', 'p3a', 'p3b'], 'wrong region ids');
+  // Problem 2 has a single sub-part, so it gets a second page of writing space
+  // for the same answer: two rows sharing part_id "2", distinct region_ids.
+  assertEqual(t.rows.map(r => r.partId), ['1(a)', '1(b)', '2', '2', '3(a)', '3(b)'], 'wrong part ids');
+  assertEqual(t.rows.map(r => r.regionId), ['p1a', 'p1b', 'p2', 'p2x2', 'p3a', 'p3b'], 'wrong region ids');
+  assertEqual([...new Set(t.rows.map(r => r.regionId))].length, t.rows.length, 'a region_id repeats');
 });
 
 check('the sketch part is flagged is_drawing, and only it', () =>
@@ -471,12 +485,41 @@ check('two parts sharing a page split it by points, but neither is squeezed', ()
   assertEqual(lay.splitByPoints(0, 0), [0.5, 0.5], 'zero points should split evenly');
 });
 
-check("a two-part problem is kept together rather than split across a page break", () => {
-  // One single-part problem, then a two-part problem: naive packing would put
-  // 2(a) on page 1 and 2(b) on page 2.
-  const l = lay.buildLayout(makeAssignment([[part('Lone', 10)], [part('First', 10), part('Second', 10)]]));
-  const page = (id) => l.regions.find(r => r.regionId === id).pageK;
-  assertEqual(page('p2a'), page('p2b'), 'the two-part problem was split across pages');
+check('every problem starts a new page, and that page carries one sub-part only', () => {
+  const l = lay.buildLayout(makeAssignment([
+    [part('1a', 10), part('1b', 10), part('1c', 10)],
+    [part('2a', 10), part('2b', 10)],
+  ]));
+  const perPage = new Map();
+  for (const r of l.regions) perPage.set(r.pageK, [...(perPage.get(r.pageK) || []), r]);
+
+  // No page mixes two problems.
+  for (const [k, rs] of perPage) {
+    assertEqual([...new Set(rs.map(r => r.problemIndex))].length, 1, `page ${k} mixes problems`);
+  }
+  // A problem's first page holds exactly one part.
+  const firstPageOf = new Map();
+  for (const r of l.regions) {
+    if (!firstPageOf.has(r.problemIndex)) firstPageOf.set(r.problemIndex, r.pageK);
+  }
+  for (const [prob, k] of firstPageOf) {
+    assertEqual(perPage.get(k).length, 1, `problem ${prob + 1}'s first page carries more than one sub-part`);
+  }
+  // 1(a) alone, then 1(b)+1(c); 2(a) alone, then 2(b).
+  assertEqual(l.regions.map(r => `${r.partId}@${r.pageK}`),
+    ['1(a)@1', '1(b)@2', '1(c)@2', '2(a)@3', '2(b)@4'], 'wrong pagination');
+});
+
+check('a problem with a single sub-part gets a second page of writing space', () => {
+  const l = lay.buildLayout(makeAssignment([[part('Only', 20)]]));
+  assertEqual(l.pageCount, 2, 'a lone question did not get its extra page');
+  assertEqual(l.regions.map(r => r.partId), ['1', '1'], 'the extra page is not the same part');
+  assertEqual(l.regions.map(r => r.regionId), ['p1', 'p1x2'], 'the continuation needs its own region_id');
+  assertEqual(l.regions.map(r => r.pageK), [1, 2], 'the continuation is not on the next page');
+  assert(!l.regions[0].isContinuation && l.regions[1].isContinuation, 'wrong region flagged as the continuation');
+  // The continuation is writing space, not a restatement.
+  assertEqual([l.regions[1].name, l.regions[1].description], ['', ''], 'the continuation repeats the question');
+  assert(l.regions[1].nominalMm.y1 - l.regions[1].nominalMm.y0 > 150, 'the continuation page is not mostly writing space');
 });
 
 // ---------- the payload cap is a hard failure, not a shrug ----------
@@ -682,19 +725,27 @@ check('the sheet carries the whole question: preamble, problem setup, part text'
   // Each problem gets a heading and its shared setup, above its first part.
   const headings = g.ink.filter(b => /^problem heading/.test(b.what));
   const texts = g.ink.filter(b => /^problem text/.test(b.what));
-  assertEqual(headings.length, 2, 'expected one heading per problem');
-  assertEqual(texts.length, 2, 'expected one shared-setup block per problem');
+  // Every page of a problem gets a heading; only its first page repeats the setup.
+  assertEqual(headings.length, g.pageCount, 'expected a problem heading on every page');
+  assertEqual(texts.length, 2, 'the shared setup should be printed once per problem');
 
   // The heading belongs to the problem's first part only, and sits above it.
   const openers = g.layout.regions.filter(r => r.problemBlock);
-  assertEqual(openers.map(r => r.partId), ['1(a)', '2'], 'the wrong parts opened a problem block');
+  assertEqual(openers.length, g.pageCount, 'every page should open with a problem block');
   for (const r of openers) {
     assert(r.problemBlock.boxMm.y1 <= r.promptTopMm + 0.01,
       `${r.regionId}: the problem block overlaps the prompt row`);
     assert(r.problemBlock.heading.startsWith(`Problem ${r.problemIndex + 1}`), 'wrong heading text');
   }
-  // And every part still carries its own question text.
-  for (const r of g.layout.regions) assert(r.descBoxMm, `${r.regionId}: no question text box`);
+  // Every part carries its own question text — except a continuation page,
+  // which is writing space for a question already asked on the page before.
+  for (const r of g.layout.regions) {
+    if (r.isContinuation) {
+      assert(!r.descBoxMm, `${r.regionId}: a continuation page restates the question`);
+    } else {
+      assert(r.descBoxMm, `${r.regionId}: no question text box`);
+    }
+  }
 });
 
 check('a problem continued on a later page repeats the heading, not the setup', () => {
@@ -716,7 +767,8 @@ check('long prose is squeezed before the writing area is, and never overflows', 
   const wordy = 'A '.repeat(400);
   const l = lay.buildLayout({
     ...makeAssignment([[{ ...part('Wordy one', 50), description: wordy },
-                        { ...part('Wordy two', 50), description: wordy }]]),
+                        { ...part('Wordy two', 50), description: wordy },
+                        { ...part('Wordy three', 50), description: wordy }]]),
     preamble: wordy,
   });
   l.problems = undefined;
@@ -726,9 +778,11 @@ check('long prose is squeezed before the writing area is, and never overflows', 
     assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.01,
       `${r.regionId}: ran past the bottom limit at ${r.declaredMm.y1.toFixed(1)} mm`);
   }
-  // Regions still must not overlap once prose has eaten into the page.
-  const [a, b] = l.regions;
-  assert(a.declaredMm.y1 <= b.promptTopMm + 0.01, 'the first region runs into the second prompt');
+  // Two regions that really do share a page must not run into each other.
+  const shared = l.regions.filter(r => r.pageK === 2);
+  assertEqual(shared.length, 2, 'expected parts (b) and (c) to share page 2');
+  assert(shared[0].declaredMm.y1 <= shared[1].promptTopMm + 0.01,
+    'the first region runs into the second prompt');
 });
 
 // ---------- question text sizes to fit, since the sheet is the assignment ----------
