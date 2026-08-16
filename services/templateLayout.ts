@@ -2,15 +2,16 @@
  * templateLayout.ts — Assignment → page-format region map.
  *
  * Decides how many pages a template needs, where each part's writing area sits,
- * and emits the sidecar rows. Pure geometry and pure data: no jsPDF, no DOM, so
- * the whole thing is testable without rendering anything.
+ * and emits the sidecar rows. Pure geometry and pure data: no jsPDF, no DOM, no
+ * text measurement, so the map is identical whether it is computed in a browser
+ * or in a test, and the whole thing is testable without rendering anything.
  *
  * Spec: `GradeBridge_Page_Format_v1.md` 4.1–4.4 and 8.5.
  */
 
 import { Assignment, Subsection, AnswerSpace } from '../types';
 import {
-  IDENTITY_BAND_MM, PAGE_H_MM, QR_KEEPOUT_MM, REGION_PAD_MM, REGION_Y_MAX_MM,
+  PAGE_H_MM, QR_KEEPOUT_MM, REGION_PAD_MM, REGION_Y_MAX_MM,
   RectMm, mmRectToFraction, round4,
 } from './pageFormat';
 
@@ -23,46 +24,65 @@ export const COLUMN_X0_MM = 23.0;   // declared (padded) left edge
 export const COLUMN_X1_MM = 192.9;  // declared (padded) right edge
 
 /**
- * The column reaches past x = 166, so it sits in the QR keep-out's x-range and
- * every page's first rectangle has to clear the keep-out's lower edge rather
- * than merely the identity band. Same reasoning as the spec's worked example
- * (Appendix B), which starts its first region at 40.3 mm for exactly this reason.
+ * Where a page's first prompt row may start.
+ *
+ * The column reaches past x = 166, so it sits in the QR keep-out's x-range. It
+ * is not enough for the *writing rectangle* to clear the keep-out: the prompt
+ * row above it carries a right-aligned points label at the column's right edge,
+ * which lands squarely in the QR's column. Text over the modules can stop the
+ * symbol decoding, and the QR is the whole registration mechanism — so the
+ * entire prompt row starts below the keep-out's lower edge, on every page.
  */
-export const FIRST_REGION_TOP_MM = QR_KEEPOUT_MM.y1 + 1.0; // 38.0
+export const FIRST_PROMPT_TOP_MM = QR_KEEPOUT_MM.y1 + 1.0; // 38.0
 
 /**
- * Page 1 carries the furniture the identity band is not allowed to hold — course,
- * title, the name/ID/date line, and the print instruction — so its first region
- * starts lower. Everything in that strip is below y = 25 and left of x = 166, so
- * it trips neither the band's ink scan nor the QR keep-out.
+ * Page 1 also carries the course/title line and the print instruction. Both sit
+ * between the identity band and the first prompt row, and both are held left of
+ * the QR keep-out, so this strip is reserved rather than measured.
  */
-export const PAGE1_FURNITURE_MM = 12.0;
+export const PAGE1_FURNITURE_TOP_MM = 26.0;
+export const PAGE1_FURNITURE_BOTTOM_MM = 44.0;
 
-/** Prompt line + rule + gap, above every writing area. Printed, never declared. */
-export const PROMPT_BLOCK_MM = 9.0;
-/** Blank space under one region before the next part's prompt. */
-export const REGION_GAP_MM = 5.0;
+/** Widest any page-1 furniture line may be — keeps it out of the QR column. */
+export const FURNITURE_MAX_WIDTH_MM = QR_KEEPOUT_MM.x0 - COLUMN_X0_MM - 2.0; // 141.0
 
-/** Nominal writing-area heights, mm. The declared rectangle adds REGION_PAD_MM on each side. */
-export const ANSWER_SPACE_MM: Record<AnswerSpace, number> = {
-  short: 32.0,
-  medium: 58.0,
-  tall: 92.0,
-  xtall: 140.0,
-};
+// ---- Per-region header ---------------------------------------------------
+/** `1(a). Title` on the left, `[N pts]` on the right. */
+export const PROMPT_ROW_MM = 6.0;
+/** The question text, when the part has one. Rendered into a fixed box. */
+export const DESC_BLOCK_MM = 13.0;
+/** Rule, then a breath, then the writing area starts. */
+export const RULE_GAP_MM = 2.5;
+/** Blank space under one region before the next part's header. */
+export const REGION_GAP_MM = 6.0;
 
-/** Default sizing when the author has not chosen: bigger parts get more room. */
-export const defaultAnswerSpace = (sub: Subsection): AnswerSpace => {
-  if (sub.isDrawing) return 'tall';
-  const pts = sub.points || 0;
-  if (pts <= 5) return 'short';
-  if (pts <= 12) return 'medium';
-  if (pts <= 25) return 'tall';
-  return 'xtall';
-};
+/** Height of everything printed above a writing area, for a given part. */
+export const headerHeightMm = (hasDescription: boolean): number =>
+  PROMPT_ROW_MM + (hasDescription ? DESC_BLOCK_MM : 0) + RULE_GAP_MM;
+
+// ---- Sizing --------------------------------------------------------------
+
+/**
+ * Item 3 of the 2026-08-15 correction: writing space is set **by rule, not by
+ * points**. At most two answer regions per page, each getting roughly half the
+ * usable height. A sketch, or a part explicitly marked `full`, takes a page to
+ * itself. Within a two-region page the split still leans on points, so a 25-pt
+ * part gets more room than a 5-pt one, but bounded so neither is squeezed.
+ *
+ * This replaced a points-derived short/medium/tall scale that produced very
+ * uneven pages — a single part could take most of a sheet.
+ */
+export const MAX_REGIONS_PER_PAGE = 2;
+
+/** Neither half of a shared page may drop below this share of the usable height. */
+export const MIN_SHARE = 0.35;
+export const MAX_SHARE = 1 - MIN_SHARE;
 
 export const answerSpaceFor = (sub: Subsection): AnswerSpace =>
-  sub.answerSpace ?? defaultAnswerSpace(sub);
+  sub.isDrawing ? 'full' : (sub.answerSpace ?? 'half');
+
+/** True when this part must have a page to itself. */
+export const isFullPage = (sub: Subsection): boolean => answerSpaceFor(sub) === 'full';
 
 // ---- Parts ---------------------------------------------------------------
 
@@ -73,9 +93,15 @@ export interface TemplatePart {
   partId: string;
   /** Sub-part title, for the printed prompt only. Not in the map. */
   name: string;
+  /** Question text, printed above the writing area. Not in the map. */
+  description: string;
   maxPoints: number;
   isDrawing: boolean;
-  heightMm: number;
+  fullPage: boolean;
+  /** Index of the problem this part belongs to, for keeping a problem together. */
+  problemIndex: number;
+  /** How many parts that problem has. */
+  problemPartCount: number;
 }
 
 /**
@@ -91,20 +117,26 @@ export const enumerateParts = (assignment: Assignment): TemplatePart[] =>
         regionId: single ? `p${pIdx + 1}` : `p${pIdx + 1}${letter}`,
         partId: single ? `${pIdx + 1}` : `${pIdx + 1}(${letter})`,
         name: sub.name || '',
+        description: sub.description || '',
         maxPoints: sub.points,
         isDrawing: !!sub.isDrawing,
-        heightMm: ANSWER_SPACE_MM[answerSpaceFor(sub)],
+        fullPage: isFullPage(sub),
+        problemIndex: pIdx,
+        problemPartCount: prob.subsections.length,
       };
     })
   );
 
 // ---- Placement -----------------------------------------------------------
 
-/** One placed region: the printed prompt, and the declared (padded) rectangle. */
 export interface PlacedRegion extends TemplatePart {
   pageK: number;
-  /** Top of the prompt text, mm. Printed content. */
+  /** Top of the `1(a). Title …[N pts]` row, mm. Printed content. */
   promptTopMm: number;
+  /** Box the question text is rendered into, mm. Absent when there is none. */
+  descBoxMm?: RectMm;
+  /** The rule the student writes below, mm. */
+  ruleYMm: number;
   /** The writing area the student sees, mm. */
   nominalMm: RectMm;
   /** nominal grown by REGION_PAD_MM on all four sides — this is what is stored. */
@@ -115,16 +147,16 @@ export interface TemplateLayout {
   parts: TemplatePart[];
   regions: PlacedRegion[];
   pageCount: number;
-  /** Parts whose requested height did not fit a page and were shortened. */
+  /** Parts whose writing area came out unusually small, worth telling the author. */
   clamped: { partId: string; requestedMm: number; usedMm: number }[];
 }
 
-/** Top of the first prompt block on a page — page 1 sits lower, under the furniture. */
+/** Top of the first prompt row on a page. */
 export const pageTopMm = (pageK: number): number =>
-  FIRST_REGION_TOP_MM + (pageK === 1 ? PAGE1_FURNITURE_MM : 0) + REGION_PAD_MM - PROMPT_BLOCK_MM;
+  pageK === 1 ? Math.max(FIRST_PROMPT_TOP_MM, PAGE1_FURNITURE_BOTTOM_MM) : FIRST_PROMPT_TOP_MM;
 
-/** Tallest writing area that can start at the top of a fresh page (page 2 onward). */
-export const MAX_REGION_HEIGHT_MM = REGION_Y_MAX_MM - (FIRST_REGION_TOP_MM + REGION_PAD_MM);
+/** Usable vertical run for headers + writing areas on a page. */
+export const pageRunMm = (pageK: number): number => REGION_Y_MAX_MM - pageTopMm(pageK);
 
 const pad = (r: RectMm): RectMm => ({
   x0: round4(r.x0 - REGION_PAD_MM), y0: round4(r.y0 - REGION_PAD_MM),
@@ -132,62 +164,102 @@ const pad = (r: RectMm): RectMm => ({
 });
 
 /**
- * Flow the parts down the pages. Each page starts a fresh column below the QR
- * keep-out; a part that does not fit in what is left moves to the next page
- * whole, because a writing area split across a page break has no meaning.
+ * Group the parts into pages: full-page parts alone, everything else in twos.
+ * A problem with exactly two parts is kept together when that only costs
+ * starting a new page — which is what "naturally" means here; nothing is
+ * reordered and no page is left empty to achieve it.
  */
+export const paginate = (parts: TemplatePart[]): TemplatePart[][] => {
+  const pages: TemplatePart[][] = [];
+  let current: TemplatePart[] = [];
+  const flush = () => { if (current.length) { pages.push(current); current = []; } };
+
+  parts.forEach((part, i) => {
+    if (part.fullPage) { flush(); pages.push([part]); return; }
+
+    // Would this part start a two-part problem as the *second* region on a page,
+    // splitting it across the break? Start a fresh page instead.
+    const startsPairedProblem =
+      part.problemPartCount === 2 &&
+      parts[i - 1]?.problemIndex !== part.problemIndex &&
+      !parts[i + 1]?.fullPage &&
+      parts[i + 1]?.problemIndex === part.problemIndex;
+    if (current.length === 1 && startsPairedProblem) flush();
+
+    current.push(part);
+    if (current.length === MAX_REGIONS_PER_PAGE) flush();
+  });
+  flush();
+  return pages;
+};
+
 export const buildLayout = (assignment: Assignment): TemplateLayout => {
   const parts = enumerateParts(assignment);
+  const pages = paginate(parts);
   const regions: PlacedRegion[] = [];
   const clamped: TemplateLayout['clamped'] = [];
 
-  let pageK = 1;
-  // Cursor is the top of the next prompt block.
-  let cursor = pageTopMm(pageK);
+  pages.forEach((pageParts, pageIdx) => {
+    const pageK = pageIdx + 1;
+    const top = pageTopMm(pageK);
+    const run = pageRunMm(pageK);
 
-  let regionsOnPage = 0;
+    // Everything printed above the writing areas, plus the padding they carry.
+    const overhead = pageParts.reduce((n, p) => n + headerHeightMm(!!p.description) + REGION_PAD_MM * 2, 0)
+      + REGION_GAP_MM * (pageParts.length - 1);
+    const writable = run - overhead;
 
-  for (const part of parts) {
-    /** Writing-area height that still leaves the declared rectangle inside y ≤ 262. */
-    const roomAt = (top: number) => REGION_Y_MAX_MM - (top + PROMPT_BLOCK_MM + REGION_PAD_MM);
+    // Two regions split the writable run by points, bounded so neither is squeezed.
+    const shares = pageParts.length === 2
+      ? splitByPoints(pageParts[0].maxPoints, pageParts[1].maxPoints)
+      : [1];
 
-    let height = Math.min(part.heightMm, MAX_REGION_HEIGHT_MM);
-    if (height > roomAt(cursor)) {
-      if (regionsOnPage > 0) {
-        pageK += 1;
-        regionsOnPage = 0;
-        cursor = pageTopMm(pageK);
+    let cursor = top;
+    pageParts.forEach((part, i) => {
+      const height = Math.max(writable * shares[i], 0);
+      if (height < 25.0) {
+        clamped.push({ partId: part.partId, requestedMm: 25.0, usedMm: round4(height) });
       }
-      // Page 1 starts lower than the rest, so the tallest part can still be a
-      // little too tall for it even on a fresh page. Shorten rather than leave
-      // page 1 empty and push everything down one page.
-      height = Math.min(height, roomAt(cursor));
-    }
-    if (height < part.heightMm) {
-      clamped.push({ partId: part.partId, requestedMm: part.heightMm, usedMm: round4(height) });
-    }
 
-    const nominalTop = cursor + PROMPT_BLOCK_MM;
-    const nominal: RectMm = {
-      x0: COLUMN_X0_MM + REGION_PAD_MM,
-      y0: round4(nominalTop),
-      x1: COLUMN_X1_MM - REGION_PAD_MM,
-      y1: round4(nominalTop + height),
-    };
+      const promptTop = cursor;
+      const hasDesc = !!part.description;
+      const descBox: RectMm | undefined = hasDesc ? {
+        x0: COLUMN_X0_MM, y0: round4(promptTop + PROMPT_ROW_MM),
+        x1: COLUMN_X1_MM, y1: round4(promptTop + PROMPT_ROW_MM + DESC_BLOCK_MM),
+      } : undefined;
 
-    regions.push({
-      ...part,
-      pageK,
-      promptTopMm: round4(cursor),
-      nominalMm: nominal,
-      declaredMm: pad(nominal),
+      const ruleY = round4(promptTop + headerHeightMm(hasDesc) - 1.0);
+      const nominalTop = promptTop + headerHeightMm(hasDesc) + REGION_PAD_MM;
+      const nominal: RectMm = {
+        x0: COLUMN_X0_MM + REGION_PAD_MM,
+        y0: round4(nominalTop),
+        x1: COLUMN_X1_MM - REGION_PAD_MM,
+        y1: round4(nominalTop + height),
+      };
+
+      regions.push({
+        ...part,
+        pageK,
+        promptTopMm: round4(promptTop),
+        descBoxMm: descBox,
+        ruleYMm: ruleY,
+        nominalMm: nominal,
+        declaredMm: pad(nominal),
+      });
+
+      cursor = nominal.y1 + REGION_PAD_MM + REGION_GAP_MM;
     });
+  });
 
-    regionsOnPage += 1;
-    cursor = nominal.y1 + REGION_PAD_MM + REGION_GAP_MM;
-  }
+  return { parts, regions, pageCount: Math.max(1, pages.length), clamped };
+};
 
-  return { parts, regions, pageCount: Math.max(1, pageK), clamped };
+/** Points-weighted split of a shared page, bounded to [MIN_SHARE, MAX_SHARE]. */
+export const splitByPoints = (a: number, b: number): [number, number] => {
+  const total = (a || 0) + (b || 0);
+  if (total <= 0) return [0.5, 0.5];
+  const first = Math.min(MAX_SHARE, Math.max(MIN_SHARE, a / total));
+  return [first, 1 - first];
 };
 
 // ---- The stored map ------------------------------------------------------
@@ -244,12 +316,4 @@ export const toLayoutCsv = (rows: LayoutRow[]): string => {
   return [LAYOUT_CSV_HEADER, ...body].join('\n') + '\n';
 };
 
-/** Where the prompt rule is drawn, and how wide. Printed content, not declared. */
-export const promptRule = (r: PlacedRegion) => ({
-  xFromMm: COLUMN_X0_MM,
-  xToMm: COLUMN_X1_MM,
-  yMm: round4(r.nominalMm.y0 - 1.5),
-});
-
-export const IDENTITY_BAND_LIMIT_MM = IDENTITY_BAND_MM;
 export const PAGE_BOTTOM_MM = PAGE_H_MM;

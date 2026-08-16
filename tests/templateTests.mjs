@@ -372,11 +372,14 @@ check('exactly one text line per page in the band, at the spec 8.4 anchor', () =
 
 check('every part gets a prompt and a rule, and the rule sits above the writing area', () => {
   for (const r of t.layout.regions) {
-    const rule = lay.promptRule(r);
-    assert(rule.yMm < r.nominalMm.y0, `${r.regionId}: the rule is not above the writing area`);
-    assert(rule.yMm > r.promptTopMm, `${r.regionId}: the rule is not below the prompt text`);
+    assert(r.ruleYMm < r.nominalMm.y0, `${r.regionId}: the rule is not above the writing area`);
+    assert(r.ruleYMm > r.promptTopMm, `${r.regionId}: the rule is not below the prompt text`);
     assert(r.declaredMm.y0 < r.nominalMm.y0, `${r.regionId}: padding was not applied outward`);
-    assert(r.declaredMm.y0 > rule.yMm - 3.1, `${r.regionId}: the declared rectangle swallows the prompt`);
+    assert(r.declaredMm.y0 > r.ruleYMm - 3.1, `${r.regionId}: the declared rectangle swallows the prompt`);
+    if (r.description) {
+      assert(r.descBoxMm, `${r.regionId}: has a description but no box reserved for it`);
+      assert(r.descBoxMm.y1 <= r.ruleYMm + 0.01, `${r.regionId}: the description box runs past the rule`);
+    }
   }
 });
 
@@ -431,26 +434,49 @@ check('a long assignment paginates, and every page carries its own correct k of 
     'some page has no regions');
 });
 
-check('the author can size a part, and a sketch defaults to a large area', () => {
-  const sized = lay.buildLayout(makeAssignment([[
-    part('Tiny', 1, { answerSpace: 'short' }),
-    part('Huge', 1, { answerSpace: 'xtall' }),
-    part('Sketch', 1, { isDrawing: true }),
-  ]]));
-  const h = (id) => {
-    const r = sized.regions.find(x => x.regionId === id);
-    return Math.round(r.nominalMm.y1 - r.nominalMm.y0);
-  };
-  assertEqual(h('p1a'), Math.round(lay.ANSWER_SPACE_MM.short), 'explicit short was not honoured');
-  assertEqual(h('p1b'), Math.round(lay.ANSWER_SPACE_MM.xtall), 'explicit xtall was not honoured');
-  assertEqual(h('p1c'), Math.round(lay.ANSWER_SPACE_MM.tall), 'a sketch did not default to a tall area');
+// ---------- correction item 3: two regions per page, by rule ----------
+check('at most two regions on any page', () => {
+  const perPage = new Map();
+  for (const r of t.rows) perPage.set(r.pageK, (perPage.get(r.pageK) || 0) + 1);
+  const over = [...perPage.entries()].filter(([, n]) => n > lay.MAX_REGIONS_PER_PAGE);
+  assertEqual(over.map(([p, n]) => `page ${p} has ${n}`), [], 'a page carries more than two regions');
 });
 
-check('a part too tall for a page is shortened and reported, never silently clipped', async () => {
-  const l = lay.buildLayout(makeAssignment([[part('Enormous', 1, { answerSpace: 'xtall' })]]));
+check('a sketch, and anything marked full page, gets a page to itself', () => {
+  const l = lay.buildLayout(makeAssignment([[
+    part('Shared one', 10), part('Sketch', 10, { isDrawing: true }),
+    part('Shared two', 10), part('Big', 10, { answerSpace: 'full' }),
+  ]]));
+  const pageOf = (id) => l.regions.find(r => r.regionId === id).pageK;
+  const alone = (id) => l.regions.filter(r => r.pageK === pageOf(id)).length === 1;
+  assert(alone('p1b'), 'the sketch shares its page');
+  assert(alone('p1d'), 'the full-page part shares its page');
+  assert(l.regions.find(r => r.regionId === 'p1b').isDrawing, 'the sketch lost its is_drawing flag');
+});
+
+check('a full-page part really does get most of the sheet', () => {
+  const l = lay.buildLayout(makeAssignment([[part('Solo', 10, { answerSpace: 'full' })]]));
   const r = l.regions[0];
-  assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.001, 'a region ran past the bottom limit');
-  if (l.clamped.length) assert(l.clamped[0].partId === '1', 'the clamp was not reported');
+  const h = r.nominalMm.y1 - r.nominalMm.y0;
+  assert(h > 150, `a lone part got only ${h.toFixed(0)} mm of writing space`);
+  assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.001, 'the region ran past the bottom limit');
+});
+
+check('two parts sharing a page split it by points, but neither is squeezed', () => {
+  const l = lay.buildLayout(makeAssignment([[part('Small', 5), part('Large', 45)]]));
+  const [a, b] = l.regions.map(r => r.nominalMm.y1 - r.nominalMm.y0);
+  assert(b > a, 'the 45-point part did not get more room than the 5-point one');
+  assert(a / (a + b) >= lay.MIN_SHARE - 0.01, `the small part got only ${(100 * a / (a + b)).toFixed(0)}% of the page`);
+  assertEqual(lay.splitByPoints(10, 10), [0.5, 0.5], 'equal points should split evenly');
+  assertEqual(lay.splitByPoints(0, 0), [0.5, 0.5], 'zero points should split evenly');
+});
+
+check("a two-part problem is kept together rather than split across a page break", () => {
+  // One single-part problem, then a two-part problem: naive packing would put
+  // 2(a) on page 1 and 2(b) on page 2.
+  const l = lay.buildLayout(makeAssignment([[part('Lone', 10)], [part('First', 10), part('Second', 10)]]));
+  const page = (id) => l.regions.find(r => r.regionId === id).pageK;
+  assertEqual(page('p2a'), page('p2b'), 'the two-part problem was split across pages');
 });
 
 // ---------- the payload cap is a hard failure, not a shrug ----------
@@ -476,14 +502,114 @@ check('the self-test refuses to emit when a rule is broken', async () => {
   assert(threw !== null, 'an assignment with no parts produced a template');
 });
 
+// ---------- the 2026-08-15 correction ----------
+
+check('item 1: no name, student ID or date field anywhere on the template', () => {
+  // Identity comes from Gradescope authenticating the upload. A labelled blank
+  // is redundant, contradicts "do not write your name on the pages", and a
+  // filled-in one is exactly the PII the band gate exists to keep out.
+  const text = [...pdfText.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' | ');
+  for (const banned of [/\bName\b/i, /\bStudent ID\b/i, /\bDate\b/i, /_{5,}/]) {
+    assert(!banned.test(text), `the template prints an identity field matching ${banned}: "${text.slice(0, 200)}"`);
+  }
+});
+
+check('item 2: nothing printed enters the QR keep-out, on any page', () => {
+  // The writing rectangle already cleared it; the prompt row above, with its
+  // right-aligned points label, did not. Checked against the ink the generator
+  // actually laid down, not against the layout's intent.
+  const intruders = t.ink.filter(b =>
+    b.x0 < fmt.QR_KEEPOUT_MM.x1 - 0.01 && b.x1 > fmt.QR_KEEPOUT_MM.x0 + 0.01 &&
+    b.y0 < fmt.QR_KEEPOUT_MM.y1 - 0.01 && b.y1 > fmt.QR_KEEPOUT_MM.y0 + 0.01);
+  assertEqual(intruders.map(b => `page ${b.pageK} ${b.what}`), [], 'something is printed over the QR');
+});
+
+check('item 2: the first prompt row on every page starts below the keep-out', () => {
+  const firstPerPage = new Map();
+  for (const r of t.layout.regions) {
+    if (!firstPerPage.has(r.pageK) || r.promptTopMm < firstPerPage.get(r.pageK).promptTopMm) {
+      firstPerPage.set(r.pageK, r);
+    }
+  }
+  for (const [page, r] of firstPerPage) {
+    assert(r.promptTopMm >= fmt.QR_KEEPOUT_MM.y1,
+      `page ${page}: the first prompt row starts at y = ${r.promptTopMm} mm, above the keep-out's ${fmt.QR_KEEPOUT_MM.y1} mm`);
+  }
+});
+
+check('item 2: the QR still decodes with every ink box on the page overlaid', () => {
+  // A conservative full-page check: fill every recorded ink box black over the
+  // rendered symbol and decode. If a label had been drawn across the modules,
+  // this is what would catch it — level H recovers 30%, so an eyeball check of
+  // "does it look overlapped" is not enough.
+  t.payloads.forEach((payload, i) => {
+    const pageK = i + 1;
+    const m = enc.encodeQr(payload);
+    const modulePx = Math.round((fmt.QR_SIZE_MM / m.moduleCount) * PX_PER_MM_300);
+    const quiet = fmt.QR_QUIET_MODULES * modulePx;
+    const side = m.moduleCount * modulePx + quiet * 2;
+    const rgba = new Uint8ClampedArray(side * side * 4).fill(255);
+    const originXmm = fmt.QR_RECT_MM.x0 - fmt.QR_QUIET_MM;
+    const originYmm = fmt.QR_RECT_MM.y0 - fmt.QR_QUIET_MM;
+    const pxPerMm = side / (fmt.QR_SIZE_MM + fmt.QR_QUIET_MM * 2);
+
+    for (let r = 0; r < m.moduleCount; r++) for (let c = 0; c < m.moduleCount; c++) {
+      if (!m.dark[r][c]) continue;
+      for (let dy = 0; dy < modulePx; dy++) for (let dx = 0; dx < modulePx; dx++) {
+        const idx = ((quiet + r * modulePx + dy) * side + (quiet + c * modulePx + dx)) * 4;
+        rgba[idx] = rgba[idx + 1] = rgba[idx + 2] = 0;
+      }
+    }
+    for (const b of t.ink.filter(b => b.pageK === pageK)) {
+      const x0 = Math.max(0, Math.round((b.x0 - originXmm) * pxPerMm));
+      const x1 = Math.min(side, Math.round((b.x1 - originXmm) * pxPerMm));
+      const y0 = Math.max(0, Math.round((b.y0 - originYmm) * pxPerMm));
+      const y1 = Math.min(side, Math.round((b.y1 - originYmm) * pxPerMm));
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        const idx = (y * side + x) * 4;
+        rgba[idx] = rgba[idx + 1] = rgba[idx + 2] = 0;
+      }
+    }
+    const res = jsQR(rgba, side, side);
+    assert(res !== null, `page ${pageK}: the symbol stopped decoding once the page's ink was overlaid`);
+    assertEqual(res.data, payload, `page ${pageK}: decoded the wrong payload with ink overlaid`);
+  });
+});
+
+check('item 5: no em-dash in any printed text', () => {
+  const text = [...pdfText.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join('');
+  assert(!text.includes('—') && !text.includes(''), 'an em-dash reached the page');
+  assert(/Write your answer below this line\./.test(text) || t.ink.some(b => /^prompt /.test(b.what)),
+    'the prompt line is missing');
+});
+
+check('item 4: authored text with Greek and math is not silently garbled', async () => {
+  // Node has no DOM, so the KaTeX rasteriser is unavailable and the generator
+  // falls back to WinAnsi-safe vector text. Assert the fallback is safe — jsPDF
+  // re-encodes a non-Latin-1 string as UTF-16BE, which its standard fonts render
+  // as mojibake. The glyph path itself needs a browser and was verified there.
+  const greek = makeAssignment([[
+    { id: 'g1', name: 'Skin depth $\\delta_s$', description: 'Find $\\alpha$ and $\\omega$ for a $\\mu$F cap.',
+      points: 50, submissionType: 'Handwritten', handwrittenGradingMode: 'ai' },
+    { id: 'g2', name: 'Reflection $\\Gamma$', description: 'Compute $\\Gamma$ at 6 $\\Omega$.',
+      points: 50, submissionType: 'Handwritten', handwrittenGradingMode: 'ai' },
+  ]]);
+  const g = await gen.generateTemplate(greek);
+  const bytes = Buffer.from(await g.pdf.arrayBuffer()).toString('latin1');
+  const strings = bytes.match(/\(((?:\\.|[^\\()])*)\)\s*Tj/g) || [];
+  const utf16 = strings.filter(s => / /.test(s));
+  assertEqual(utf16, [], 'a string was re-encoded as UTF-16BE and will render as mojibake');
+  assert(!/\\delta|\\Omega|\\frac/.test(bytes), 'raw LaTeX was written onto the template');
+});
+
 // ---------- .md round trip of the template settings ----------
 {
   const exportSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportSvc.mjs');
   const mdParser = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParser.mjs');
 
   const authored = makeAssignment([[
-    part('Cutoff frequency', 40, { answerSpace: 'xtall' }),
-    part('Field sketch', 60, { isDrawing: true, answerSpace: 'tall' }),
+    part('Cutoff frequency', 40, { answerSpace: 'full' }),
+    part('Field sketch', 60, { isDrawing: true, answerSpace: 'half' }),
   ]], { pageFormatId: 'EEC130BHW3' });
 
   const md = exportSvc.assignmentToMd(authored);
@@ -491,12 +617,24 @@ check('the self-test refuses to emit when a rule is broken', async () => {
 
   check('md: the template settings survive export and import', () => {
     assert(/^\*\*Template ID:\*\* EEC130BHW3$/m.test(md), `no Template ID line in:\n${md}`);
-    assert(/^> template: space=xtall$/m.test(md), 'the writing-space setting was not written');
-    assert(/^> template: space=tall, sketch$/m.test(md), 'the sketch flag was not written');
+    assert(/^> template: space=full$/m.test(md), 'the full-page setting was not written');
+    assert(/^> template: space=half, sketch$/m.test(md), 'the sketch flag was not written');
     assertEqual(back.pageFormatId, 'EEC130BHW3', 'the Template ID was lost');
     const [a, b] = back.problems[0].subsections;
-    assertEqual([a.answerSpace, a.isDrawing], ['xtall', undefined], 'part (a) settings were lost');
-    assertEqual([b.answerSpace, b.isDrawing], ['tall', true], 'part (b) settings were lost');
+    assertEqual([a.answerSpace, a.isDrawing], ['full', undefined], 'part (a) settings were lost');
+    assertEqual([b.answerSpace, b.isDrawing], ['half', true], 'part (b) settings were lost');
+  });
+
+  check('md: the pre-correction size scale still imports', () => {
+    const legacy = [
+      '# EEC130B: Homework 3', '', '**Input:** handwritten', '',
+      '## Problem 1: Old scale', '',
+      '### (a) Was extra tall [50 pts] [handwritten]', 'Do it.', '', '> template: space=xtall', '',
+      '### (b) Was short [50 pts] [handwritten]', 'Do it.', '', '> template: space=short', '',
+    ].join('\n');
+    const [a, b] = mdParser.parseMdToAssignment(legacy).problems[0].subsections;
+    assertEqual(a.answerSpace, 'full', 'xtall should map to a full page');
+    assertEqual(b.answerSpace, 'half', 'short should map to a half page');
   });
 
   check('md: the round trip is a fixed point, and the layout is unchanged by it', async () => {

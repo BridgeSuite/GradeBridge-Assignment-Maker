@@ -174,18 +174,23 @@ def parse_metadata(lines):
 
 def parse_template_options(lines):
     """
-    Parse '> template: space=tall, sketch' — the printed-template settings for a
-    handwritten sub-part. Returns a dict with any of answerSpace / isDrawing that
-    were set; absent keys mean the generator derives them from the part's points.
+    Parse '> template: space=full, sketch' — the printed-template settings for a
+    handwritten sub-part. Absent means the part shares a page with one other,
+    which is the default.
+
+    short/medium/tall/xtall were the pre-correction scale, from before writing
+    space became "at most two parts per page". Still read, so files written
+    against the old scale import without losing the author's intent that one
+    part wanted a lot of room.
     """
     raw = extract_blockquote_value('template', lines)
     if not raw:
         return {}
     out = {}
     for token in [t.strip().lower() for t in raw.split(',') if t.strip()]:
-        m = re.match(r'^space\s*=\s*(short|medium|tall|xtall)$', token)
+        m = re.match(r'^space\s*=\s*(half|full|short|medium|tall|xtall)$', token)
         if m:
-            out['answerSpace'] = m.group(1)
+            out['answerSpace'] = 'full' if m.group(1) in ('full', 'xtall') else 'half'
             continue
         if token in ('sketch', 'drawing'):
             out['isDrawing'] = True

@@ -124,17 +124,24 @@ function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title'
 }
 
 /**
- * `> template: space=tall, sketch` — the printed-template settings for a
- * handwritten sub-part. Absent means both are unset, and the generator derives
- * the writing-area height from the part's points.
+ * `> template: space=full, sketch` — the printed-template settings for a
+ * handwritten sub-part. Absent means the part shares a page with one other,
+ * which is the default.
  */
 function parseTemplateOptions(body: string[]): { answerSpace?: AnswerSpace; isDrawing?: boolean } {
   const raw = extractBlockquoteValue('template', body);
   if (!raw) return {};
   const out: { answerSpace?: AnswerSpace; isDrawing?: boolean } = {};
   for (const token of raw.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)) {
-    const space = token.match(/^space\s*=\s*(short|medium|tall|xtall)$/);
-    if (space) { out.answerSpace = space[1] as AnswerSpace; continue; }
+    const space = token.match(/^space\s*=\s*(half|full|short|medium|tall|xtall)$/);
+    if (space) {
+      // short/medium/tall/xtall were the pre-correction scale, from before
+      // writing space became "at most two parts per page". Still read, so files
+      // written against the old scale import without losing the author's intent
+      // that one part wanted a lot of room.
+      out.answerSpace = (space[1] === 'full' || space[1] === 'xtall') ? 'full' : 'half';
+      continue;
+    }
     if (token === 'sketch' || token === 'drawing') out.isDrawing = true;
   }
   return out;

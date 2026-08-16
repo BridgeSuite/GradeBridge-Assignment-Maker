@@ -167,15 +167,15 @@ A third key configures the **printed QR template** (§10) and is handwritten-onl
 
 | Key | Purpose |
 |---|---|
-| `> template: space={short\|medium\|tall\|xtall}, sketch` | How much writing room this part gets on the printed sheet, and whether it is a sketch. Both parts are optional and order does not matter — `> template: sketch` alone is valid. |
+| `> template: space={half\|full}, sketch` | Whether this part shares its template page with one other (`half`, the default) or takes a page to itself (`full`), and whether it is a sketch. Both parts are optional and order does not matter — `> template: sketch` alone is valid. |
 
-Omit the line entirely and the height is derived from the part's points (5 → short, 12 → medium, 25 → tall, more → extra tall), which is what every assignment written before templates existed does.
+Omit the line and the part shares a page, which is what every assignment written before templates existed does. A sketch always takes a full page. The older `space=short|medium|tall|xtall` values still import — `xtall` reads as `full`, the rest as `half`.
 
 ```markdown
 ### (b) Field sketch [25 pts] [handwritten:human]
 Sketch the transverse field pattern.
 
-> template: space=tall, sketch
+> template: sketch
 
 > grader_note: Look for arrows normal to the walls.
 ```
@@ -236,7 +236,27 @@ A handwritten assignment can emit a printable template the student writes on and
 
 The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Page/GradeBridge_Page_Format_v1.md`, transcribed into `services/pageFormat.ts`, and enforced by the spec 8.7 self-test that runs on every generation — a template that fails any check is not emitted at all.
 
-Two consequences for authoring:
+### What the printed sheet holds
 
-- **Nothing student-identifying goes on the sheet above 25 mm.** The top band holds only the QR, one header line and the two top marks. The name/ID/date line lives below it, which the generator handles.
+Per page: the four corner marks, the QR, one header line in the top 25 mm, and one or two answer regions. Page 1 also carries the course and title and a print instruction, below the band.
+
+Per region: `1(a).` and the sub-part title, the points, the question text, a rule, then blank writing space. Prompt and question text go through the same KaTeX renderer as the other exports, so `$\delta_s$` and a bare `ω` print as glyphs rather than being garbled by jsPDF's Latin-1 fonts.
+
+**There is no name, student ID or date field, deliberately.** Identity comes from Gradescope authenticating the upload, so a blank for it is redundant; students are told not to write their name on the pages, so a labelled blank is a mixed message; a filled-in name is exactly the PII the band gate exists to keep out; and grading is meant to be blind to identity. Appendix C of the page-format spec says the same — because the app authenticates the student, there is no identity page.
+
+### How much room a part gets
+
+**At most two answer regions per page**, set by rule rather than derived from points:
+
+| Setting | Effect |
+|---|---|
+| `half` (default) | Shares the page with one other part. The two split the usable height by points, bounded so neither drops below 35%. |
+| `full` | The part takes a page to itself. |
+| a sketch | Always `full`. |
+
+Points influence the split within a shared page but never the page count, which is what keeps the sheets predictable.
+
+### Two more things to know
+
 - **The QR is the same on every copy.** One class-wide master, no per-student code; the app identifies the student from their login, not from the paper.
+- **Nothing printed may enter the QR's keep-out**, so the first prompt row on every page starts below it. The generator checks the ink it actually laid down, not just the layout, and refuses to emit a template where anything overlaps the symbol — text over the modules can stop it decoding, and the QR is the whole registration mechanism.
