@@ -135,6 +135,7 @@ const exportSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), '
 const mdParser = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParserService.mjs');
 const inputModeSvc = await loadModule(join(REPO, 'services', 'inputModeService.ts'), 'inputModeService.mjs');
 const mathRender = await loadModule(join(REPO, 'services', 'mathRender.ts'), 'mathRender.mjs');
+const pointsSvc = await loadModule(join(REPO, 'services', 'pointsService.ts'), 'pointsService.mjs');
 
 // Same module, but with a real jsPDF so the PDF can actually be inspected.
 const exportPdfSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportServicePdf.mjs', {
@@ -147,6 +148,7 @@ const { buildAssignmentSpec, assignmentToMd, generateGradingRubric, convertSubmi
 const { parseMdToAssignment } = mdParser;
 const { typeAllowedInMode, defaultTypeForMode, convertSubsectionToMode, strandedSubsectionLabels } = inputModeSvc;
 const { splitMath, toHtml, toLatexBody, toPlainUnicode, toPdfText, hasMath } = mathRender;
+const { apportionPoints, tooManyPartsForTarget } = pointsSvc;
 
 // ---------- helpers ----------
 const spkiPem = (der) =>
@@ -742,6 +744,100 @@ if (fixture) {
   check('md round trip: a second pass is a fixed point', () => {
     const once = assignmentToMd(parseMdToAssignment(mathMd));
     assertEqual(assignmentToMd(parseMdToAssignment(once)), once, 'the export is not stable');
+  });
+}
+
+// =====================================================
+// 10. Points apportionment
+// =====================================================
+// The old code rounded every part then dumped the whole rounding remainder on
+// the largest one. On a 47-part, 200-point assignment that left a part worth
+// −6, which reached the exported rubric and the student spec; the QR template's
+// self-test was the first thing that ever checked. Largest-remainder
+// apportionment replaces it.
+{
+  const sum = (xs) => xs.reduce((a, b) => a + b, 0);
+
+  // The three real ENG17 assignments that surfaced this. Points read off the
+  // .md headers; the second and third produced negative parts.
+  const HW1 = [6,4,5,5,20,4,5,11,14,6,14,6,14,6,6,6,8,4,4,8,4,14,6,6,4,5,5];
+  const HW2 = [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4];
+  const many = Array.from({ length: 41 }, () => 5);
+
+  check('no part can come out negative or zero, on the assignments that broke it', () => {
+    for (const [label, pts] of [['HW1-shaped', HW1], ['47 equal parts', HW2], ['41 equal parts', many]]) {
+      const out = apportionPoints(pts, 100);
+      assertEqual(out.filter(v => v <= 0), [], `${label}: a part came out non-positive`);
+      assertEqual(sum(out), 100, `${label}: does not sum to the target`);
+    }
+  });
+
+  check('the exact case from the failing export: 47 parts, 200 points', () => {
+    const out = apportionPoints(HW2, 100);
+    assertEqual(sum(out), 100, 'does not sum to 100');
+    assert(Math.min(...out) >= 1, `smallest part is ${Math.min(...out)}`);
+    assert(Math.max(...out) <= 3, `one part absorbed too much: ${Math.max(...out)}`);
+  });
+
+  check('a part keeps its share instead of absorbing the whole remainder', () => {
+    // HW1: the 20-point part is 10% of 200, so it must stay worth 10 of 100.
+    // The old code made it 7 — the same as a 14-point part.
+    const out = apportionPoints(HW1, 100);
+    assertEqual(out[4], 10, 'the 20-point part did not keep its 10% share');
+    assertEqual(sum(out), 100, 'does not sum to 100');
+  });
+
+  check('a small part is never scaled out of existence', () => {
+    // 1 point in a 400-point assignment is 0.25 of 100 — floors to zero.
+    const out = apportionPoints([1, 399], 100);
+    assertEqual(out, [1, 99], 'a 1-point part was rounded away');
+    const many1 = apportionPoints([1, 1, 1, 997], 100);
+    assert(many1.every(v => v >= 1), `a part hit zero: ${many1.join(',')}`);
+    assertEqual(sum(many1), 100, 'does not sum to 100');
+  });
+
+  check('scaling up works too, and stays exact', () => {
+    assertEqual(apportionPoints([1, 1, 1], 100), [34, 33, 33], 'wrong split scaling up');
+    assertEqual(sum(apportionPoints([3, 7], 100)), 100, 'does not sum to 100');
+    assertEqual(apportionPoints([3, 7], 100), [30, 70], 'exact shares were disturbed');
+  });
+
+  check('it is idempotent and leaves an already-correct total alone', () => {
+    const once = apportionPoints(HW1, 100);
+    assertEqual(apportionPoints(once, 100), once, 'a second pass changed the result');
+    assertEqual(apportionPoints([50, 50], 100), [50, 50], 'an exact total was disturbed');
+  });
+
+  check('degenerate inputs do not throw or invent points', () => {
+    assertEqual(apportionPoints([], 100), [], 'empty input');
+    assertEqual(apportionPoints([0, 0], 100), [0, 0], 'all-zero points should stay zero');
+    assertEqual(apportionPoints([5, 5], 0), [5, 5], 'a zero target should change nothing');
+    assertEqual(apportionPoints([5, 5], NaN), [5, 5], 'a NaN target should change nothing');
+  });
+
+  check('more graded parts than points: it gives up rather than zeroing anyone', () => {
+    // 150 parts cannot each hold >= 1 point out of 100. Every part stays worth
+    // something and the total overshoots, which the self-test then surfaces.
+    const out = apportionPoints(Array.from({ length: 150 }, () => 2), 100);
+    assert(out.every(v => v >= 1), 'a part was zeroed');
+    assert(tooManyPartsForTarget(Array.from({ length: 150 }, () => 2), 100), 'the condition was not detected');
+  });
+
+  check('the whole export path survives the assignment that failed', async () => {
+    const subs = HW2.map((pts, i) => ({
+      id: `s${i}`, name: `Part ${i}`, description: '', points: pts,
+      submissionType: 'Handwritten', handwrittenGradingMode: 'ai',
+    }));
+    // Three problems, so the shape matches a real assignment.
+    const problems = [subs.slice(0, 20), subs.slice(20, 35), subs.slice(35)].map((ss, i) => ({
+      id: `p${i}`, name: `Problem ${i + 1}`, description: '', subsections: ss,
+    }));
+    const a = { ...makeAssignment(), inputMode: 'handwritten', problems };
+
+    const rubric = generateGradingRubric(a);
+    const bad = Object.values(rubric.rubrics).filter(r => !(r.max_points > 0));
+    assertEqual(bad.map(r => `${r.subsection_id}=${r.max_points}`), [],
+      'the grading rubric still carries a non-positive max_points');
   });
 }
 

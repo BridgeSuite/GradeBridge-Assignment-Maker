@@ -20,6 +20,7 @@ import {
 } from '../services/inputModeService';
 import { answerSpaceFor } from '../services/templateLayout';
 import { derivePageFormatId } from '../services/qrPayload';
+import { apportionPoints } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, PenLine, Keyboard, QrCode } from 'lucide-react';
 
@@ -40,17 +41,11 @@ const AI_WORD_RANGES: Partial<Record<SubmissionType, { range: string; min: numbe
   [SubmissionType.AI_GRADED_LONG]:   { range: '150–250 words', min: 150 },
 };
 
+// Same arithmetic the export uses — imported, not copied, so what the editor
+// shows and what lands in the rubric cannot drift apart.
 const normalizePoints = (assignment: Assignment): Assignment => {
-  const target = assignment.targetPoints || 100;
   const allSubs = assignment.problems.flatMap(p => p.subsections);
-  const total = allSubs.reduce((sum, s) => sum + s.points, 0);
-  if (total === 0 || total === target) return assignment;
-  const scaled = allSubs.map(s => Math.round(s.points * target / total));
-  const diff = target - scaled.reduce((a, b) => a + b, 0);
-  if (diff !== 0) {
-    const maxIdx = scaled.reduce((maxI, v, i, arr) => v > arr[maxI] ? i : maxI, 0);
-    scaled[maxIdx] += diff;
-  }
+  const scaled = apportionPoints(allSubs.map(s => s.points), assignment.targetPoints || 100);
   let idx = 0;
   return {
     ...assignment,
