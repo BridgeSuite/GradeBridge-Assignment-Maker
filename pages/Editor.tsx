@@ -102,6 +102,7 @@ const Editor: React.FC = () => {
     courseCode: '',
     title: '',
     inputMode: 'electronic',
+    aiFeedback: false,
     preamble: '',
     problems: [emptyProblem()],
     aiGradingConfig: DEFAULT_AI_GRADING_CONFIG,
@@ -111,6 +112,15 @@ const Editor: React.FC = () => {
 
   // Assignments saved before handwritten support have no inputMode — they are electronic.
   const inputMode: InputMode = assignment.inputMode ?? 'electronic';
+
+  /**
+   * A brand-new assignment has not been asked the AI-feedback question yet, so
+   * the control is highlighted until the author answers. Anything loaded or
+   * imported already carries a value (absent reads as off), so it shows as a
+   * plain toggle.
+   */
+  const [aiFeedbackAnswered, setAiFeedbackAnswered] = useState(isEdit);
+  const aiFeedbackUnanswered = !aiFeedbackAnswered;
 
   // What the QR would carry if the author leaves the Template ID blank.
   const [qrIdPreview, setQrIdPreview] = useState('');
@@ -140,6 +150,7 @@ const Editor: React.FC = () => {
         const sanitized = {
           ...loadedWithoutDate,
           inputMode: loaded.inputMode || 'electronic',
+          aiFeedback: !!loaded.aiFeedback,
           aiGradingConfig: loaded.aiGradingConfig || DEFAULT_AI_GRADING_CONFIG,
           problems: loaded.problems.map(p => ({
             ...p,
@@ -344,6 +355,7 @@ const Editor: React.FC = () => {
           createdAt: Date.now(),
           updatedAt: Date.now(),
           aiGradingConfig: loadedAssignment.aiGradingConfig || DEFAULT_AI_GRADING_CONFIG,
+          aiFeedback: !!loadedAssignment.aiFeedback,
           problems: loadedAssignment.problems.map(p => ({
             ...p,
             id: uuidv4(),
@@ -357,6 +369,7 @@ const Editor: React.FC = () => {
         };
 
         setAssignment(newAssignment);
+        setAiFeedbackAnswered(true); // the template carries a value; show it as a plain toggle
         setKeyInput(newAssignment.coursePublicKey || '');
         checkCourseKey(newAssignment.coursePublicKey || '');
         alert("Template loaded! You can now edit and save it as a new assignment.");
@@ -534,8 +547,53 @@ const Editor: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* The one per-assignment AI-feedback flag. Asked as a question so a
+                new assignment gets a conscious answer rather than a silent
+                default, and left visible so an imported value can be seen and
+                changed. Gates student-facing feedback only — never grading. */}
+            <div className={`md:col-span-2 rounded-lg border p-4 ${
+              aiFeedbackUnanswered ? 'border-amber-300 bg-amber-50' : 'border-academic-200 bg-academic-50'
+            }`}>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <p className="text-sm font-medium text-academic-800">
+                    Allow students to request AI feedback on any problem in this assignment?
+                  </p>
+                  {aiFeedbackUnanswered && (
+                    <p className="text-xs text-amber-700 mt-0.5 font-medium">Choose one — it defaults to No.</p>
+                  )}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  {([
+                    { label: 'No',  value: false },
+                    { label: 'Yes', value: true  },
+                  ]).map(({ label, value }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => { setAiFeedbackAnswered(true); setAssignment({ ...assignment, aiFeedback: value }); }}
+                      className={`text-xs px-4 py-1.5 rounded-full border font-medium transition-colors ${
+                        !aiFeedbackUnanswered && !!assignment.aiFeedback === value
+                          ? 'bg-academic-700 text-white border-academic-700'
+                          : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-academic-500 mt-2 leading-relaxed">
+                Whole-assignment, not per problem. Students may request one gradeless, pointer-only pass per
+                problem; it never returns a score and a human still posts every grade. This setting does not
+                change grading, which follows the sub-part types. The feedback itself is generated in
+                Gradescope, not here.
+              </p>
+            </div>
+
             <Input
-              label="Course Code" 
+              label="Course Code"
               placeholder="e.g. CS101" 
               value={assignment.courseCode} 
               onChange={e => setAssignment({...assignment, courseCode: e.target.value})} 

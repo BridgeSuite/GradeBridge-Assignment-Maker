@@ -746,6 +746,80 @@ if (fixture) {
 }
 
 // =====================================================
+// 9. AI feedback — one per-assignment flag
+// =====================================================
+// Gates the student-facing, gradeless, pointer-only feedback. It does NOT gate
+// grading, which follows the sub-part types. The feedback itself, the
+// per-problem election and the cross-submission tally live in Gradescope; this
+// app only records the instructor's choice and carries it into the spec.
+{
+  const withFlag = (aiFeedback) => makeAssignment({ inputMode: 'electronic', aiFeedback });
+
+  const onMd = assignmentToMd(withFlag(true));
+  const offMd = assignmentToMd(withFlag(false));
+  const absentMd = assignmentToMd(makeAssignment());
+
+  check('md export: the line is written only when the flag is on', () => {
+    assert(/^\*\*AI Feedback:\*\* on$/m.test(onMd), `no AI Feedback line in:\n${onMd}`);
+    assert(!/AI Feedback/.test(offMd), 'an "off" flag wrote a line');
+    assert(!/AI Feedback/.test(absentMd), 'an unset flag wrote a line');
+  });
+
+  check('md export: off and absent produce byte-identical files', () =>
+    assertEqual(offMd, absentMd, 'an explicit off differs from an absent flag'));
+
+  check('md import: on reads as on, off and absent read as off', () => {
+    assertEqual(parseMdToAssignment(onMd).aiFeedback, true, '"on" did not import as on');
+    assertEqual(parseMdToAssignment(offMd).aiFeedback, false, 'an absent line did not import as off');
+    const explicitOff = onMd.replace('**AI Feedback:** on', '**AI Feedback:** off');
+    assertEqual(parseMdToAssignment(explicitOff).aiFeedback, false, '"off" did not import as off');
+  });
+
+  check('md import: only a clear yes switches a student-facing feature on', () => {
+    for (const value of ['off', 'no', 'false', 'maybe', 'ON PLEASE', '']) {
+      const md = onMd.replace('**AI Feedback:** on', `**AI Feedback:** ${value}`);
+      assertEqual(parseMdToAssignment(md).aiFeedback, false, `"${value}" switched the flag on`);
+    }
+    for (const value of ['on', 'ON', 'On', 'yes', 'true', 'enabled']) {
+      const md = onMd.replace('**AI Feedback:** on', `**AI Feedback:** ${value}`);
+      assertEqual(parseMdToAssignment(md).aiFeedback, true, `"${value}" did not switch the flag on`);
+    }
+  });
+
+  check('md round trip is a fixed point for on, off and absent', () => {
+    for (const [label, md] of [['on', onMd], ['off', offMd], ['absent', absentMd]]) {
+      assertEqual(assignmentToMd(parseMdToAssignment(md)), md, `${label} is not a fixed point`);
+    }
+  });
+
+  check('the flag reaches the exported spec, and an old spec reads as off', async () => {
+    assertEqual((await buildAssignmentSpec(withFlag(true))).aiFeedback, true, 'the flag is missing from the spec');
+    assertEqual((await buildAssignmentSpec(withFlag(false))).aiFeedback, false, 'off did not reach the spec');
+    // An assignment saved before the flag existed carries no field at all.
+    const old = await buildAssignmentSpec(makeAssignment());
+    assert(!('aiFeedback' in old), 'the field was invented for an assignment that never had it');
+    assert(!old.aiFeedback, 'an absent field does not read as off');
+  });
+
+  check('the flag does not touch grading', () => {
+    // Same assignment, flag flipped: the rubric the autograder reads is identical.
+    const a = generateGradingRubric(withFlag(true));
+    const b = generateGradingRubric(withFlag(false));
+    assertEqual(a, b, 'the AI-feedback flag changed the grading rubric');
+    assert(!JSON.stringify(a).includes('aiFeedback'), 'the flag leaked into the grading rubric');
+  });
+
+  check('a handwritten assignment carries the flag too', () => {
+    const hw = makeAssignment({ inputMode: 'handwritten', aiFeedback: true });
+    const md = assignmentToMd(hw);
+    assert(/^\*\*Input:\*\* handwritten$/m.test(md), 'the Input line went missing');
+    assert(/^\*\*AI Feedback:\*\* on$/m.test(md), 'the AI Feedback line went missing');
+    const back = parseMdToAssignment(md);
+    assertEqual([back.inputMode, back.aiFeedback], ['handwritten', true], 'a value was lost');
+  });
+}
+
+// =====================================================
 // 8. Cross-app — the mirrored delimiter file has not drifted
 // =====================================================
 // services/mathDelimiters.ts is held byte-identical in both repos. If they ever

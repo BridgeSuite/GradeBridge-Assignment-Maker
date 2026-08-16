@@ -679,6 +679,12 @@ export const assignmentToMd = (assignment: Assignment): string => {
     lines.push(`**Template ID:** ${normalized.pageFormatId}`);
     lines.push('');
   }
+  // Emitted only when on: absent means off, so a file written before AI feedback
+  // existed round-trips byte-for-byte.
+  if (normalized.aiFeedback) {
+    lines.push(`**AI Feedback:** on`);
+    lines.push('');
+  }
   if (normalized.preamble) {
     lines.push(`**Preamble:** ${normalized.preamble}`);
   }

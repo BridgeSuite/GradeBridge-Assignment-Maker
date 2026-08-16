@@ -98,12 +98,14 @@ function parseProblemHeader(line: string): ProblemHeaderMeta | null {
 }
 
 function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'>
-    & { pageFormatId?: string } {
-  // **Input:** is optional — files without it are electronic, which keeps every
-  // pre-handwritten .md byte-identical on round trip. **Template ID:** is the
-  // same: absent means "derive it from the course code and title".
-  const meta: Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'> & { pageFormatId?: string } =
-    { courseCode: '', title: '', preamble: '', inputMode: 'electronic' as InputMode };
+    & { pageFormatId?: string; aiFeedback: boolean } {
+  // Every optional line here defaults to the value a file written before it
+  // existed would have had, so older .md files round-trip byte-for-byte:
+  // **Input:** absent → electronic, **Template ID:** absent → derived,
+  // **AI Feedback:** absent → off.
+  const meta: Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'>
+      & { pageFormatId?: string; aiFeedback: boolean } =
+    { courseCode: '', title: '', preamble: '', inputMode: 'electronic' as InputMode, aiFeedback: false };
   for (const line of lines) {
     const l = line.trim();
     let m = l.match(/^#\s+([^:]+):\s+(.+)$/);
@@ -119,6 +121,10 @@ function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title'
       if (id) meta.pageFormatId = id;
       continue;
     }
+    // Anything other than a clear "on" reads as off — this gates a student-facing
+    // feature, so an ambiguous value should not switch it on.
+    m = l.match(/^\*\*AI Feedback:\*\*\s+(.+)$/i);
+    if (m) { meta.aiFeedback = /^(on|yes|true|enabled?)$/i.test(m[1].trim()); continue; }
   }
   return meta;
 }
@@ -278,6 +284,7 @@ export function parseMdToAssignment(content: string): Assignment {
     title: meta.title,
     inputMode: meta.inputMode,
     ...(meta.pageFormatId ? { pageFormatId: meta.pageFormatId } : {}),
+    aiFeedback: meta.aiFeedback,
     preamble: meta.preamble,
     problems,
     aiGradingConfig: DEFAULT_AI_CONFIG,
