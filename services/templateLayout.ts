@@ -41,7 +41,8 @@ export const FIRST_PROMPT_TOP_MM = QR_KEEPOUT_MM.y1 + 1.0; // 38.0
  * the QR keep-out, so this strip is reserved rather than measured.
  */
 export const PAGE1_FURNITURE_TOP_MM = 26.0;
-export const PAGE1_FURNITURE_BOTTOM_MM = 44.0;
+/** Title + print instruction. The preamble, when there is one, extends past this. */
+export const PAGE1_FURNITURE_BASE_BOTTOM_MM = 40.0;
 
 /** Widest any page-1 furniture line may be — keeps it out of the QR column. */
 export const FURNITURE_MAX_WIDTH_MM = QR_KEEPOUT_MM.x0 - COLUMN_X0_MM - 2.0; // 141.0
@@ -49,16 +50,45 @@ export const FURNITURE_MAX_WIDTH_MM = QR_KEEPOUT_MM.x0 - COLUMN_X0_MM - 2.0; // 
 // ---- Per-region header ---------------------------------------------------
 /** `1(a). Title` on the left, `[N pts]` on the right. */
 export const PROMPT_ROW_MM = 6.0;
-/** The question text, when the part has one. Rendered into a fixed box. */
-export const DESC_BLOCK_MM = 13.0;
 /** Rule, then a breath, then the writing area starts. */
 export const RULE_GAP_MM = 2.5;
 /** Blank space under one region before the next part's header. */
 export const REGION_GAP_MM = 6.0;
 
+/** Question text is set at this size, and wraps at this line height. */
+export const DESC_FONT_PT = 9.0;
+export const DESC_LINE_MM = DESC_FONT_PT * 1.35 * 25.4 / 72;
+/** A single part cannot eat the page with prose; past this it is scaled down. */
+export const DESC_MAX_LINES = 8;
+
+/**
+ * How many lines the question text will take, estimated from character count
+ * rather than measured.
+ *
+ * The layout has to be identical in a browser and in a Node test — the map is
+ * hashed into every page's QR, so a millimetre of drift between the two would
+ * change `layout_id` and make a template refuse to crop. That rules out asking
+ * jsPDF or the DOM to measure anything. Half the font size is a good average
+ * advance width for Helvetica prose; `$\delta_s$` counts as eleven characters
+ * and renders as about two, so math over-reserves, which is the safe direction.
+ */
+export const estimateDescLines = (text: string, widthMm: number): number => {
+  if (!text.trim()) return 0;
+  const charMm = DESC_FONT_PT * 0.5 * 25.4 / 72;
+  const perLine = Math.max(20, Math.floor(widthMm / charMm));
+  const lines = text.split('\n').reduce(
+    (n, para) => n + Math.max(1, Math.ceil(para.trim().length / perLine)), 0
+  );
+  return Math.min(lines, DESC_MAX_LINES);
+};
+
+/** Vertical space reserved for a part's question text. Zero when it has none. */
+export const descBlockMm = (text: string): number =>
+  round4(estimateDescLines(text, COLUMN_X1_MM - COLUMN_X0_MM) * DESC_LINE_MM);
+
 /** Height of everything printed above a writing area, for a given part. */
-export const headerHeightMm = (hasDescription: boolean): number =>
-  PROMPT_ROW_MM + (hasDescription ? DESC_BLOCK_MM : 0) + RULE_GAP_MM;
+export const headerHeightMm = (description: string): number =>
+  PROMPT_ROW_MM + descBlockMm(description) + RULE_GAP_MM;
 
 // ---- Sizing --------------------------------------------------------------
 
@@ -102,6 +132,10 @@ export interface TemplatePart {
   problemIndex: number;
   /** How many parts that problem has. */
   problemPartCount: number;
+  /** `Problem 2: Rectangular waveguide` — printed above the problem's first part. */
+  problemHeading: string;
+  /** The problem's shared setup text, printed once under its heading. */
+  problemDescription: string;
 }
 
 /**
@@ -123,14 +157,28 @@ export const enumerateParts = (assignment: Assignment): TemplatePart[] =>
         fullPage: isFullPage(sub),
         problemIndex: pIdx,
         problemPartCount: prob.subsections.length,
+        problemHeading: `Problem ${pIdx + 1}${prob.name ? `: ${prob.name}` : ''}`,
+        problemDescription: prob.description || '',
       };
     })
   );
 
 // ---- Placement -----------------------------------------------------------
 
+/** The problem's heading and shared setup, printed above its first part. */
+export interface ProblemBlock {
+  heading: string;
+  /** Empty when the problem has no shared setup, or when it is a continuation. */
+  text: string;
+  /** True when the problem started on an earlier page — heading only, no repeat of the setup. */
+  continued: boolean;
+  boxMm: RectMm;
+}
+
 export interface PlacedRegion extends TemplatePart {
   pageK: number;
+  /** Printed above this region when it is the first of its problem on the page. */
+  problemBlock?: ProblemBlock;
   /** Top of the `1(a). Title …[N pts]` row, mm. Printed content. */
   promptTopMm: number;
   /** Box the question text is rendered into, mm. Absent when there is none. */
@@ -147,16 +195,27 @@ export interface TemplateLayout {
   parts: TemplatePart[];
   regions: PlacedRegion[];
   pageCount: number;
+  /** The assignment's instructions, printed under the title on page 1. */
+  preambleBoxMm?: RectMm;
+  /** Where page 1's first prompt row starts, once the furniture is measured. */
+  page1TopMm: number;
   /** Parts whose writing area came out unusually small, worth telling the author. */
   clamped: { partId: string; requestedMm: number; usedMm: number }[];
 }
 
-/** Top of the first prompt row on a page. */
-export const pageTopMm = (pageK: number): number =>
-  pageK === 1 ? Math.max(FIRST_PROMPT_TOP_MM, PAGE1_FURNITURE_BOTTOM_MM) : FIRST_PROMPT_TOP_MM;
+/** Heading line above a problem's first part. */
+export const PROBLEM_HEADING_MM = 5.5;
+/** Gap under a problem block before the first part's prompt row. */
+export const PROBLEM_BLOCK_GAP_MM = 1.5;
+/** No writing area may be squeezed below this, whatever the prose costs. */
+export const MIN_REGION_MM = 22.0;
+
+/** Vertical space a problem block needs, given whether it repeats the setup. */
+export const problemBlockMm = (text: string, continued: boolean): number =>
+  PROBLEM_HEADING_MM + (continued ? 0 : descBlockMm(text)) + PROBLEM_BLOCK_GAP_MM;
 
 /** Usable vertical run for headers + writing areas on a page. */
-export const pageRunMm = (pageK: number): number => REGION_Y_MAX_MM - pageTopMm(pageK);
+export const pageRunMm = (topMm: number): number => REGION_Y_MAX_MM - topMm;
 
 const pad = (r: RectMm): RectMm => ({
   x0: round4(r.x0 - REGION_PAD_MM), y0: round4(r.y0 - REGION_PAD_MM),
@@ -193,43 +252,103 @@ export const paginate = (parts: TemplatePart[]): TemplatePart[][] => {
   return pages;
 };
 
+/**
+ * The sheet is the assignment, so it has to carry the whole question: the
+ * assignment's instructions on page 1, each problem's shared setup above its
+ * first part, and each part's own text above its writing area. A student should
+ * never need a second document to know what 1(a) is asking.
+ *
+ * Prose competes with writing space, and prose can be arbitrarily long. When a
+ * page cannot hold both, the prose is squeezed first — down to a single line per
+ * block if it comes to that — so the writing area never falls below
+ * MIN_REGION_MM and never runs past the page. The generator scales the rendered
+ * text into whatever box survives, so nothing is silently cut off.
+ */
 export const buildLayout = (assignment: Assignment): TemplateLayout => {
   const parts = enumerateParts(assignment);
   const pages = paginate(parts);
   const regions: PlacedRegion[] = [];
   const clamped: TemplateLayout['clamped'] = [];
+  const columnWidth = COLUMN_X1_MM - COLUMN_X0_MM;
+
+  // Page 1's furniture: title, print instruction, then the assignment preamble.
+  const preambleMm = descBlockMm(assignment.preamble || '');
+  const furnitureBottom = PAGE1_FURNITURE_BASE_BOTTOM_MM + preambleMm;
+  const page1Top = Math.max(FIRST_PROMPT_TOP_MM, furnitureBottom);
+  const preambleBoxMm: RectMm | undefined = preambleMm > 0 ? {
+    x0: COLUMN_X0_MM, y0: round4(PAGE1_FURNITURE_BASE_BOTTOM_MM - 1.5),
+    x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM, y1: round4(PAGE1_FURNITURE_BASE_BOTTOM_MM - 1.5 + preambleMm),
+  } : undefined;
+
+  const seenProblem = new Set<number>();
 
   pages.forEach((pageParts, pageIdx) => {
     const pageK = pageIdx + 1;
-    const top = pageTopMm(pageK);
-    const run = pageRunMm(pageK);
+    const top = pageK === 1 ? page1Top : FIRST_PROMPT_TOP_MM;
+    const run = pageRunMm(top);
 
-    // Everything printed above the writing areas, plus the padding they carry.
-    const overhead = pageParts.reduce((n, p) => n + headerHeightMm(!!p.description) + REGION_PAD_MM * 2, 0)
+    // Which parts open a problem block on this page, and whether it is a repeat.
+    const openers = pageParts.map((p, i) => {
+      const firstOfProblemHere = i === 0 || pageParts[i - 1].problemIndex !== p.problemIndex;
+      return firstOfProblemHere
+        ? { continued: seenProblem.has(p.problemIndex) }
+        : null;
+    });
+    pageParts.forEach(p => seenProblem.add(p.problemIndex));
+
+    // Shrink prose until the writing areas fit. `squeeze` scales every reserved
+    // prose block on the page; 1 is "as authored", 0 is "one line each".
+    const proseMm = (squeeze: number) =>
+      pageParts.reduce((n, p, i) => {
+        const opener = openers[i];
+        const problem = opener
+          ? PROBLEM_HEADING_MM + PROBLEM_BLOCK_GAP_MM +
+            (opener.continued ? 0 : shrink(descBlockMm(p.problemDescription), squeeze))
+          : 0;
+        return n + problem + shrink(descBlockMm(p.description), squeeze);
+      }, 0);
+    const fixedMm = pageParts.reduce((n) => n + PROMPT_ROW_MM + RULE_GAP_MM + REGION_PAD_MM * 2, 0)
       + REGION_GAP_MM * (pageParts.length - 1);
-    const writable = run - overhead;
+    const needed = MIN_REGION_MM * pageParts.length;
 
-    // Two regions split the writable run by points, bounded so neither is squeezed.
+    let squeeze = 1;
+    while (squeeze > 0 && run - fixedMm - proseMm(squeeze) < needed) squeeze = round4(squeeze - 0.05);
+    squeeze = Math.max(0, squeeze);
+
+    const writable = Math.max(run - fixedMm - proseMm(squeeze), needed);
     const shares = pageParts.length === 2
       ? splitByPoints(pageParts[0].maxPoints, pageParts[1].maxPoints)
       : [1];
 
     let cursor = top;
     pageParts.forEach((part, i) => {
-      const height = Math.max(writable * shares[i], 0);
-      if (height < 25.0) {
-        clamped.push({ partId: part.partId, requestedMm: 25.0, usedMm: round4(height) });
+      const opener = openers[i];
+      let problemBlock: ProblemBlock | undefined;
+      if (opener) {
+        const textMm = opener.continued ? 0 : shrink(descBlockMm(part.problemDescription), squeeze);
+        const height = PROBLEM_HEADING_MM + textMm;
+        problemBlock = {
+          heading: opener.continued ? `${part.problemHeading} (continued)` : part.problemHeading,
+          text: opener.continued ? '' : part.problemDescription,
+          continued: opener.continued,
+          boxMm: { x0: COLUMN_X0_MM, y0: round4(cursor), x1: COLUMN_X1_MM, y1: round4(cursor + height) },
+        };
+        cursor = round4(cursor + height + PROBLEM_BLOCK_GAP_MM);
       }
 
       const promptTop = cursor;
-      const hasDesc = !!part.description;
-      const descBox: RectMm | undefined = hasDesc ? {
+      const descHeight = shrink(descBlockMm(part.description), squeeze);
+      const descBox: RectMm | undefined = descHeight > 0 ? {
         x0: COLUMN_X0_MM, y0: round4(promptTop + PROMPT_ROW_MM),
-        x1: COLUMN_X1_MM, y1: round4(promptTop + PROMPT_ROW_MM + DESC_BLOCK_MM),
+        x1: COLUMN_X1_MM, y1: round4(promptTop + PROMPT_ROW_MM + descHeight),
       } : undefined;
 
-      const ruleY = round4(promptTop + headerHeightMm(hasDesc) - 1.0);
-      const nominalTop = promptTop + headerHeightMm(hasDesc) + REGION_PAD_MM;
+      const header = PROMPT_ROW_MM + descHeight + RULE_GAP_MM;
+      const height = Math.max(writable * shares[i], MIN_REGION_MM);
+      if (height < 30.0) clamped.push({ partId: part.partId, requestedMm: 30.0, usedMm: round4(height) });
+
+      const ruleY = round4(promptTop + header - 1.0);
+      const nominalTop = promptTop + header + REGION_PAD_MM;
       const nominal: RectMm = {
         x0: COLUMN_X0_MM + REGION_PAD_MM,
         y0: round4(nominalTop),
@@ -240,6 +359,7 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
       regions.push({
         ...part,
         pageK,
+        problemBlock,
         promptTopMm: round4(promptTop),
         descBoxMm: descBox,
         ruleYMm: ruleY,
@@ -251,8 +371,18 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
     });
   });
 
-  return { parts, regions, pageCount: Math.max(1, pages.length), clamped };
+  return {
+    parts, regions,
+    pageCount: Math.max(1, pages.length),
+    preambleBoxMm,
+    page1TopMm: round4(page1Top),
+    clamped,
+  };
 };
+
+/** Scale a reserved prose block, never below one line (or zero when there is none). */
+const shrink = (mm: number, squeeze: number): number =>
+  mm <= 0 ? 0 : round4(Math.max(DESC_LINE_MM, mm * squeeze));
 
 /** Points-weighted split of a shared page, bounded to [MIN_SHARE, MAX_SHARE]. */
 export const splitByPoints = (a: number, b: number): [number, number] => {

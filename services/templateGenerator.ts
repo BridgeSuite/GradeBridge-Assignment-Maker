@@ -32,7 +32,7 @@ import { renderTextToCanvas, toPdfText } from './mathRender';
 import {
   MARK_ORIGINS_MM, MARK_SIZE_MM, PAGE_H_MM, PAGE_W_MM, QR_KEEPOUT_MM, QR_MODULES,
   QR_QUIET_MM, QR_RECT_MM, QR_SIZE_MM, HEADER_TEXT_ANCHOR_MM,
-  RectMm, mmRectToFraction,
+  RectMm, mmRectToFraction, round4,
 } from './pageFormat';
 import { encodeQr } from './qrEncoder';
 import {
@@ -40,7 +40,7 @@ import {
 } from './qrPayload';
 import {
   COLUMN_X0_MM, COLUMN_X1_MM, FURNITURE_MAX_WIDTH_MM, LayoutRow, PAGE1_FURNITURE_TOP_MM,
-  PROMPT_ROW_MM, PlacedRegion, TemplateLayout,
+  DESC_FONT_PT, PROBLEM_HEADING_MM, PROMPT_ROW_MM, PlacedRegion, TemplateLayout,
   buildLayout, toLayoutCsv, toLayoutRows,
 } from './templateLayout';
 import { SelfTestReport, runInkChecks, runSelfTest } from './templateSelfTest';
@@ -218,7 +218,9 @@ const drawHeaderLine = (doc: jsPDF, assignmentId: string, k: number, n: number, 
  * meant to be blind to identity. Appendix C says the same — because the app
  * authenticates the student, there is no identity page. Nothing replaces it.
  */
-const drawPage1Furniture = async (doc: jsPDF, assignment: Assignment, ink: InkBox[]) => {
+const drawPage1Furniture = async (
+  doc: jsPDF, assignment: Assignment, layout: TemplateLayout, ink: InkBox[]
+) => {
   await drawAuthoredText(
     doc, `${assignment.courseCode}: ${assignment.title}`,
     { x0: COLUMN_X0_MM, y0: PAGE1_FURNITURE_TOP_MM, x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM, y1: PAGE1_FURNITURE_TOP_MM + 6.5 },
@@ -232,6 +234,14 @@ const drawPage1Furniture = async (doc: jsPDF, assignment: Assignment, ink: InkBo
     drawPlain(doc, line, COLUMN_X0_MM, PAGE1_FURNITURE_TOP_MM + 8.0 + i * 3.4,
       { fontPt: 7.5, grey: 110 }, ink, 1, 'print instruction');
   });
+
+  // The assignment's own instructions. Held to the furniture width so it stays
+  // clear of the QR column, which it would otherwise reach at this height.
+  if (layout.preambleBoxMm && assignment.preamble) {
+    await drawAuthoredText(doc, assignment.preamble,
+      { ...layout.preambleBoxMm, x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM },
+      { fontPt: DESC_FONT_PT, grey: 40 }, ink, 1, 'preamble');
+  }
 };
 
 /**
@@ -240,6 +250,20 @@ const drawPage1Furniture = async (doc: jsPDF, assignment: Assignment, ink: InkBo
  * printed here is inside it.
  */
 const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
+  // The problem's heading and shared setup, above its first part. Without this
+  // the sheet is not a self-contained assignment — "1(a)" means nothing on its
+  // own when the givens are stated once at the top of the problem.
+  if (r.problemBlock) {
+    const b = r.problemBlock;
+    drawPlain(doc, b.heading, COLUMN_X0_MM, b.boxMm.y0,
+      { fontPt: 11, bold: true }, ink, r.pageK, `problem heading ${r.partId}`);
+    if (b.text) {
+      await drawAuthoredText(doc, b.text,
+        { x0: COLUMN_X0_MM, y0: round4(b.boxMm.y0 + PROBLEM_HEADING_MM), x1: COLUMN_X1_MM, y1: b.boxMm.y1 },
+        { fontPt: DESC_FONT_PT }, ink, r.pageK, `problem text ${r.partId}`);
+    }
+  }
+
   // Points first, so the title knows how much room is left.
   const points = `[${r.maxPoints} pts]`;
   applyText(doc, 9, false, 0);
@@ -320,7 +344,7 @@ export const generateTemplate = async (assignment: Assignment): Promise<Generate
     drawMarks(doc);
     drawQr(doc, payloads[k - 1]);
     drawHeaderLine(doc, assignmentId, k, layout.pageCount, ink);
-    if (k === 1) await drawPage1Furniture(doc, assignment, ink);
+    if (k === 1) await drawPage1Furniture(doc, assignment, layout, ink);
     for (const r of layout.regions.filter(r => r.pageK === k)) await drawRegionPrompt(doc, r, ink);
   }
 
