@@ -125,7 +125,8 @@ def parse_problem_header(line):
 def parse_metadata(lines):
     """
     Parse the title line and metadata fields from the top of the file.
-    Returns dict with courseCode, title, preamble, inputMode, pageFormatId.
+    Returns dict with courseCode, title, preamble, inputMode, pageFormatId,
+    aiFeedback.
     Due date is intentionally ignored — managed in Canvas.
     """
     meta = {
@@ -136,7 +137,10 @@ def parse_metadata(lines):
         'inputMode': 'electronic',
         # **Template ID:** is optional too — absent means the QR template
         # generator derives one from the course code and title.
-        'pageFormatId': None
+        'pageFormatId': None,
+        # **AI Feedback:** absent means off, so files written before the flag
+        # existed stay valid and feedback-off.
+        'aiFeedback': False
     }
 
     for line in lines:
@@ -167,6 +171,14 @@ def parse_metadata(lines):
             cleaned = re.sub(r'[^A-Z0-9]', '', m.group(1).strip().upper())[:12]
             if cleaned:
                 meta['pageFormatId'] = cleaned
+            continue
+
+        # AI feedback: **AI Feedback:** on
+        # Anything other than a clear "on" reads as off — this gates a
+        # student-facing feature, so an ambiguous value must not switch it on.
+        m = re.match(r'^\*\*AI Feedback:\*\*\s+(.+)$', line, re.IGNORECASE)
+        if m:
+            meta['aiFeedback'] = bool(re.match(r'^(on|yes|true|enabled?)$', m.group(1).strip(), re.IGNORECASE))
             continue
 
     return meta
@@ -363,6 +375,7 @@ def parse_md(filepath):
         'courseCode': meta['courseCode'],
         'title': meta['title'],
         'inputMode': meta['inputMode'],
+        'aiFeedback': meta['aiFeedback'],
         'preamble': meta['preamble'],
         'problems': problems,
         # Only present when the .md pinned one; otherwise the QR template

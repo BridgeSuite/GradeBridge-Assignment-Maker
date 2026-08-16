@@ -59,6 +59,20 @@ export interface Assignment {
   title: string;
   inputMode?: InputMode; // How students answer. Absent (older assignments) means 'electronic'.
   pageFormatId?: string; // QR field 2, [A-Z0-9]{1,12}. Unset = derived from courseCode + title.
+  /**
+   * Whether students may request the gradeless, pointer-only AI feedback on any
+   * problem in this assignment. Whole-assignment; there are no per-problem allow
+   * flags. Absent means off, so every spec written before this existed stays
+   * valid and feedback-off.
+   *
+   * **Gates student-facing feedback only — never grading.** Whether the AI
+   * analyses work and advises a grade to a human is driven by the submission
+   * types and is unaffected by this. The feedback itself, the per-problem
+   * one-time election and the cross-submission tally all live in
+   * Gradescope/Docker; this app only records the instructor's choice and carries
+   * it into the exported spec.
+   */
+  aiFeedback?: boolean;
   dueDate?: string; // ISO Date string — optional, managed in Canvas
   dueTime?: string; // HH:MM — optional, managed in Canvas
   preamble: string;

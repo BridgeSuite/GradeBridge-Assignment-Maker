@@ -2,7 +2,7 @@
 
 **What this is:** the reference for the `.md` format the Assignment Maker reads with **Import Markdown** and writes with **Export .md**. If you draft an assignment as markdown to import, follow this.
 
-**Source of truth:** this document is derived from, and must stay in lockstep with, `services/mdParserService.ts` (import) and `services/exportService.ts` (export) in this repo, and their Python port `converter/convert.py`. If the code and this file disagree, the code wins, and this file is the bug. Last synced to the format as of 2026-08-15 (QR page-format templates).
+**Source of truth:** this document is derived from, and must stay in lockstep with, `services/mdParserService.ts` (import) and `services/exportService.ts` (export) in this repo, and their Python port `converter/convert.py`. If the code and this file disagree, the code wins, and this file is the bug. Last synced to the format as of 2026-08-15 (QR page-format templates; AI-feedback flag).
 
 ---
 
@@ -35,10 +35,17 @@ Sketch the transverse E-field and justify the maximum.
 | `# {COURSE}: {TITLE}` | **yes** | Course code and assignment title. Exactly one, first. Format: `# EEC130A: Homework 3`. |
 | `**Input:** handwritten` | no | Marks the whole assignment as handwritten. Any other value, or the line being absent, means **electronic**. Emitted by Export only for handwritten assignments, so older electronic files have no such line. |
 | `**Template ID:** {ID}` | no | Handwritten only. Goes in the printed QR as the layout key (`[A-Z0-9]{1,12}`, unique across the course). Emitted only when the author pinned one; absent means it is derived from the course code and title. |
+| `**AI Feedback:** on` | no | Whether students may request AI feedback on any problem in this assignment. `on` or `off`; absent means **off**. Emitted by Export only when on, so older files stay byte-identical. |
 | `**Preamble:** {text}` | no | Instructions shown to the student. Single line. |
 | `**Due:** {anything}` | no | **Ignored on import** — due dates are managed in Canvas. Safe to include or omit. |
 
 `inputMode` governs which mediums are valid (see §5): a `handwritten` assignment should use only `[handwritten]` / `[handwritten:human]` sub-parts; an `electronic` assignment should use everything except those.
+
+`**AI Feedback:** on` allows students to request the one-time, gradeless AI feedback on any problem in
+this assignment; `off` or an absent line disables it. It gates the student-facing feedback only, not
+grading, which is governed by the sub-part type tags. The feedback itself, the per-problem one-time
+election, and the tally are handled downstream in Gradescope, not by the Assignment Maker or the
+Student app; this line only records the instructor's choice and carries it into the exported spec.
 
 ---
 
