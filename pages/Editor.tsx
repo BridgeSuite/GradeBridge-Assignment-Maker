@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { Assignment, AnswerSpace, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
+import { Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService } from '../services/exportService';
 import {
@@ -18,7 +18,7 @@ import {
   strandedSubsectionLabels,
   typeAllowedInMode
 } from '../services/inputModeService';
-import { ANSWER_SPACE_MM, defaultAnswerSpace } from '../services/templateLayout';
+import { answerSpaceFor } from '../services/templateLayout';
 import { derivePageFormatId } from '../services/qrPayload';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, PenLine, Keyboard, QrCode } from 'lucide-react';
@@ -758,21 +758,28 @@ const Editor: React.FC = () => {
                              QR template, and whether it is a sketch. Both only affect the
                              printed sheet and the layout map. */}
                          <span className="text-xs text-academic-300 mx-1">|</span>
-                         <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Writing space:</span>
-                         <select
-                           value={sub.answerSpace ?? ''}
-                           onChange={e => updateSubsection(pIndex, sIndex, {
-                             answerSpace: (e.target.value || undefined) as AnswerSpace | undefined,
-                           })}
-                           className="text-xs border border-academic-300 rounded px-2 py-1 bg-white focus:outline-none focus:border-academic-500"
-                           title="Height of this part's answer area on the printed template"
-                         >
-                           <option value="">Auto ({ANSWER_SPACE_MM[defaultAnswerSpace(sub)]} mm)</option>
-                           <option value="short">Short ({ANSWER_SPACE_MM.short} mm)</option>
-                           <option value="medium">Medium ({ANSWER_SPACE_MM.medium} mm)</option>
-                           <option value="tall">Tall ({ANSWER_SPACE_MM.tall} mm)</option>
-                           <option value="xtall">Extra tall ({ANSWER_SPACE_MM.xtall} mm)</option>
-                         </select>
+                         <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Template page:</span>
+                         {([
+                           { label: 'Half page', value: 'half' as const,
+                             title: 'Shares a page with one other part. Two parts per page is the cap.' },
+                           { label: 'Full page', value: 'full' as const,
+                             title: 'This part gets a page to itself.' },
+                         ]).map(({ label, value, title }) => (
+                           <button
+                             key={value}
+                             type="button"
+                             disabled={!!sub.isDrawing}
+                             onClick={() => updateSubsection(pIndex, sIndex, { answerSpace: value })}
+                             title={sub.isDrawing ? 'Sketches always take a full page' : title}
+                             className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
+                               answerSpaceFor(sub) === value
+                                 ? 'bg-academic-700 text-white border-academic-700'
+                                 : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                             } ${sub.isDrawing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                           >
+                             {label}
+                           </button>
+                         ))}
                          <button
                            type="button"
                            onClick={() => updateSubsection(pIndex, sIndex, { isDrawing: !sub.isDrawing })}
@@ -781,7 +788,7 @@ const Editor: React.FC = () => {
                                ? 'bg-academic-700 text-white border-academic-700'
                                : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
                            }`}
-                           title="Sketch part — sized for a drawing and flagged is_drawing in the layout map"
+                           title="Sketch part. Takes a full page and is flagged is_drawing in the layout map."
                          >
                            Sketch
                          </button>

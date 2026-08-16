@@ -20,8 +20,12 @@ export interface AiGradingConfig {
   maxTokens: number;
 }
 
-/** How much writing room a handwritten part gets on the printed template. */
-export type AnswerSpace = 'short' | 'medium' | 'tall' | 'xtall';
+/**
+ * How much of a printed template page a handwritten part takes.
+ * `half` — shares the page with one other part (the default; at most two per page).
+ * `full` — alone on its page. Sketches take this automatically.
+ */
+export type AnswerSpace = 'half' | 'full';
 
 export interface Subsection {
   id: string;

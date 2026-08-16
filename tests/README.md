@@ -64,11 +64,32 @@ declared symbol rectangle, and exactly one text line per page in the identity
 band at the spec 8.4 anchor. Between the two halves, both "is the geometry right"
 and "did it reach the paper" are covered.
 
+There is a **third** layer, added by the 2026-08-15 correction. Checks 1–7 look
+at the layout; the ink is not the layout. A prompt row can sit at a perfectly
+legal y while its right-aligned points label overruns into the QR's column —
+which is exactly what shipped, and what the layout could not see. So the
+generator records every box it puts ink in and, after drawing and before handing
+back the blob, asserts none of them touch the QR keep-out, the identity band, or
+the outside of the writing column. This suite then re-checks that ink against the
+keep-out, and decodes each QR **with every ink box on its page filled black over
+the symbol** — level H recovers 30%, so "it looks fine" is not evidence.
+
+That guard is mutation-tested: putting `FIRST_PROMPT_TOP_MM` back to its pre-fix
+value makes the generator refuse to emit at all, naming the offender
+(`page 2 points label at x 182.5–192.9, y 32.0–35.8 mm`).
+
 The rest of the suite covers the parts a spec cannot check for you: part-id
-numbering, pagination, per-part sizing and clamping, the `layout_id` stale-map
-guard actually changing when a rectangle moves, the `.md` round trip of the new
-`**Template ID:**` and `> template:` keys, and Appendix C — that none of the exam
-generator's choices leaked into a homework template.
+numbering, the two-regions-per-page rule and full-page parts, the points-weighted
+split, keeping a two-part problem off a page break, the `layout_id` stale-map
+guard actually changing when a rectangle moves, the `.md` round trip of the
+`**Template ID:**` and `> template:` keys including the pre-correction size
+scale, no identity field or em-dash reaching the page, and Appendix C — that none
+of the exam generator's choices leaked into a homework template.
+
+One thing this suite **cannot** check: Node has no DOM, so the KaTeX rasteriser
+is unavailable and the generator falls back to WinAnsi-safe vector text. The test
+asserts that fallback is safe (no UTF-16BE strings, no raw LaTeX); the glyph path
+itself was verified in Chrome — see "UI verification" below.
 
 ## `tests/bundle-tests.mjs`
 
@@ -144,3 +165,10 @@ The QR template was exercised on 2026-08-15 (Chrome, `npm run dev`) from
   row with `is_drawing = 1`.
 - Exporting the ZIP adds `{id}_qr_template.pdf` and `layout_{id}.csv`; an
   electronic assignment's ZIP is unchanged.
+
+Re-verified after the 2026-08-15 correction, same fixture now carrying Greek in
+the prompts (`Skin depth $\delta_s$`, `Attenuation constant $\alpha$`, the
+`$TE_{10}$` mode, `$\Gamma$`): four pages, 2/1/1/1 regions, generated in ~0.6 s.
+δₛ, σ, μᵣ, α, β, λ_g and `f_c = c/(2a)` all print as glyphs. No identity field, no
+em-dash, no UTF-16 string, no ink in the QR keep-out — points labels sit at
+y = 38/44/156 mm against a keep-out ending at 37.

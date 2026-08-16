@@ -22,7 +22,10 @@
  */
 
 import { Assignment } from '../types';
-import { QR_PAYLOAD_MAX_CHARS, fractionRectToMm, rectsOverlap, safeAreaViolations } from './pageFormat';
+import {
+  IDENTITY_BAND_MM, QR_KEEPOUT_MM, QR_PAYLOAD_MAX_CHARS, REGION_X_MAX_MM, REGION_X_MIN_MM,
+  fractionRectToMm, rectsOverlap, safeAreaViolations,
+} from './pageFormat';
 import {
   PAYLOAD_RE, computeLayoutId, parsePayload, payloadViolations,
 } from './qrPayload';
@@ -163,8 +166,50 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
 
   const failures = checks.filter(c => !c.passed).map(c => `check ${c.id || '–'} — ${c.name}: ${c.detail}`);
   const warnings = layout.clamped.map(c =>
-    `part ${c.partId} asked for ${c.requestedMm} mm of writing space; a page fits ${c.usedMm} mm, so it was shortened.`
+    `part ${c.partId} has only ${c.usedMm} mm of writing space; consider marking it "full page" or splitting the problem.`
   );
 
   return { passed: failures.length === 0, checks, failures, warnings };
+};
+
+// ---- Post-draw: what actually landed on the page -------------------------
+
+export interface InkRect { pageK: number; what: string; x0: number; y0: number; x1: number; y1: number }
+
+const intersects = (a: InkRect, b: { x0: number; y0: number; x1: number; y1: number }): boolean =>
+  a.x0 < b.x1 - 0.01 && a.x1 > b.x0 + 0.01 && a.y0 < b.y1 - 0.01 && a.y1 > b.y0 + 0.01;
+
+/**
+ * Checks 1–7 look at the layout. These look at what was drawn, which is not the
+ * same thing: a prompt row can sit at a legal y while its right-aligned points
+ * label overruns into the QR's column, and a label over the modules can stop the
+ * symbol decoding. The layout cannot see that; the ink can.
+ *
+ * Runs after the pages are drawn and before the blob is handed back, so a
+ * collision is still "a template failing any check is not emitted".
+ */
+export const runInkChecks = (ink: InkRect[], base: SelfTestReport): SelfTestReport => {
+  const checks = [...base.checks];
+  const add = (name: string, problems: string[]) =>
+    checks.push({ id: 0, name, passed: problems.length === 0, detail: problems.join('; ') || undefined });
+
+  const describe = (b: InkRect) =>
+    `page ${b.pageK} ${b.what} at x ${b.x0.toFixed(1)}–${b.x1.toFixed(1)}, y ${b.y0.toFixed(1)}–${b.y1.toFixed(1)} mm`;
+
+  // Nothing the generator draws may touch the QR keep-out. The QR itself and its
+  // quiet field are drawn separately and never recorded as ink.
+  add('nothing printed enters the QR keep-out (spec 4.4)',
+    ink.filter(b => intersects(b, QR_KEEPOUT_MM)).map(describe));
+
+  // The band holds the QR, the header line and the two top marks, nothing else.
+  add('nothing but the header line is printed in the identity band (spec 4.5)',
+    ink.filter(b => b.y0 < IDENTITY_BAND_MM && b.what !== 'header line').map(describe));
+
+  add('every printed row stays inside the writing column',
+    ink.filter(b => b.what !== 'header line')
+      .filter(b => b.x0 < REGION_X_MIN_MM - 0.01 || b.x1 > REGION_X_MAX_MM + 0.01)
+      .map(describe));
+
+  const failures = checks.filter(c => !c.passed).map(c => `check ${c.id || '–'} — ${c.name}: ${c.detail}`);
+  return { passed: failures.length === 0, checks, failures, warnings: base.warnings };
 };
