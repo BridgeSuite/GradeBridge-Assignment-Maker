@@ -5,7 +5,8 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { AnswerSpace, Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
+import { Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
+import { LEGACY_SPACE_LINES } from './templateLayout';
 import { FIGURE_FENCE_CLOSE_RE, FIGURE_FENCE_OPEN_RE, splitFigures } from './figureBlocks';
 
 const DEFAULT_AI_CONFIG: AiGradingConfig = {
@@ -131,26 +132,33 @@ function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title'
 }
 
 /**
- * `> template: space=full, sketch` — the printed-template settings for a
- * handwritten sub-part. Absent means the part shares a page with one other,
- * which is the default.
+ * `> template: lines=20, sketch` — the printed-template settings for a
+ * handwritten sub-part. `lines=N` is the writing space the author wants
+ * reserved; absent means DEFAULT_ANSWER_LINES, and is left unset here so a file
+ * that never carried the directive round-trips byte-for-byte.
+ *
+ * The retired `space=half|full|short|medium|tall|xtall` scale still imports,
+ * mapped to a line count, so nothing written against it loses the author's
+ * intent that a part wanted a lot of room. Export only ever writes `lines=N`.
+ * An explicit `lines=` wins over a `space=` in the same directive.
  */
-function parseTemplateOptions(body: string[]): { answerSpace?: AnswerSpace; isDrawing?: boolean } {
+function parseTemplateOptions(body: string[]): { answerLines?: number; isDrawing?: boolean } {
   const raw = extractBlockquoteValue('template', body);
   if (!raw) return {};
-  const out: { answerSpace?: AnswerSpace; isDrawing?: boolean } = {};
+  const out: { answerLines?: number; isDrawing?: boolean } = {};
+  let legacyLines: number | undefined;
   for (const token of raw.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)) {
-    const space = token.match(/^space\s*=\s*(half|full|short|medium|tall|xtall)$/);
-    if (space) {
-      // short/medium/tall/xtall were the pre-correction scale, from before
-      // writing space became "at most two parts per page". Still read, so files
-      // written against the old scale import without losing the author's intent
-      // that one part wanted a lot of room.
-      out.answerSpace = (space[1] === 'full' || space[1] === 'xtall') ? 'full' : 'half';
+    const lines = token.match(/^lines\s*=\s*(\d+)$/);
+    if (lines) {
+      const n = parseInt(lines[1], 10);
+      if (n > 0) out.answerLines = n;
       continue;
     }
+    const space = token.match(/^space\s*=\s*(half|full|short|medium|tall|xtall)$/);
+    if (space) { legacyLines = LEGACY_SPACE_LINES[space[1]]; continue; }
     if (token === 'sketch' || token === 'drawing') out.isDrawing = true;
   }
+  if (out.answerLines === undefined && legacyLines !== undefined) out.answerLines = legacyLines;
   return out;
 }
 

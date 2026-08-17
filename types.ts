@@ -21,11 +21,13 @@ export interface AiGradingConfig {
 }
 
 /**
- * How much of a printed template page a handwritten part takes.
- * `half` — shares the page with one other part (the default; at most two per page).
- * `full` — alone on its page. Sketches take this automatically.
+ * How much writing space a handwritten part gets on the printed template,
+ * **authored** rather than derived: the number of writing lines to reserve.
+ * The generator reserves exactly this, draws exactly this, and the layout map
+ * crops exactly this — one rectangle, no drift between what the student writes
+ * in and what the grader sees. Absent means `DEFAULT_ANSWER_LINES`.
  */
-export type AnswerSpace = 'half' | 'full';
+export type AnswerLines = number;
 
 export interface Subsection {
   id: string;
@@ -33,7 +35,7 @@ export interface Subsection {
   description: string;
   points: number;
   submissionType: SubmissionType;
-  answerSpace?: AnswerSpace; // Handwritten only: template writing-area height. Unset = derived from points.
+  answerLines?: AnswerLines; // Handwritten only: writing lines reserved on the template. Unset = DEFAULT_ANSWER_LINES.
   isDrawing?: boolean;       // Handwritten only: sketch part. Sets is_drawing in the layout map.
   maxImages?: number; // Specific for Image submission types
   imageGradingMode?: 'human' | 'auto'; // Image only: 'human' = TA reviews; 'auto' = autograder checks images_submitted > 0

@@ -2,7 +2,7 @@
 
 **What this is:** the reference for the `.md` format the Assignment Maker reads with **Import Markdown** and writes with **Export .md**. If you draft an assignment as markdown to import, follow this.
 
-**Source of truth:** this document is derived from, and must stay in lockstep with, `services/mdParserService.ts` (import) and `services/exportService.ts` (export) in this repo, and their Python port `converter/convert.py`. If the code and this file disagree, the code wins, and this file is the bug. Last synced to the format as of 2026-08-17 (figures in the problem stem — §11).
+**Source of truth:** this document is derived from, and must stay in lockstep with, `services/mdParserService.ts` (import) and `services/exportService.ts` (export) in this repo, and their Python port `converter/convert.py`. If the code and this file disagree, the code wins, and this file is the bug. Last synced to the format as of 2026-08-17 (figures in the problem stem — §11; authored answer space, `> template: lines=N` — §7, §10).
 
 ---
 
@@ -177,15 +177,20 @@ A third key configures the **printed QR template** (§10) and is handwritten-onl
 
 | Key | Purpose |
 |---|---|
-| `> template: space={half\|full}, sketch` | Whether this part shares its template page with one other (`half`, the default) or takes a page to itself (`full`), and whether it is a sketch. Both parts are optional and order does not matter — `> template: sketch` alone is valid. |
+| `> template: lines=N, sketch` | The printed handwritten template only. `lines=N` reserves **N writing lines** for the student's answer to this part; the box drawn is exactly the region the layout map crops. `sketch` marks a drawing region (a plain box, no rules). Both optional, order-free — `> template: sketch` alone is valid. |
 
-Omit the line and the part shares a page, which is what every assignment written before templates existed does. A sketch always takes a full page. The older `space=short|medium|tall|xtall` values still import — `xtall` reads as `full`, the rest as `half`.
+Omit `lines=N` and the part gets `DEFAULT_ANSWER_LINES` (6). The generator reserves exactly the
+requested lines, draws them as a ruled box (a plain box for `sketch`), and never shrinks the question
+text to make room: if a part's question and answer box do not fit the rest of a page, the part starts
+a new page, and a part whose answer exceeds a page continues onto the next. The older
+`space=half|full|short|medium|tall|xtall` values still import, mapped to a line count, but Export
+always writes `lines=N`.
 
 ```markdown
 ### (b) Field sketch [25 pts] [handwritten:human]
 Sketch the transverse field pattern.
 
-> template: sketch
+> template: lines=20, sketch
 
 > grader_note: Look for arrows normal to the walls.
 ```
@@ -260,28 +265,31 @@ The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Pa
 | Top 25 mm, every page | The QR, the four corner marks, one header line. Nothing else, ever. |
 | Page 1, under the band | Course and title, the print instruction, then the assignment **preamble**. |
 | Above each problem's first part | `Problem 2: Rectangular waveguide` and the problem's **shared setup text**. On a later page the heading repeats as `(continued)`; the setup does not. |
-| Each region | `1(a).`, the sub-part title, the points, the **question text**, a rule, then blank writing space. |
+| Each region | `1(a).`, the sub-part title, the points, the **question text**, a rule, then the **ruled answer box** of the part's authored size. |
 
 Prompt, problem and question text all go through the same KaTeX renderer as the other exports, so `$\delta_s$` and a bare `ω` print as glyphs rather than being garbled by jsPDF's Latin-1 fonts.
 
-Prose competes with writing space, and prose can be arbitrarily long. When a page cannot hold both, **the prose is squeezed first** — down to a single line per block if it comes to that — so a writing area never falls below 22 mm and never runs past the bottom of the page. The rendered text is scaled into whatever box survives, so nothing is silently cut off.
+The prompt row is the authored sub-part name and nothing else. No page instruction is injected into it — the ruled box beneath is the cue, and a continuation says so in its heading.
 
-Those reservations are estimated from character count rather than measured. The map is hashed into every page's QR, so a millimetre of difference between a browser and a test would change `layout_id` and make the template refuse to crop.
+Question text is set at a fixed 9 pt and is never scaled down. Each part reserves its authored answer
+space (`> template: lines=N`, §7) and the generator honours it: the question prints at full size and
+the answer box is drawn at exactly N lines. When a page cannot hold a part's question plus its box, the
+part moves to a new page rather than the text being shrunk; a part whose answer needs more than a page
+continues onto the next. Heights are estimated from character count, not measured, so the map is
+identical in a browser and in a test and `layout_id` stays stable across them.
 
 **There is no name, student ID or date field, deliberately.** Identity comes from Gradescope authenticating the upload, so a blank for it is redundant; students are told not to write their name on the pages, so a labelled blank is a mixed message; a filled-in name is exactly the PII the band gate exists to keep out; and grading is meant to be blind to identity. Appendix C of the page-format spec says the same — because the app authenticates the student, there is no identity page.
 
 ### How the pages are laid out
 
-By rule, not derived from points:
+Pack, then break. Nothing is derived from points, and nothing is squeezed to avoid a break:
 
-1. **Every problem starts a new page**, and that page carries **one sub-part only** — it is also carrying the problem heading and the shared setup.
-2. The problem's remaining sub-parts follow, **at most two to a page**.
-3. A sketch, or a part marked `full`, is **alone on its page**.
-4. **A problem with a single sub-part gets a second page**: the question with some writing space, then a full page of writing space for the same answer. A lone question is usually the long one.
+1. **Every problem starts a new page**, carrying its heading and shared setup text.
+2. Its parts then **pack down the page**: a part's prompt, its fixed-size question text, and its N-line answer box. When the **next** part's prompt, text and box do not fit in what is left of the page, that part **breaks to a new page**. However many fit at their authored sizes is however many the page carries.
+3. If a single part's prompt, text and answer box **exceed a whole page**, it **continues**: same `part_id`, `region_id` suffixed `x2`, heading `(continued)`.
+4. Never squeeze to avoid a break. A break is the correct outcome — paper is cheap, unreadable text is not.
 
-Where two parts do share a page they split the usable height by points, bounded so neither drops below 35%. Points influence that split but never the page count.
-
-**Rule 4 means a part can own more than one region.** The continuation row carries the same `part_id` and a `region_id` suffixed `x2`, so the Submission app receives two crops for one answer. The spec allows this — `region_id` is unique, `part_id` is a display string — but a consumer that assumed one crop per part will be surprised, so: **group crops by `part_id`, and grade the part once.**
+**Rule 3 means a part can own more than one region.** The continuation row carries the same `part_id` and a `region_id` suffixed `x2`, so the Submission app receives two crops for one answer. The spec allows this — `region_id` is unique, `part_id` is a display string — but a consumer that assumed one crop per part will be surprised, so: **group crops by `part_id`, and grade the part once.**
 
 ### Two more things to know
 

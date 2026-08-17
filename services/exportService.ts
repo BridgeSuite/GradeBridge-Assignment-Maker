@@ -725,9 +725,12 @@ export const assignmentToMd = (assignment: Assignment): string => {
       // Printed-template settings, only when the author set them. A separate key
       // rather than more colons in the type tag, so the tag grammar is untouched
       // and a file written before templates existed round-trips byte-for-byte.
-      if (isHandwritten && (sub.answerSpace || sub.isDrawing)) {
+      // Always the `lines=N` form. The retired `space=…` spellings still import
+      // (mapped to a line count) but are never written back — a one-way
+      // migration, so a file only ever gains the newer, clearer spelling.
+      if (isHandwritten && (sub.answerLines || sub.isDrawing)) {
         const opts = [
-          ...(sub.answerSpace ? [`space=${sub.answerSpace}`] : []),
+          ...(sub.answerLines ? [`lines=${sub.answerLines}`] : []),
           ...(sub.isDrawing ? ['sketch'] : []),
         ];
         lines.push('');

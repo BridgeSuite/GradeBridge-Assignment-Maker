@@ -41,8 +41,8 @@ against the same WebCrypto the browser uses.
   export is byte-identical for none / inline-svg / shared-figure; each inlined
   copy gets its own id namespace; `.tex` and a rasteriser-less `.pdf` degrade to
   `[figure: ...]` and never to raw SVG; the rubric carries `problem_statement`
-  only when the problem has a stem; and a figure-free description reserves
-  exactly the template height it always did. `services/figureBlocks.ts` is
+  only when the problem has a stem; and a figure-free description is still
+  reserved by character count alone. `services/figureBlocks.ts` is
   mirrored like the delimiter file, checked from both sides
   (`tests/figure-tests.mjs` in the Student app).
 
@@ -91,12 +91,27 @@ value makes the generator refuse to emit at all, naming the offender
 (`page 2 points label at x 182.5–192.9, y 32.0–35.8 mm`).
 
 The rest of the suite covers the parts a spec cannot check for you: part-id
-numbering, the two-regions-per-page rule and full-page parts, the points-weighted
-split, keeping a two-part problem off a page break, the `layout_id` stale-map
-guard actually changing when a rectangle moves, the `.md` round trip of the
-`**Template ID:**` and `> template:` keys including the pre-correction size
-scale, no identity field or em-dash reaching the page, and Appendix C — that none
-of the exam generator's choices leaked into a homework template.
+numbering, the `layout_id` stale-map guard actually changing when a rectangle
+moves, the `.md` round trip of the `**Template ID:**` and `> template:` keys, no
+identity field or em-dash reaching the page, and Appendix C — that none of the
+exam generator's choices leaked into a homework template.
+
+**Authored answer space** (2026-08-17) is checked here too, since it is the whole
+sizing model: the authored line count is what is reserved, what is drawn (the
+inked box is compared to the declared rectangle edge by edge) and what the map
+crops; points influence nothing; parts pack down a page and then break rather
+than being squeezed; a part whose answer exceeds a page continues with an `x2`
+region and no line is lost across the break; long prose is reserved in full and
+never scaled, with the one remaining clamp (prose that cannot fit a page at all)
+reported to the author. A text box is ruled at `WRITING_LINE_MM` and a sketch box
+is not. The prompt row carries no injected "write your answer below this line" —
+the PDF's own text operators are searched for all three retired sentences.
+
+`> template:` parsing is compared **against `converter/convert.py`** over
+`fixtures/ENG17_AnswerSpaceFixture.md`, which covers `lines=N`, an absent
+directive, `lines` with `sketch`, and a legacy `space=full`. The check runs the
+real converter in a temp directory (SKIP if no Python is on PATH) — the two
+parsers are only ever right together.
 
 One thing this suite **cannot** check: Node has no DOM, so the KaTeX rasteriser
 is unavailable and the generator falls back to WinAnsi-safe vector text. The test
@@ -173,8 +188,7 @@ The QR template was exercised on 2026-08-15 (Chrome, `npm run dev`) from
   y = 30.1, 35.2 and 39.7 mm, all below the band.
 - The sidecar's first region starts at y = 50.0 mm on page 1 (under the
   furniture) and 38.0 mm on pages 2–3 (clear of the QR keep-out at 37 mm).
-- The sketch part prompts "Sketch your answer below this line" and is the only
-  row with `is_drawing = 1`.
+- The sketch part is the only row with `is_drawing = 1`.
 - Exporting the ZIP adds `{id}_qr_template.pdf` and `layout_{id}.csv`; an
   electronic assignment's ZIP is unchanged.
 
