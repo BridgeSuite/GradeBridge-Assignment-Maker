@@ -136,6 +136,8 @@ const mdParser = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 
 const inputModeSvc = await loadModule(join(REPO, 'services', 'inputModeService.ts'), 'inputModeService.mjs');
 const mathRender = await loadModule(join(REPO, 'services', 'mathRender.ts'), 'mathRender.mjs');
 const pointsSvc = await loadModule(join(REPO, 'services', 'pointsService.ts'), 'pointsService.mjs');
+const figures = await loadModule(join(REPO, 'services', 'figureBlocks.ts'), 'figureBlocks.mjs');
+const layoutSvc = await loadModule(join(REPO, 'services', 'templateLayout.ts'), 'templateLayout.mjs');
 
 // Same module, but with a real jsPDF so the PDF can actually be inspected.
 const exportPdfSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportServicePdf.mjs', {
@@ -149,6 +151,9 @@ const { parseMdToAssignment } = mdParser;
 const { typeAllowedInMode, defaultTypeForMode, convertSubsectionToMode, strandedSubsectionLabels } = inputModeSvc;
 const { splitMath, toHtml, toLatexBody, toPlainUnicode, toPdfText, hasMath } = mathRender;
 const { apportionPoints, tooManyPartsForTarget } = pointsSvc;
+const { splitFigures, figureSegsToSource, hasFigure, trimAroundFigures, figureLabel,
+        figurePlaceholder, sanitizeSvg, namespaceSvgIds, prepareSvgForInline } = figures;
+const { estimateDescLines } = layoutSvc;
 
 // ---------- helpers ----------
 const spkiPem = (der) =>
@@ -954,6 +959,233 @@ if (fixture) {
     assertEqual(offenders.map(f => f.slice(REPO.length + 1)), [],
       'a second copy of the delimiter regex appeared');
   });
+}
+
+// =====================================================
+// 11. Figures — lifted before the math splitter, on every surface
+// =====================================================
+// The bug this guards: an SVG document is full of characters `splitMath` and
+// KaTeX mis-handle — a `$` in path data or an attribute value reads as a math
+// delimiter — so a drawing that reaches the splitter is shredded into text
+// fragments and KaTeX spans, and nothing downstream notices. ENG17's
+// check_math.js would report the file clean while it happened. Figures come out
+// first, everywhere, and go back at their anchor.
+{
+  const FIXTURE = resolve(REPO, 'tests', 'fixtures', 'ENG17_FigureFixture.md');
+  const fixtureMd = readFileSync(FIXTURE, 'utf8').replace(/\r\n/g, '\n');
+
+  // --- the splitter ---
+  check('splitFigures separates a fenced svg block from the prose around it', () => {
+    const src = 'lead\n\n```svg\n<svg viewBox="0 0 1 1"/>\n```\n\ntail';
+    const segs = splitFigures(src);
+    assertEqual(segs.map(s => s.kind), ['text', 'figure', 'text'], 'wrong segmentation');
+    assertEqual(segs[1].figure, { form: 'svg', svg: '<svg viewBox="0 0 1 1"/>' }, 'the svg was not lifted whole');
+  });
+
+  check('the split is exact — every form reassembles to the input byte-for-byte', () => {
+    for (const src of [
+      'a\n```svg\n<svg>X</svg>\n```\nb',
+      '```svg\n<svg>X</svg>\n```',
+      '```svg\n<svg>X</svg>\n```\n',
+      '```svg\nA\n```\n![x](data:image/png;base64,AA)\n',
+      'prose only, no figure',
+      '```svg\nan unterminated fence\nis still lifted',
+      '',
+    ]) {
+      assertEqual(figureSegsToSource(splitFigures(src)), src, `reassembly changed: ${JSON.stringify(src)}`);
+    }
+  });
+
+  check('a markdown image on its own line is a figure; one inside a sentence is prose', () => {
+    assert(hasFigure('![plot](data:image/png;base64,AA)') === true, 'a lone image was not lifted');
+    assert(hasFigure('see ![plot](data:image/png;base64,AA) above') === false, 'an inline image was lifted');
+    assert(hasFigure('no figures here') === false, 'prose counted as a figure');
+  });
+
+  check('trimAroundFigures drops the one newline either side, and nothing else', () => {
+    const segs = trimAroundFigures(splitFigures('a\n\n```svg\n<svg/>\n```\n\nb'));
+    assertEqual(segs.map(s => (s.kind === 'text' ? s.value : 'FIG')), ['a\n', 'FIG', '\nb'],
+      'the authored blank line either side was not preserved');
+  });
+
+  // --- ordering: the SVG must never reach splitMath ---
+  {
+    const withDollar = '```svg\n<svg viewBox="0 0 9 9"><text>cost $5 each, $9 total</text></svg>\n```';
+    check('a `$` inside a drawing is not a math delimiter', () => {
+      assert(hasMath(withDollar) === true,
+        'sanity: the raw block does look like math to splitMath — which is the whole point');
+      const html = toHtml(withDollar, 'f-');
+      assert(!/class="katex"/.test(html), 'KaTeX rendered part of the SVG');
+      assert(html.includes('cost $5 each, $9 total'), `the drawing's own text was altered:\n${html}`);
+      assert(html.includes('<svg'), 'the SVG did not survive into the HTML');
+    });
+    check('math beside a figure still renders', () => {
+      const html = toHtml(`Given $V_{in} = 10$ V.\n\n${withDollar}\n\nFind $V_{out}$.`, 'f-');
+      assertEqual((html.match(/class="katex"/g) || []).length > 0, true, 'the prose math was not rendered');
+      assert(html.includes('cost $5 each, $9 total'), 'the figure was shredded by the math pass');
+    });
+  }
+
+  // --- round trip ---
+  const fixture2 = parseMdToAssignment(fixtureMd);
+  check('md import: the fenced block lands in the problem stem, verbatim', () => {
+    const stem = fixture2.problems[0].description;
+    assert(stem.includes('```svg'), `no figure in the stem:\n${stem}`);
+    assert(stem.includes('<title>divider circuit for Problem 1</title>'), 'the SVG title was lost');
+    assert(stem.includes('#arrow { fill: #000000 }'), 'a `#` line inside the SVG was filtered out as a heading');
+    assert(stem.includes('marker-end="url(#arrow)"'), 'a wrapped attribute line was dropped');
+    assert(stem.startsWith('The circuit below is driven by $V_{in} = 10$ V.'), 'the stem prose was lost');
+  });
+  check('md import: a figure line is not mistaken for a blockquote or a header', () => {
+    assertEqual(fixture2.problems[0].subsections[0].graderNote, 'Expect 2/3.', 'the grader note was disturbed');
+    assertEqual(fixture2.problems.length, 4, 'the figure block split a problem in two');
+  });
+  check('md import: the image form lands in the stem', () => {
+    assert(/^!\[measured magnitude response\]\(data:image\/gif/.test(fixture2.problems[2].description),
+      `the image figure did not survive: ${fixture2.problems[2].description}`);
+  });
+  check('md round trip: the figure fixture is byte-identical through import → export', () =>
+    assertEqual(assignmentToMd(fixture2), fixtureMd, 'the file changed on round trip'));
+  check('md round trip: a second pass is a fixed point', () => {
+    const once = assignmentToMd(parseMdToAssignment(fixtureMd));
+    assertEqual(assignmentToMd(parseMdToAssignment(once)), once, 'the export is not stable');
+  });
+  check('md export: a problem with no figure emits nothing new', () => {
+    const plain = makeAssignment();
+    assert(!/```svg|!\[/.test(assignmentToMd(plain)), 'a figure block was invented');
+    assertEqual(assignmentToMd(parseMdToAssignment(assignmentToMd(plain))), assignmentToMd(plain),
+      'a figure-free assignment stopped round-tripping');
+  });
+  check('two problems may carry the same figure — neither is deduped away', () => {
+    const [p1, p2] = fixture2.problems;
+    const fig = s => splitFigures(s).find(x => x.kind === 'figure').source;
+    assertEqual(fig(p2.description), fig(p1.description), 'the shared figure did not survive on both problems');
+  });
+
+  // --- ids ---
+  check('inlining namespaces the ids, so a shared figure cannot capture the other copy', () => {
+    const svg = '<svg><defs><marker id="arrow"/><style>#arrow { fill: red }</style></defs>'
+      + '<path marker-end="url(#arrow)"/><use href="#arrow"/></svg>';
+    const a = prepareSvgForInline(svg, 'p0-');
+    const b = prepareSvgForInline(svg, 'p1-');
+    for (const [label, out, prefix] of [['first', a, 'p0-'], ['second', b, 'p1-']]) {
+      assert(out.includes(`id="${prefix}arrow"`), `${label}: the id was not prefixed`);
+      assert(out.includes(`url(#${prefix}arrow)`), `${label}: the url() reference was not prefixed`);
+      assert(out.includes(`href="#${prefix}arrow"`), `${label}: the href reference was not prefixed`);
+      assert(out.includes(`#${prefix}arrow { fill: red }`), `${label}: the CSS selector was not prefixed`);
+    }
+    assert(a !== b, 'both copies got the same id namespace');
+  });
+  check('an SVG with no ids is left exactly as authored', () =>
+    assertEqual(namespaceSvgIds('<svg><rect/></svg>', 'p-'), '<svg><rect/></svg>', 'the drawing was rewritten'));
+  check('an inlined drawing is as wide as it says it is, and never wider than the column', () => {
+    // viewBox only: without an intrinsic width the browser stretches a replaced
+    // element to 100% of its container — a 240x120 circuit filling the page.
+    const viewBoxOnly = prepareSvgForInline('<svg viewBox="0 0 240 120"><rect/></svg>', 'q-');
+    assert(/style="width:240px;max-width:100%;height:auto"/.test(viewBoxOnly),
+      `the viewBox width was not adopted: ${viewBoxOnly}`);
+    const declared = prepareSvgForInline('<?xml version="1.0"?>\n<svg viewBox="0 0 800 400" width="800"/>', 'q-');
+    assert(!declared.includes('<?xml'), 'the XML prolog was inlined into the page');
+    assert(/max-width:100%/.test(declared) && !/width:800px/.test(declared),
+      `a declared width was overridden: ${declared}`);
+  });
+  check('a drawing cannot bring script with it', () => {
+    const out = sanitizeSvg('<svg><script>alert(1)</script><rect onclick="steal()" onload=x /><a href="javascript:x">t</a></svg>');
+    assert(!/script/i.test(out), `a script survived: ${out}`);
+    assert(!/onclick|onload/i.test(out), `an event handler survived: ${out}`);
+    assert(!/javascript:/i.test(out), `a javascript: URL survived: ${out}`);
+    assert(out.includes('<rect'), 'the drawing itself was removed');
+  });
+  check('the placeholder names the drawing from its <title>', () => {
+    assertEqual(figureLabel({ form: 'svg', svg: '<svg><title>circuit for Problem 3</title></svg>' }),
+      'circuit for Problem 3', 'the title was not read');
+    assertEqual(figurePlaceholder({ form: 'svg', svg: '<svg/>' }), '[figure]', 'wrong untitled placeholder');
+    assertEqual(figurePlaceholder({ form: 'image', alt: 'Bode plot', url: 'data:image/png;base64,AA' }),
+      '[figure: Bode plot]', 'the alt text was not used');
+  });
+
+  // --- the exports ---
+  {
+    const html = await generateHTML(fixture2);
+    const graderHtml = await generateGraderHTML(fixture2);
+    for (const [label, doc] of [['assignment.html', html], ['grader document', graderHtml]]) {
+      check(`${label}: the drawing is inlined, not escaped into prose`, () => {
+        assert(doc.includes('<svg viewBox="0 0 240 120"'), 'the SVG was not inlined');
+        assert(!doc.includes('&lt;svg'), 'the SVG source was escaped into the page as text');
+        assert(doc.includes('cost $5 each, $9 total'), "the drawing's own text was altered");
+      });
+      check(`${label}: the two copies of the shared figure get different id namespaces`, () => {
+        const ids = [...doc.matchAll(/<marker id="([^"]+)"/g)].map(m => m[1]);
+        assertEqual(ids.length, 2, `expected the figure twice, found ${ids.length}`);
+        assert(ids[0] !== ids[1], `both copies declare the same id: ${ids[0]}`);
+      });
+      check(`${label}: the image form becomes an <img>`, () =>
+        assert(/<img src="data:image\/gif;base64,[^"]+" alt="measured magnitude response"/.test(doc),
+          'the markdown image did not render'));
+    }
+
+    const tex = generateLaTeX(fixture2);
+    check('tex: a figure degrades to a placeholder, never raw SVG source', () => {
+      assert(!/<svg|viewBox/.test(tex), 'SVG source leaked into the .tex');
+      assert(tex.includes('[figure: divider circuit for Problem 1]'), `no placeholder in:\n${tex.slice(0, 1200)}`);
+      assert(!tex.includes('<<') && !tex.includes('>>'), 'raw << >> would become guillemets under T1');
+    });
+
+    const pdf = await exportPdfSvc.createPDF(fixture2, 'student');
+    const bytes = Buffer.from(await pdf.arrayBuffer()).toString('latin1');
+    check('pdf: without a rasteriser a figure degrades to a short placeholder line', () => {
+      assert(bytes.startsWith('%PDF'), 'not a PDF');
+      assert(!/viewBox|<svg/.test(bytes), 'raw SVG source was written into the PDF');
+      assert(bytes.includes('[figure: divider circuit for Problem 1]'),
+        'the placeholder line is not in the PDF text');
+    });
+
+    const rubric = generateGradingRubric(fixture2);
+    check('rubric: the grader-visible stem carries the figure, verbatim', () => {
+      const r = rubric.rubrics.p0s0;
+      assert(r.problem_statement.includes('```svg'), 'the figure did not reach the grading rubric');
+      assert(r.problem_statement.includes('<title>divider circuit for Problem 1</title>'), 'the SVG was altered');
+      assertEqual(rubric.rubrics.p0s1.problem_statement, r.problem_statement,
+        'the two parts of one problem disagree about the stem');
+    });
+    check('rubric: a problem with no stem carries no problem_statement at all', () =>
+      assert(!('problem_statement' in rubric.rubrics.p3s0),
+        'an empty stem was written into the rubric'));
+  }
+
+  // --- the printed handwritten template ---
+  check('template layout: text with no figure reserves exactly what it always did', () => {
+    const width = 169.9;
+    for (const text of ['', 'A short line.', 'x'.repeat(400), 'one\n\ntwo\nthree']) {
+      const old = text.trim()
+        ? Math.min(text.split('\n').reduce((n, p) => n + Math.max(1, Math.ceil(p.trim().length / Math.max(20, Math.floor(width / (9 * 0.5 * 25.4 / 72))))), 0), 8)
+        : 0;
+      assertEqual(estimateDescLines(text, width), old, `reservation moved for: ${JSON.stringify(text.slice(0, 20))}`);
+    }
+  });
+  check('template layout: a figure reserves a block, not eight lines of character count', () => {
+    const width = 169.9;
+    const svgStem = 'Given the circuit.\n\n```svg\n' + '<svg viewBox="0 0 9 9">' + 'x'.repeat(3000) + '</svg>\n```';
+    const lines = estimateDescLines(svgStem, width);
+    assert(lines > 8, `a figure-bearing stem reserved only ${lines} lines — the drawing would be a smudge`);
+    assert(lines < 24, `a figure-bearing stem reserved ${lines} lines — that is the whole page`);
+  });
+
+  // --- the mirrored file ---
+  {
+    const MIRROR = join('services', 'figureBlocks.ts');
+    const here = join(REPO, MIRROR);
+    const there = resolve(REPO, '..', 'GradeBridge-Student-Submission', MIRROR);
+    if (existsSync(there)) {
+      const norm = (p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
+      check('cross-app: services/figureBlocks.ts is byte-identical in both repos', () =>
+        assert(norm(here) === norm(there),
+          `the mirrored file has diverged.\n          copy ${here}\n          over ${there} (or the other way) and re-run`));
+    } else {
+      skip('cross-app: services/figureBlocks.ts is byte-identical in both repos',
+        'Student Submission repo not alongside this one');
+    }
+  }
 }
 
 // ---------- report ----------

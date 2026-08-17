@@ -10,6 +10,7 @@
  */
 
 import { Assignment, Subsection, AnswerSpace } from '../types';
+import { splitFigures } from './figureBlocks';
 import {
   PAGE_H_MM, QR_KEEPOUT_MM, REGION_PAD_MM, REGION_Y_MAX_MM,
   RectMm, mmRectToFraction, round4,
@@ -70,6 +71,12 @@ export const DESC_FONT_PT = 9.0;
 export const DESC_LINE_MM = DESC_FONT_PT * 1.35 * 25.4 / 72;
 /** A single part cannot eat the page with prose; past this it is scaled down. */
 export const DESC_MAX_LINES = 8;
+/**
+ * Height reserved for one figure, in `DESC_LINE_MM` units — about 51 mm, which
+ * is a readable circuit diagram without taking the writing area with it. A
+ * drawing taller than its box is scaled to fit, as authored text is.
+ */
+export const FIGURE_LINES = 12;
 
 /**
  * How many lines the question text will take, estimated from character count
@@ -86,10 +93,22 @@ export const estimateDescLines = (text: string, widthMm: number): number => {
   if (!text.trim()) return 0;
   const charMm = DESC_FONT_PT * 0.5 * 25.4 / 72;
   const perLine = Math.max(20, Math.floor(widthMm / charMm));
-  const lines = text.split('\n').reduce(
-    (n, para) => n + Math.max(1, Math.ceil(para.trim().length / perLine)), 0
-  );
-  return Math.min(lines, DESC_MAX_LINES);
+
+  // A figure is reserved for as a block, not by character count — an SVG
+  // document is thousands of characters, so counting it as prose would pin every
+  // stem it appears in to the DESC_MAX_LINES ceiling and then scale the drawing
+  // down into it as a smudge. Text with no figure counts exactly as it always
+  // did, so no existing template's layout_id moves.
+  const segs = splitFigures(text);
+  const figures = segs.filter(s => s.kind === 'figure').length;
+  const proseLines = segs.reduce((n, seg) => {
+    if (seg.kind !== 'text' || !seg.value.trim()) return n;
+    return n + seg.value.split('\n').reduce(
+      (m, para) => m + Math.max(1, Math.ceil(para.trim().length / perLine)), 0
+    );
+  }, 0);
+
+  return Math.min(proseLines, DESC_MAX_LINES) + figures * FIGURE_LINES;
 };
 
 /**

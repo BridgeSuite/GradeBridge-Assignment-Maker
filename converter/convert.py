@@ -54,6 +54,92 @@ DEFAULT_AI_CONFIG = {
 }
 
 
+# --- Figures -------------------------------------------------------------
+# Port of services/figureBlocks.ts — keep the two in lockstep. A figure sits in
+# the problem stem, above the first sub-part, in one of two forms:
+#
+#     ```svg
+#     <svg viewBox="0 0 400 200" ...>...</svg>
+#     ```
+#
+#     ![alt text](data:image/png;base64,...)
+#
+# It must be lifted out of the text before anything else looks at it. The
+# per-line filters below throw away blank lines and lines starting with `#` or
+# `>` — all of which are legitimate inside an SVG (a CSS id selector in a
+# `<style>`, a wrapped attribute) — and on the JS side the `$...$` math splitter
+# would shred a drawing whose path data happens to hold a dollar sign.
+
+FIGURE_FENCE_OPEN_RE = re.compile(r'^[ \t]*```[ \t]*svg[ \t]*$')
+FIGURE_FENCE_CLOSE_RE = re.compile(r'^[ \t]*```[ \t]*$')
+FIGURE_IMAGE_RE = re.compile(r'^[ \t]*!\[([^\]]*)\]\(\s*([^)\s]+)\s*\)[ \t]*$')
+
+
+def split_figures(lines):
+    """
+    Split a list of body lines into ('text', [lines]) and ('figure', [lines])
+    units, in order. An unterminated fence is still lifted, to the end.
+    """
+    units = []
+    buf = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        if FIGURE_IMAGE_RE.match(line):
+            if buf:
+                units.append(('text', buf))
+                buf = []
+            units.append(('figure', [line]))
+            i += 1
+            continue
+
+        if FIGURE_FENCE_OPEN_RE.match(line):
+            end = i + 1
+            while end < len(lines) and not FIGURE_FENCE_CLOSE_RE.match(lines[end]):
+                end += 1
+            closed = end < len(lines)
+            if buf:
+                units.append(('text', buf))
+                buf = []
+            units.append(('figure', lines[i:end + 1] if closed else lines[i:end]))
+            i = end + 1 if closed else end
+            continue
+
+        buf.append(line)
+        i += 1
+
+    if buf:
+        units.append(('text', buf))
+    return units
+
+
+def build_description(body, keep_line):
+    """
+    Body lines -> a description, with figure blocks kept verbatim and separated
+    from their neighbours by a blank line — the form Export .md writes, so an
+    exported file re-imports to exactly itself.
+    """
+    parts = []
+    for kind, lines in split_figures(body):
+        if kind == 'figure':
+            parts.append('\n'.join(lines))
+            continue
+        kept = '\n'.join(l for l in lines if keep_line(l)).strip()
+        if kept:
+            parts.append(kept)
+    return '\n\n'.join(parts)
+
+
+def lines_without_figures(body):
+    """Body lines with any figure block removed, for the blockquote scanners."""
+    out = []
+    for kind, lines in split_figures(body):
+        if kind == 'text':
+            out.extend(lines)
+    return out
+
+
 def parse_subsection_header(line):
     """
     Parse a subsection header line.
@@ -209,12 +295,14 @@ def parse_template_options(lines):
     return out
 
 
-def extract_blockquote_value(key, lines):
+def extract_blockquote_value(key, body):
     """
     Finds a blockquote starting with '> key:' in lines and returns the full value
     (concatenating continuation lines that start with '>').
     Returns empty string if not found.
     """
+    # A '>' at the start of a line inside a figure is XML, not a blockquote.
+    lines = lines_without_figures(body)
     key_lower = key.lower()
     collecting = False
     parts = []
@@ -282,8 +370,24 @@ def parse_md(filepath):
     current_header = ''
     current_body = []
 
+    # Inside a figure block nothing is a header — an SVG's own text content is
+    # not markdown, and a line of it that happened to look like one would cut
+    # the drawing in half.
+    in_figure = False
+
     for line in lines:
         stripped = line.strip()
+
+        if in_figure:
+            if FIGURE_FENCE_CLOSE_RE.match(line):
+                in_figure = False
+            current_body.append(line)
+            continue
+
+        if FIGURE_FENCE_OPEN_RE.match(line):
+            in_figure = True
+            current_body.append(line)
+            continue
 
         if re.match(r'^##\s+Problem\s+\d+:', stripped, re.IGNORECASE):
             sections.append((current_type, current_header, current_body))
@@ -310,16 +414,16 @@ def parse_md(filepath):
                 problems.append(current_problem)
             prob = parse_problem_header(header)
             if prob:
-                desc_lines = [
-                    l for l in body
-                    if l.strip()
+                description = build_description(
+                    body,
+                    lambda l: bool(l.strip())
                     and not l.strip().startswith('#')
                     and not re.match(r'^\*\*(Due|Preamble):', l.strip())
-                ]
+                )
                 current_problem = {
                     'id': str(uuid.uuid4()),
                     'name': prob['name'],
-                    'description': '\n'.join(desc_lines).strip(),
+                    'description': description,
                     'subsections': []
                 }
 
@@ -330,12 +434,10 @@ def parse_md(filepath):
             if not sub_meta:
                 continue
 
-            desc_lines = [
-                l for l in body
-                if l.strip()
-                and not l.strip().startswith('>')
-            ]
-            description = '\n'.join(desc_lines).strip()
+            description = build_description(
+                body,
+                lambda l: bool(l.strip()) and not l.strip().startswith('>')
+            )
 
             ai_grading_prompt = extract_blockquote_value('grading_prompt', body)
             grader_note = extract_blockquote_value('grader_note', body)

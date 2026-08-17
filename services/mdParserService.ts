@@ -6,6 +6,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { AnswerSpace, Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
+import { FIGURE_FENCE_CLOSE_RE, FIGURE_FENCE_OPEN_RE, splitFigures } from './figureBlocks';
 
 const DEFAULT_AI_CONFIG: AiGradingConfig = {
   model: 'claude-haiku-4-5-20251001',
@@ -153,7 +154,32 @@ function parseTemplateOptions(body: string[]): { answerSpace?: AnswerSpace; isDr
   return out;
 }
 
-function extractBlockquoteValue(key: string, lines: string[]): string {
+/**
+ * Body lines → a description, with figure blocks lifted out whole.
+ *
+ * The per-line filters below throw away blank lines, and lines that start with
+ * `#` or `>` — every one of which is legitimate inside an SVG document (a CSS
+ * id selector in a `<style>`, a wrapped attribute). So the figure comes out
+ * first and goes back in verbatim; only the prose between figures is filtered.
+ *
+ * A figure is separated from its neighbours by a blank line, which is the form
+ * Export .md writes — so an exported file re-imports to exactly itself.
+ */
+function buildDescription(body: string[], keepLine: (line: string) => boolean): string {
+  const parts: string[] = [];
+  for (const seg of splitFigures(body.join('\n'))) {
+    if (seg.kind === 'figure') { parts.push(seg.source); continue; }
+    const kept = seg.value.split('\n').filter(keepLine).join('\n').trim();
+    if (kept) parts.push(kept);
+  }
+  return parts.join('\n\n');
+}
+
+function extractBlockquoteValue(key: string, body: string[]): string {
+  // A `>` at the start of a line inside a figure is XML, not a blockquote.
+  const lines = splitFigures(body.join('\n'))
+    .filter(seg => seg.kind === 'text')
+    .flatMap(seg => (seg as { value: string }).value.split('\n'));
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const startPattern = new RegExp(`^>\\s+${escapedKey}:\\s*(.*)$`, 'i');
   let collecting = false;
@@ -190,8 +216,23 @@ export function parseMdToAssignment(content: string): Assignment {
   let curHeader = '';
   let curBody: string[] = [];
 
+  // Inside a figure block nothing is a header — an SVG's own text content is not
+  // markdown, and a line of it that happened to look like one would cut the
+  // drawing in half.
+  let inFigure = false;
+
   for (const line of lines) {
     const s = line.trim();
+    if (inFigure) {
+      if (FIGURE_FENCE_CLOSE_RE.test(line)) inFigure = false;
+      curBody.push(line);
+      continue;
+    }
+    if (FIGURE_FENCE_OPEN_RE.test(line)) {
+      inFigure = true;
+      curBody.push(line);
+      continue;
+    }
     if (/^##\s+Problem\s+\d+:/i.test(s)) {
       sections.push({ type: curType, header: curHeader, body: curBody });
       curType = 'problem'; curHeader = s; curBody = [];
@@ -212,16 +253,16 @@ export function parseMdToAssignment(content: string): Assignment {
       if (currentProblem) problems.push(currentProblem);
       const prob = parseProblemHeader(header);
       if (prob) {
-        const descLines = body.filter(l =>
-          l.trim() && !l.trim().startsWith('#') && !/^\*\*(Due|Preamble):/.test(l.trim())
+        const description0 = buildDescription(body, l =>
+          !!l.trim() && !l.trim().startsWith('#') && !/^\*\*(Due|Preamble):/.test(l.trim())
         );
-        currentProblem = { id: uuidv4(), name: prob.name, description: descLines.join('\n').trim(), subsections: [] };
+        currentProblem = { id: uuidv4(), name: prob.name, description: description0, subsections: [] };
 
         if (prob.points !== undefined && prob.submissionType !== undefined) {
           // Flat format — auto-promote body into a single (a) subsection
-          const description = body
-            .filter(l => l.trim() && !l.trim().startsWith('>') && !l.trim().startsWith('#') && !/^\*\*(Due|Preamble):/.test(l.trim()))
-            .join('\n').trim();
+          const description = buildDescription(body, l =>
+            !!l.trim() && !l.trim().startsWith('>') && !l.trim().startsWith('#') && !/^\*\*(Due|Preamble):/.test(l.trim())
+          );
           const aiGradingPrompt = extractBlockquoteValue('grading_prompt', body);
           const graderNote = extractBlockquoteValue('grader_note', body);
           const minWords = MIN_WORDS_MAP[prob.submissionType];
@@ -249,7 +290,7 @@ export function parseMdToAssignment(content: string): Assignment {
       const subMeta = parseSubsectionHeader(header);
       if (!subMeta) continue;
 
-      const description = body.filter(l => l.trim() && !l.trim().startsWith('>')).join('\n').trim();
+      const description = buildDescription(body, l => !!l.trim() && !l.trim().startsWith('>'));
       const aiGradingPrompt = extractBlockquoteValue('grading_prompt', body);
       const graderNote = extractBlockquoteValue('grader_note', body);
 
