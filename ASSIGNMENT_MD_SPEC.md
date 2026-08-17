@@ -2,7 +2,7 @@
 
 **What this is:** the reference for the `.md` format the Assignment Maker reads with **Import Markdown** and writes with **Export .md**. If you draft an assignment as markdown to import, follow this.
 
-**Source of truth:** this document is derived from, and must stay in lockstep with, `services/mdParserService.ts` (import) and `services/exportService.ts` (export) in this repo, and their Python port `converter/convert.py`. If the code and this file disagree, the code wins, and this file is the bug. Last synced to the format as of 2026-08-15 (QR page-format templates; AI-feedback flag).
+**Source of truth:** this document is derived from, and must stay in lockstep with, `services/mdParserService.ts` (import) and `services/exportService.ts` (export) in this repo, and their Python port `converter/convert.py`. If the code and this file disagree, the code wins, and this file is the bug. Last synced to the format as of 2026-08-17 (figures in the problem stem — §11).
 
 ---
 
@@ -64,7 +64,7 @@ A lossless 50-ohm line terminated in Z_L = 75 + j25 ohm.
 ...
 ```
 - Header: `## Problem {N}: {Title}` (the number is for humans; sub-parts are ordered by appearance).
-- Any text between the problem header and the first `### (...)` is the **problem description**.
+- Any text between the problem header and the first `### (...)` is the **problem description** — the problem *stem*. A **figure** belongs here (§11).
 
 **Flat (a problem that is itself a single sub-part):** put the points and type tag on the problem header.
 ```markdown
@@ -133,6 +133,9 @@ math cannot render differently in one place than another.
 - The Student Submission app imports the **same file** (`services/mathDelimiters.ts`), so authored
   math displays identically to the student. Edit one copy, copy it to the other; both repos' `npm
   test` fails if they diverge.
+- **Figures are lifted out before the splitter runs** (§11). An SVG that reached `splitMath` would be
+  shredded by a `$` in its path data, so `services/figureBlocks.ts` — mirrored the same way — takes
+  the drawing out first, and only the text between figures is split.
 
 What each output does with a math span:
 
@@ -191,7 +194,7 @@ Sketch the transverse field pattern.
 
 ## 8. Round-trip and points
 
-- **Export .md → Import Markdown is stable**: importing an exported file and re-exporting yields the same file. A legacy electronic file that has no `**Input:**` line round-trips unchanged.
+- **Export .md → Import Markdown is stable**: importing an exported file and re-exporting yields the same file. A legacy electronic file that has no `**Input:**` line round-trips unchanged, and so does a file carrying figures (§11).
 - On export, sub-part points are **normalised** to the assignment's target total (default 100), so the numbers you write are relative weights; the exported file shows the scaled values.
 
 ---
@@ -284,3 +287,78 @@ Where two parts do share a page they split the usable height by points, bounded 
 
 - **The QR is the same on every copy.** One class-wide master, no per-student code; the app identifies the student from their login, not from the paper.
 - **Nothing printed may enter the QR's keep-out**, so the first prompt row on every page starts below it. The generator checks the ink it actually laid down, not just the layout, and refuses to emit a template where anything overlaps the symbol — text over the modules can stop it decoding, and the QR is the whole registration mechanism.
+
+---
+
+## 11. Figures
+
+A figure sits in the **problem stem** — between `## Problem N:` and the first `### (a)` sub-part — and is context for every part of that problem. A problem may have none.
+
+**Nothing may assume one figure per problem.** A textbook sometimes prints one drawing for two numbered problems, so the same figure content appearing on two problems is valid and is *not* a duplicate to collapse. Each copy is inlined with its own id namespace, so neither can capture the other's markers, gradients or clip paths.
+
+### The two accepted forms
+
+**A fenced ` ```svg ` block** holding a complete SVG document. This is the form to use for circuits, plots and anything else generated from source:
+
+````markdown
+## Problem 1: Two-resistor divider
+
+The circuit below is driven by $V_{in} = 10$ V.
+
+```svg
+<svg viewBox="0 0 240 120" xmlns="http://www.w3.org/2000/svg">
+  <title>divider circuit for Problem 1</title>
+  ...
+</svg>
+```
+
+### (a) Divider ratio [30 pts] [text]
+Find $V_{out}/V_{in}$ for the circuit shown.
+````
+
+- ` ```svg ` opens the block on a line of its own; a bare ` ``` ` closes it.
+- Give the `<svg>` a **`viewBox`** — that is what lets it scale to the column it lands in instead of overflowing at whatever pixel width it was drawn at.
+- Give it a **`<title>`** — it names the drawing for a screen reader, and it is what the plain-text placeholder says where a drawing cannot be drawn: `[figure: divider circuit for Problem 1]`. Without one the placeholder is a bare `[figure]`.
+- The drawing is inlined into the page, so `<script>`, `on*` handlers and `javascript:` URLs are stripped on the way in.
+
+**A raw image**, as the fallback for anything that is neither a circuit nor a plot: a Markdown image **alone on its own line**.
+
+```markdown
+![measured magnitude response](data:image/png;base64,iVBORw0KGgo...)
+```
+
+- The URL should be a **`data:` URI**, so the `.md` stays one self-contained file and `assignment.html` still opens with no network. An absolute `http(s)` URL renders on screen but breaks that guarantee, and it cannot be drawn into `assignment.pdf` at all.
+- There are **no asset paths**: the Assignment Maker is a browser app that imports a single `.md` and has nothing to resolve a relative path against.
+- `![alt](url)` *inside* a sentence is prose, not a figure. It must be the whole line.
+
+### The parser must lift the figure out first — this is a hard requirement
+
+The figure block comes out of the text **before the `$...$` / `$$...$$` math splitter runs and before any HTML escaping**, and goes back at its anchor when rendering. `services/figureBlocks.ts` is the one place that does it, mirrored byte-for-byte into the Student Submission app exactly as `services/mathDelimiters.ts` is (§6), so preview and student screen cannot disagree.
+
+The reason is specific. An SVG document is full of characters the splitter mis-handles: a `$` in path data or an attribute value reads as a math delimiter, and a drawing that reaches `splitMath` is shredded into text fragments and KaTeX spans. Nothing downstream notices — ENG17's `tools/check_math.js` reports the file **clean** while it happens. Green checker, destroyed source. Ordering is the only defence, which is why it is stated here rather than left to each surface.
+
+The same lift protects the parser's own line filters, which throw away blank lines and lines starting with `#` or `>` — all three legitimate inside an SVG (a CSS id selector in a `<style>`, a wrapped attribute).
+
+### Where it renders
+
+| Surface | What it does |
+|---|---|
+| App preview (`components/FormattedText.tsx`) | Inlines the `<svg>`; images become `<img>` |
+| Student app (`components/KatexRenderer.tsx` → `LatexContent`) | The same, via the mirrored splitter |
+| `assignment.html`, grader document | The same, at export time. Inline SVG keeps the file self-contained; an `http(s)` image URL does not |
+| `assignment.pdf` | The browser draws the block — prose, KaTeX and the drawing together — and the raster is placed as an image. Where there is no rasteriser it degrades to the **short placeholder line**, `[figure: ...]`, never to raw SVG source |
+| `assignment.tex` | The placeholder in an `\fbox` — pdflatex cannot typeset an inline SVG without an external file |
+| Handwritten QR template | Drawn into the stem's reserved box. A figure reserves a block of about 51 mm rather than being counted as thousands of characters of prose |
+| `{stem}_grading_rubric.json` | Every rubric entry carries `problem_statement`: the problem stem verbatim, figure included, so the AI grader sees the drawing the rubric was written against. Written only when the problem has a stem |
+
+**The figure is grader-visible.** A grading prompt may therefore say "in the circuit shown". (`assignment_spec.json` carries the stem as it always has, so the student sees it too.)
+
+### Round trip
+
+Import → Export reproduces the file byte-for-byte:
+
+- A problem with **no figure** exports exactly as it did before figures existed — no new line, no new block.
+- A problem **with** a figure round-trips the fenced block, SVG document and all, verbatim.
+- Two problems sharing the same figure keep both copies.
+
+A figure is separated from the prose around it by one blank line, which is the form Export writes; a hand-authored file that omits the blank line gains one on its first round trip and is stable from then on, the same way point normalisation behaves.

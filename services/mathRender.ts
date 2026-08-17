@@ -20,9 +20,65 @@
 import katex from 'katex';
 import katexCss from 'katex/dist/katex.min.css?raw';
 import { splitMath } from './mathDelimiters';
+import {
+  Figure, FigureSeg, figurePlaceholder, prepareSvgForInline, splitFigures, trimAroundFigures,
+} from './figureBlocks';
 
 export { MATH_DELIMITER_RE, splitMath, hasMath, segToSource } from './mathDelimiters';
 export type { MathSeg } from './mathDelimiters';
+export {
+  splitFigures, hasFigure, trimAroundFigures, figureLabel, figurePlaceholder,
+  prepareSvgForInline, sanitizeSvg, namespaceSvgIds, figureSegsToSource,
+} from './figureBlocks';
+export type { Figure, FigureSeg } from './figureBlocks';
+
+// -----------------------------------------------------
+// Figures (```svg blocks and `![alt](url)` images)
+// -----------------------------------------------------
+// Lifted out of the text BEFORE the math splitter and before any escaping —
+// see services/figureBlocks.ts for why that ordering is not negotiable. Every
+// emitter below therefore has the same shape: split figures, then do whatever
+// it does to the text segments between them.
+
+/**
+ * Apply a text emitter to the prose and a figure emitter to the drawings,
+ * keeping each figure at the anchor it was authored at.
+ */
+const emitSegments = (
+  input: string,
+  onText: (text: string) => string,
+  onFigure: (figure: Figure, index: number) => string
+): string => {
+  if (!input) return '';
+  let figureIndex = 0;
+  return trimAroundFigures(splitFigures(input))
+    .map((seg: FigureSeg) => (seg.kind === 'text' ? onText(seg.value) : onFigure(seg.figure, figureIndex++)))
+    .join('');
+};
+
+/** A URL we are willing to put in an `src`. Anything else is dropped. */
+const safeImageUrl = (url: string): string =>
+  /^\s*(?:data:image\/|https?:\/\/|\.{0,2}\/)/i.test(url) ? url : '';
+
+/**
+ * One figure as HTML. The `svg` form is inlined so it stays vector, scales with
+ * the column and needs no network; the image form becomes an `<img>`, which is
+ * self-contained only when its URL is a data: URI (which is why the spec
+ * recommends one).
+ *
+ * `idPrefix` must differ per figure on the page — ids are document-global, and
+ * the same drawing may legitimately appear on two problems.
+ */
+export const figureToHtml = (figure: Figure, idPrefix: string): string => {
+  if (figure.form === 'svg') {
+    return `<div class="gb-figure" style="margin:1em 0;text-align:center">${prepareSvgForInline(figure.svg, idPrefix)}</div>`;
+  }
+  const url = safeImageUrl(figure.url);
+  if (!url) return `<div class="gb-figure" style="margin:1em 0;text-align:center">${escapeHtml(figurePlaceholder(figure))}</div>`;
+  return `<div class="gb-figure" style="margin:1em 0;text-align:center">`
+    + `<img src="${escapeHtml(url)}" alt="${escapeHtml(figure.alt)}" style="max-width:100%;height:auto">`
+    + `</div>`;
+};
 
 // -----------------------------------------------------
 // HTML (app preview, assignment.html, grader document)
@@ -57,12 +113,14 @@ export const renderTex = (tex: string, displayMode: boolean): string => {
  * Callers should set `white-space: pre-wrap` on the container so authored line
  * breaks survive, matching the app preview.
  */
-export const toHtml = (input: string): string => {
-  if (!input) return '';
-  return splitMath(input)
-    .map(seg => (seg.kind === 'text' ? escapeHtml(seg.value) : renderTex(seg.tex, seg.kind === 'display')))
-    .join('');
-};
+export const toHtml = (input: string, idPrefix = 'gbfig'): string =>
+  emitSegments(
+    input,
+    text => splitMath(text)
+      .map(seg => (seg.kind === 'text' ? escapeHtml(seg.value) : renderTex(seg.tex, seg.kind === 'display')))
+      .join(''),
+    (figure, i) => figureToHtml(figure, `${idPrefix}${i}-`)
+  );
 
 /**
  * KaTeX's own stylesheet with every glyph font embedded as a data URI, so an
@@ -117,6 +175,8 @@ export interface RasterOptions {
  * is no DOM, or if the browser refuses the image — callers fall back to
  * toPdfText() rather than emitting anything broken.
  */
+let rasterSeq = 0;
+
 export const renderTextToCanvas = async (
   text: string, opts: RasterOptions
 ): Promise<HTMLCanvasElement | null> => {
@@ -138,7 +198,9 @@ export const renderTextToCanvas = async (
 
   const host = document.createElement('div');
   host.setAttribute('style', `position:fixed;left:-10000px;top:0;z-index:-1;${boxCss}`);
-  host.innerHTML = toHtml(text);
+  // The host is briefly a live part of the page, so a figure's ids share the
+  // document with the preview's. A per-raster prefix keeps them apart.
+  host.innerHTML = toHtml(text, `gbraster${++rasterSeq}-`);
   document.body.appendChild(host);
 
   let heightPx: number;
@@ -219,16 +281,20 @@ export const escapeLatexText = (s: string): string =>
  * delimiters so pdflatex typesets it natively. There is no placeholder token,
  * so there is nothing that can fail to be restored.
  */
-export const toLatexBody = (input: string): string => {
-  if (!input) return '';
-  return splitMath(input)
-    .map(seg => {
-      if (seg.kind === 'text') return escapeLatexText(seg.value);
-      if (seg.kind === 'inline') return `$${seg.tex}$`;
-      return `$$${seg.tex}$$`;
-    })
-    .join('');
-};
+export const toLatexBody = (input: string): string =>
+  emitSegments(
+    input,
+    text => splitMath(text)
+      .map(seg => {
+        if (seg.kind === 'text') return escapeLatexText(seg.value);
+        if (seg.kind === 'inline') return `$${seg.tex}$`;
+        return `$$${seg.tex}$$`;
+      })
+      .join(''),
+    // pdflatex has no way to typeset an inline SVG without an external file, so
+    // the .tex carries the placeholder and points at the drawing's real home.
+    figure => `\n\n\\begin{center}\\fbox{\\textit{${escapeLatexText(figurePlaceholder(figure))}}}\\end{center}\n\n`
+  );
 
 // -----------------------------------------------------
 // Plain text (PDF fallback, and any context that cannot typeset)
@@ -355,16 +421,20 @@ const texToText = (tex: string, charset: Charset): string => {
   return s.replace(/[ \t]+/g, ' ').trim();
 };
 
-const render = (input: string, charset: Charset): string => {
-  if (!input) return '';
-  return splitMath(input)
-    .map(seg => {
-      if (seg.kind === 'text') return seg.value;
-      const body = texToText(seg.tex, charset);
-      return seg.kind === 'display' ? `\n${body}\n` : body;
-    })
-    .join('');
-};
+const render = (input: string, charset: Charset): string =>
+  emitSegments(
+    input,
+    text => splitMath(text)
+      .map(seg => {
+        if (seg.kind === 'text') return seg.value;
+        const body = texToText(seg.tex, charset);
+        return seg.kind === 'display' ? `\n${body}\n` : body;
+      })
+      .join(''),
+    // Plain text cannot hold a drawing. It degrades to a short placeholder line
+    // — never to raw SVG source, which is what would otherwise land in the PDF.
+    figure => `\n${figurePlaceholder(figure)}\n`
+  );
 
 /**
  * Best-effort LaTeX → Unicode, for any context that truly cannot typeset:

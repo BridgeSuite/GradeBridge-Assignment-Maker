@@ -1,7 +1,7 @@
 
 import { Assignment, SubmissionType } from '../types';
 import { encryptJson, normalizeCoursePublicKey, validateCoursePublicKey } from './cryptoService';
-import { escapeHtml, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
+import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
 import { generateTemplate } from './templateGenerator';
 import { apportionPoints } from './pointsService';
 import jsPDF from 'jspdf';
@@ -224,7 +224,10 @@ const addRichText = async (
   if (!text) return y;
   const pageHeight = doc.internal.pageSize.height;
 
-  if (hasMath(text)) {
+  // A figure takes the same route as math: the browser draws the block — prose,
+  // KaTeX and the inlined SVG together — and the raster is placed as an image.
+  // Without a DOM it degrades to toPdfText(), which prints `[figure: ...]`.
+  if (hasMath(text) || hasFigure(text)) {
     const grey = style.grey ?? 0;
     const canvas = await renderTextToCanvas(text, {
       widthPx: maxWidthMm * PX_PER_MM,
@@ -324,7 +327,10 @@ const generatePDFContent = async (doc: jsPDF, assignment: Assignment, isTemplate
           const style: RichStyle = { fontPt: 10, grey: 100 };
           applyStyle(doc, style);
           const wrapped: string[] = doc.splitTextToSize(toPdfText(prob.description), contentWidth);
-          if (wrapped.length > DESC_PREVIEW_LINES) {
+          // A stem carrying a figure is never shortened: the drawing is the
+          // context the part is answered against, and a truncated preview would
+          // reduce it to the words "[figure: ...]".
+          if (wrapped.length > DESC_PREVIEW_LINES && !hasFigure(prob.description)) {
             // Truncating rendered math would cut mid-expression, so a shortened
             // description is always the plain-text form.
             wrapped.slice(0, DESC_PREVIEW_LINES).forEach((line, n) => {
@@ -423,11 +429,11 @@ h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
   ${assignment.problems.map((p, i) => `
     <div class="problem">
       <h3>Problem ${i + 1}: ${toHtml(p.name)}</h3>
-      <p class="authored">${toHtml(p.description || '')}</p>
+      <p class="authored">${toHtml(p.description || '', `p${i}f`)}</p>
       ${p.subsections.map((s, j) => `
         <div class="subsection">
           <h4>(${String.fromCharCode(97 + j)}) ${toHtml(s.name)} <span class="points">[${s.points} pts]</span></h4>
-          <p class="authored">${toHtml(s.description || '')}</p>
+          <p class="authored">${toHtml(s.description || '', `p${i}s${j}f`)}</p>
           <div class="submission-type">
             Submission: ${escapeHtml(s.submissionType)}
             ${s.submissionType === 'Image' && s.maxImages ? `(Max ${s.maxImages} pages)` : ''}
@@ -605,6 +611,11 @@ export const generateGradingRubric = (assignment: Assignment): object => {
         subsection_letter: subsectionLetter,
         subsection_name: sub.name,
         display_name: `Problem ${pIndex + 1}(${subsectionLetter}): ${sub.name}`,
+        // The problem stem, verbatim — including any figure block, so the AI
+        // grader sees the drawing the rubric was written against and a prompt
+        // may say "in the circuit shown". Written only when the problem has a
+        // stem, so a rubric for an assignment without one is unchanged.
+        ...(prob.description ? { problem_statement: prob.description } : {}),
         max_points: sub.points,
         // Handwritten is checked first: pages are cropped per region, so it never
         // falls through to the image or plain-human branches.
@@ -804,7 +815,7 @@ export const generateGraderHTML = async (assignment: Assignment): Promise<string
             <span class="sub-pts">${sub.points} pts</span>
             <span class="sub-type">${escapeHtml(typeLabel)}</span>
           </div>
-          ${sub.description ? `<p class="sub-desc">${toHtml(sub.description)}</p>` : ''}
+          ${sub.description ? `<p class="sub-desc">${toHtml(sub.description, `gp${pIdx}s${sIdx}f`)}</p>` : ''}
           ${referenceBlock}
         </div>`;
     }).join('');
@@ -815,7 +826,7 @@ export const generateGraderHTML = async (assignment: Assignment): Promise<string
           <span class="prob-num">Problem ${pIdx + 1}: ${toHtml(prob.name)}</span>
           <span class="prob-pts">${problemPoints} pts</span>
         </div>
-        ${prob.description ? `<p class="prob-desc">${toHtml(prob.description)}</p>` : ''}
+        ${prob.description ? `<p class="prob-desc">${toHtml(prob.description, `gp${pIdx}f`)}</p>` : ''}
         ${subsRows}
       </div>`;
   }).join('');

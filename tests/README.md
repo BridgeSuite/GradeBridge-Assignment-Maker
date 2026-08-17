@@ -33,6 +33,18 @@ against the same WebCrypto the browser uses.
   is not checked out alongside) and greps the tree for a second copy of the
   regex. The Student app runs the same check from its side, in
   `tests/math-delimiter-tests.mjs`.
+- **Figures** (§11) — over `fixtures/ENG17_FigureFixture.md`. The split is exact
+  (every form reassembles byte-for-byte); a ` ```svg ` block never reaches
+  `splitMath`, so a `$` in the drawing's own text is not read as a delimiter
+  while math beside it still renders; the block survives the parser's line
+  filters (a `#` CSS selector, a wrapped attribute, a `>`-leading line); import →
+  export is byte-identical for none / inline-svg / shared-figure; each inlined
+  copy gets its own id namespace; `.tex` and a rasteriser-less `.pdf` degrade to
+  `[figure: ...]` and never to raw SVG; the rubric carries `problem_statement`
+  only when the problem has a stem; and a figure-free description reserves
+  exactly the template height it always did. `services/figureBlocks.ts` is
+  mirrored like the delimiter file, checked from both sides
+  (`tests/figure-tests.mjs` in the Student app).
 
 ## `tests/templateTests.mjs`
 
