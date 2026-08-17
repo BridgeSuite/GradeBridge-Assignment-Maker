@@ -1141,12 +1141,81 @@ if (fixture) {
     });
 
     const rubric = generateGradingRubric(fixture2);
-    check('rubric: the grader-visible stem carries the figure, verbatim', () => {
+    check('rubric: the grader gets the figure as words, never as path data', () => {
+      // §11 used to send the stem verbatim, SVG included — ~143k tokens of
+      // `<path d="…">` per student per grading pass on the ENG17 set, carried so
+      // a grader forbidden to reason from the drawing could decline to use it.
       const r = rubric.rubrics.p0s0;
-      assert(r.problem_statement.includes('```svg'), 'the figure did not reach the grading rubric');
-      assert(r.problem_statement.includes('<title>divider circuit for Problem 1</title>'), 'the SVG was altered');
+      assert(!/<svg|<path|viewBox|```svg/.test(r.problem_statement),
+        `SVG source reached the grading rubric:\n${r.problem_statement.slice(0, 400)}`);
+      assert(r.problem_statement.includes('[Figure: divider circuit for Problem 1]'),
+        `the figure's own words are missing:\n${r.problem_statement}`);
+      // The prose around it is untouched and still in place.
+      assert(r.problem_statement.includes('The circuit below is driven by $V_{in} = 10$ V.'),
+        `the stem prose was disturbed:
+${r.problem_statement}`);
       assertEqual(rubric.rubrics.p0s1.problem_statement, r.problem_statement,
         'the two parts of one problem disagree about the stem');
+    });
+
+    check('rubric: the grader payload no longer scales with the drawing', () => {
+      // The real property, and the one that does not depend on how big a test
+      // fixture happens to be: what the grader carries is the figure's *words*,
+      // so it is constant no matter how much geometry the drawing holds. ENG17
+      // measured the old behaviour at ~143k tokens per student per pass.
+      const withPaths = (n) => ({
+        ...fixture2,
+        problems: [{
+          ...fixture2.problems[0],
+          description: [
+            'For the bridge circuit provided: a 20 V source and six resistors.',
+            '',
+            '```svg',
+            '<svg viewBox="0 0 400 240"><title>bridge circuit</title>'
+              + '<desc>A 20 V source across a bridge of six resistors, nodes A to D lettered.</desc>'
+              + Array.from({ length: n }, (_, i) => `<path d="M ${i} 20 H 220 V 100 H 20 Z" fill="none"/>`).join('')
+              + '</svg>',
+            '```',
+          ].join('\n'),
+        }],
+      });
+      const statement = (n) => generateGradingRubric(withPaths(n)).rubrics.p0s0.problem_statement;
+
+      const small = statement(200), large = statement(400);
+      assertEqual(small, large, 'the grader payload still grows with the drawing');
+      assert(!/<path/.test(small), 'path geometry survived into the grading rubric');
+      assert(small.length * 50 < withPaths(200).problems[0].description.length,
+        `the stem only shrank to ${small.length} of ${withPaths(200).problems[0].description.length} bytes`);
+      // Grader-facing only: every student-facing render still inlines the real
+      // drawing, and the authored .md still carries the full <svg>.
+      assert(html.includes('<svg viewBox="0 0 240 120"'), 'the student HTML lost the drawing');
+      assert(assignmentToMd(fixture2).includes('```svg'), 'the .md round trip lost the drawing');
+    });
+
+    check('rubric: the markdown image form becomes its alt text', () => {
+      const r = rubric.rubrics.p2s0;
+      assert(r.problem_statement.includes('[Figure: measured magnitude response]'),
+        `the image alt text is missing:\n${r.problem_statement}`);
+      assert(!r.problem_statement.includes('data:image/'),
+        'a data: URI reached the grading rubric');
+    });
+
+    check('rubric: the <desc> fallback degrades instead of blocking', () => {
+      // The ENG17 <desc> set is still being authored, so all three rungs matter.
+      const stem = (svg) => ({
+        ...fixture2,
+        problems: [{ ...fixture2.problems[0], description: `Given the network.\n\n\`\`\`svg\n${svg}\n\`\`\`` }],
+      });
+      const statement = (svg) => generateGradingRubric(stem(svg)).rubrics.p0s0.problem_statement;
+
+      assert(statement('<svg viewBox="0 0 9 9"><title>bridge circuit</title>'
+        + '<desc>A 20 V source across a bridge of six resistors, nodes A to D lettered.</desc></svg>')
+        .includes('[Figure — bridge circuit: A 20 V source across a bridge of six resistors, nodes A to D lettered.]'),
+        'title and desc together were not used');
+      assert(statement('<svg viewBox="0 0 9 9"><title>bridge circuit</title></svg>')
+        .includes('[Figure: bridge circuit]'), 'a title-only figure did not fall back to its title');
+      assert(statement('<svg viewBox="0 0 9 9"><rect width="9" height="9"/></svg>')
+        .includes('[figure]'), 'a figure with neither title nor desc did not fall back to [figure]');
     });
     check('rubric: a problem with no stem carries no problem_statement at all', () =>
       assert(!('problem_statement' in rubric.rubrics.p3s0),

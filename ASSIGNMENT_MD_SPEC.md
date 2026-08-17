@@ -359,9 +359,13 @@ The same lift protects the parser's own line filters, which throw away blank lin
 | `assignment.pdf` | The browser draws the block — prose, KaTeX and the drawing together — and the raster is placed as an image. Where there is no rasteriser it degrades to the **short placeholder line**, `[figure: ...]`, never to raw SVG source |
 | `assignment.tex` | The placeholder in an `\fbox` — pdflatex cannot typeset an inline SVG without an external file |
 | Handwritten QR template | Drawn into its own reserved block of about 51 mm, **separately from the stem's prose**, rather than being counted as thousands of characters of prose. The two are never rasterised together: a figure may be scaled to fit its block, question text may not, so a drawing that runs over cannot shrink the words beside it |
-| `{stem}_grading_rubric.json` | Every rubric entry carries `problem_statement`: the problem stem verbatim, figure included, so the AI grader sees the drawing the rubric was written against. Written only when the problem has a stem |
+| `{stem}_grading_rubric.json` | Every rubric entry carries `problem_statement`: the problem stem with the prose verbatim and **each figure reduced to its own words** — `[Figure — {title}: {desc}]` from the SVG's `<title>` and `<desc>`, falling back to `[Figure: {title}]` and then `[figure]`; a Markdown image uses its alt text. **No `<svg>` or `<path>` reaches the grader.** Written only when the problem has a stem |
 
-**The figure is grader-visible.** A grading prompt may therefore say "in the circuit shown". (`assignment_spec.json` carries the stem as it always has, so the student sees it too.)
+**The grader gets the figure's words, not the drawing.** `problem_statement` names each figure by its `<title>`/`<desc>`; the SVG source does not go into the grading rubric. It went in verbatim at first, and ENG17 measured what that cost: ~143k tokens of `<path d="…">` per student per full grading pass, about a million across a class of 30, carried so a grader **forbidden by policy to reason from the drawing** could decline to use it. A `<desc>` written under the "describe only what a sighted student can see" rule is a few hundred bytes, more useful to a model than coordinates, and leaks strictly less than the geometry.
+
+**So write `<title>` and `<desc>` on every figure** — they are what the grader reads, and what a screen reader announces. A grading prompt should stay figure-agnostic: no clause's verdict may depend on reading the drawing.
+
+Students are unaffected: `assignment_spec.json` and every rendered surface carry the real drawing, and the authored `.md` still holds the full `<svg>`.
 
 ### Round trip
 
