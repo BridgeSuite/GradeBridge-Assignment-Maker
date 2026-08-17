@@ -358,7 +358,7 @@ The same lift protects the parser's own line filters, which throw away blank lin
 | `assignment.html`, grader document | The same, at export time. Inline SVG keeps the file self-contained; an `http(s)` image URL does not |
 | `assignment.pdf` | The browser draws the block — prose, KaTeX and the drawing together — and the raster is placed as an image. Where there is no rasteriser it degrades to the **short placeholder line**, `[figure: ...]`, never to raw SVG source |
 | `assignment.tex` | The placeholder in an `\fbox` — pdflatex cannot typeset an inline SVG without an external file |
-| Handwritten QR template | Drawn into the stem's reserved box. A figure reserves a block of about 51 mm rather than being counted as thousands of characters of prose |
+| Handwritten QR template | Drawn into its own reserved block of about 51 mm, **separately from the stem's prose**, rather than being counted as thousands of characters of prose. The two are never rasterised together: a figure may be scaled to fit its block, question text may not, so a drawing that runs over cannot shrink the words beside it |
 | `{stem}_grading_rubric.json` | Every rubric entry carries `problem_statement`: the problem stem verbatim, figure included, so the AI grader sees the drawing the rubric was written against. Written only when the problem has a stem |
 
 **The figure is grader-visible.** A grading prompt may therefore say "in the circuit shown". (`assignment_spec.json` carries the stem as it always has, so the student sees it too.)

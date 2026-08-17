@@ -671,6 +671,53 @@ check('the prompt row is the authored name alone, and an unnamed part has none',
   assertEqual(g.ink.filter(b => b.what === 'points label').length, 2, 'a part lost its [N pts] label');
 });
 
+check('a stem with a figure keeps its prose at full size — separate rasters', async () => {
+  // The bug this pins: prose and figure were rendered into ONE scale-to-fit
+  // canvas. A circuit a millimetre over its FIGURE_LINES allotment set
+  // scale < 1 on the shared raster, and the prose — already at 9 pt — shrank
+  // with it, so every ENG17 stem printed smaller than its own sub-parts.
+  // A figure may scale to its box; text may not. That means two rasters.
+  const stemProse = 'For the bridge circuit provided (text problem 1.11): a 20 V source and six '
+    + 'resistors, with every node lettered on the drawing.';
+  const svg = '```svg\n<svg viewBox="0 0 400 240" xmlns="http://www.w3.org/2000/svg">'
+    + '<title>bridge circuit</title><rect x="10" y="10" width="380" height="220" fill="none" stroke="#000"/>'
+    + '</svg>\n```';
+
+  const withFigure = makeAssignment([[{ ...part('Node table', 100), description: 'Give a table with one row per node.' }]]);
+  withFigure.problems[0].description = `${stemProse}\n\n${svg}`;
+  const g = await gen.generateTemplate(withFigure);
+
+  const prose = g.ink.filter(b => b.what === 'problem text 1');
+  const figure = g.ink.filter(b => b.what === 'figure in problem text 1');
+  assertEqual(prose.length, 1, 'the stem prose was not drawn as its own raster');
+  assertEqual(figure.length, 1, 'the figure was not drawn as its own raster');
+
+  // The prose starts at the top of the stem block and stops before the figure:
+  // two boxes, stacked, never one. If they shared a canvas the figure's overrun
+  // would be free to scale the prose.
+  const block = g.layout.regions[0].problemBlock;
+  const stemTop = round(block.boxMm.y0 + lay.PROBLEM_HEADING_MM);
+  assertEqual(round(prose[0].y0), stemTop, 'the prose does not start at the top of the stem block');
+  assert(prose[0].y1 <= figure[0].y0 + 0.01, 'the prose raster runs into the figure raster');
+
+  // The prose is given the prose's share of the reservation and no more — the
+  // figure's FIGURE_LINES allotment is not part of the box the prose scales to.
+  const proseBox = figure[0].y0 - stemTop;
+  const figureAllotment = lay.FIGURE_LINES * lay.DESC_LINE_MM;
+  assert(proseBox > 0, 'the prose got no room at all');
+  assert(proseBox <= lay.descBlockMm(`${stemProse}\n\n${svg}`) - figureAllotment + 0.01,
+    `the prose box (${proseBox.toFixed(1)} mm) includes part of the figure's allotment`);
+  assert(figure[0].y1 - figure[0].y0 <= figureAllotment + 0.01, 'the figure overran its reserved block');
+});
+
+check('a figure-free stem is drawn as one raster, exactly as before', async () => {
+  const plain = makeAssignment([[{ ...part('A', 100), description: 'Find R1.' }]]);
+  plain.problems[0].description = 'Six identical resistors in series.';
+  const g = await gen.generateTemplate(plain);
+  assertEqual(g.ink.filter(b => b.what === 'problem text 1').length, 1, 'the stem was split without a figure');
+  assertEqual(g.ink.filter(b => /^figure in /.test(b.what)), [], 'a figure block was drawn for a stem with no figure');
+});
+
 check('the stem is reserved at the same line height as a sub-part description', () => {
   // The stem used to print smallest of all: it is the longest block, so the page
   // squeeze hit it hardest, and the eight-line cap finished the job. Both are

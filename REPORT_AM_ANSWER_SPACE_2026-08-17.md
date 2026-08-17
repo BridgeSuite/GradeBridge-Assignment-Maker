@@ -8,9 +8,9 @@ gives.
 
 | | |
 |---|---|
-| **Work orders** | `WORKORDER_AM_ANSWER_SPACE_2026-08-17.md`, `WORKORDER_AM_DROP_ANSWER_INSTRUCTION_2026-08-17.md` |
-| **Commits** | `ef30eb2` (the build) + the no-printed-box follow-up → `main` |
-| **Tests** | 127 + 66 + 3 pass; `tsc --noEmit` clean |
+| **Work orders** | `ANSWER_SPACE` and `DROP_ANSWER_INSTRUCTION`, then `NO_PRINTED_BOX` and `STEM_FIGURE_FONT` as same-day follow-ups (all `WORKORDER_AM_*_2026-08-17.md`) |
+| **Commits** | `ef30eb2`, then the no-printed-box and stem/figure follow-ups → `main` |
+| **Tests** | 127 + 68 + 3 pass; `tsc --noEmit` clean |
 | **Deploy** | Published to `gh-pages` — https://bridgesuite.github.io/GradeBridge-Assignment-Maker/ |
 
 *Scope: handwritten QR template only. Electronic exports are untouched. Companion document:
@@ -196,13 +196,50 @@ entry. Removing it is paint-only — the same assignment hashes to the same `lay
 
 ---
 
+## Follow-up: a stem's prose never shares a raster with its figure
+
+Even with the fixed 9 pt and the eight-line cap gone, every ENG17 stem still printed smaller than its
+own sub-parts. The reason was one line of drawing code, not the sizing model.
+
+The stem and its figure went into **one** scale-to-fit canvas: `drawAuthoredText` handed the whole
+stem — prose *and* the ```` ```svg ```` block — to a single rasteriser, and the reserved height was
+`proseLines + FIGURE_LINES`. A bridge circuit renders taller than its 12-line (~51 mm) allotment, so
+the canvas overran its box, the backstop scale kicked in, and it scaled **everything** — the drawing a
+little, and the 9 pt prose along with it. Sub-part descriptions have no figure to share a canvas with,
+so they stayed at 9 pt. That asymmetry was the whole symptom, and it hit every ENG17 problem because
+every ENG17 stem carries a circuit.
+
+The fix is to decouple, not to grow the allotment — even a perfectly sized reservation would scale the
+prose the moment a drawing ran a millimetre over. `drawAuthoredBlock` splits the stem with
+`splitFigures` and stacks the pieces in authored order, each in its own box: prose gets a box the
+height of its own reservation, so its scale is always 1; each figure gets the `FIGURE_LINES` block the
+layout already reserved for it, and only the drawing is scaled into that.
+
+> **A figure may scale to its box. Question text may not.**
+
+The same split now runs for the preamble and sub-part descriptions, so no authored block anywhere can
+have its words scaled by a drawing beside them. A figure-free block takes the original single-raster
+path untouched.
+
+**`layout_id` did not move.** Reservation arithmetic is unchanged — only which rasters the reserved
+space is divided between. Verified: `38AE82C0` on the EEC130B HW3 fixture, either side of the change.
+
+One residual, stated rather than hidden: `drawAuthoredText` still scales a block down if it genuinely
+overruns its own reservation. That backstop is why a pathological paragraph cannot overflow into the
+writing area below it, and it now applies to a stem exactly as it always has to a sub-part
+description — which is what "the stem prints at the same size as the descriptions" means. The
+character-count estimate is deliberately generous (`CHAR_ADVANCE_EM` = 0.55 em) to keep it off the
+routine path.
+
+---
+
 ## What moved
 
 | File | Change |
 |---|---|
 | `types.ts` | `AnswerSpace` → `AnswerLines`; `answerSpace` → `answerLines`. |
 | `services/templateLayout.ts` | New: `WRITING_LINE_MM`, `DEFAULT_ANSWER_LINES`, `FULL_PAGE_LINES`, `LEGACY_SPACE_LINES`, `answerLinesFor`. Removed: `DESC_MAX_LINES`, `MAX_REGIONS_PER_PAGE`, `MIN_SHARE`, `MIN_REGION_MM`, `splitByPoints`, `paginate`, the squeeze loop. `buildLayout` rewritten as one pack-then-break walk that also does continuations. |
-| `services/templateGenerator.ts` | Prompt tail dropped; `drawWritingArea` added — a rule and N ruled lines, no frame; print instruction reworded to "write on the ruled lines". |
+| `services/templateGenerator.ts` | Prompt tail dropped; `drawWritingArea` added — a rule and N ruled lines, no frame; print instruction reworded to "write on the ruled lines"; `drawAuthoredBlock` added — prose and figures rasterised separately. |
 | `services/templateSelfTest.ts` | The clamp warning now reports unfittable question text, not a squeezed writing area. |
 | `services/mdParserService.ts`, `converter/convert.py` | `lines=N` parsed, legacy `space=` mapped, explicit wins. Kept in lockstep and now tested against each other. |
 | `services/exportService.ts` | Writes `lines=N`, never `space=`. |
@@ -222,7 +259,7 @@ costs a little paper, which is the cheap direction.
 
 ## How it is held down
 
-127 + 66 + 3 checks pass, type-check clean. New or rewritten:
+127 + 68 + 3 checks pass, type-check clean. New or rewritten:
 
 - The authored line count is what is reserved, ruled and cropped — the **inked** rules are checked to
   fall inside the declared rectangle, not intent against intent.
@@ -233,6 +270,9 @@ costs a little paper, which is the cheap direction.
   page even alone — is reachable only by a pathological description and is reported to the author.
 - The stem is reserved at the same line height as a sub-part description.
 - A text region carries exactly N rules at the writing pitch; a sketch region carries none.
+- **A stem with a figure produces two rasters, not one:** the prose starts at the top of the stem
+  block and stops before the figure, and its box never includes any of the figure's allotment. A
+  figure-free stem is still a single raster.
 - **No region is framed:** the PDF's `re` operators are scanned for a rectangle matching any declared
   region, and the page-1 instruction is read back out and asserted to say "ruled lines" — with the
   word "box" printed nowhere on the sheet.
@@ -243,4 +283,4 @@ costs a little paper, which is the cheap direction.
 
 ---
 
-*BridgeSuite/GradeBridge-Assignment-Maker · `ef30eb2` and the no-printed-box follow-up · pushed to main, published to gh-pages*
+*BridgeSuite/GradeBridge-Assignment-Maker · `ef30eb2` and the no-printed-box and stem/figure follow-ups · pushed to main, published to gh-pages*

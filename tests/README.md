@@ -107,6 +107,15 @@ sketch region is left blank. The prompt row carries no injected "write your answ
 below this line" — the PDF's own text operators are searched for all three retired
 sentences.
 
+**A stem's prose never shares a raster with its figure.** The two used to go into
+one scale-to-fit canvas, so a drawing over its `FIGURE_LINES` allotment scaled the
+prose down with it and the stem printed smaller than its own sub-parts. The suite
+generates a stem carrying an inline SVG and asserts there are two ink entries, not
+one — `problem text N` and `figure in problem text N` — that the prose starts at the
+top of the stem block and stops before the figure, that the prose's box never
+includes any of the figure's allotment, and that a figure-free stem is still drawn
+as a single raster with no figure block at all.
+
 **Nothing is boxed** (page-format §4.1). The suite scans the PDF's `re`
 operators for a rectangle matching any declared region and asserts there is none,
 then ties the drawn writing area to the cropped one the way that survives without
