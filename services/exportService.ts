@@ -2,6 +2,7 @@
 import { Assignment, SubmissionType } from '../types';
 import { encryptJson, normalizeCoursePublicKey, validateCoursePublicKey } from './cryptoService';
 import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
+import { stemForGrader } from './figureText';
 import { generateTemplate } from './templateGenerator';
 import { apportionPoints } from './pointsService';
 import jsPDF from 'jspdf';
@@ -611,11 +612,15 @@ export const generateGradingRubric = (assignment: Assignment): object => {
         subsection_letter: subsectionLetter,
         subsection_name: sub.name,
         display_name: `Problem ${pIndex + 1}(${subsectionLetter}): ${sub.name}`,
-        // The problem stem, verbatim — including any figure block, so the AI
-        // grader sees the drawing the rubric was written against and a prompt
-        // may say "in the circuit shown". Written only when the problem has a
-        // stem, so a rubric for an assignment without one is unchanged.
-        ...(prob.description ? { problem_statement: prob.description } : {}),
+        // The problem stem, with each figure reduced to its own `<title>`/
+        // `<desc>` text rather than its SVG source (`stemForGrader`). The prose
+        // is verbatim and in place; a stem with no figure is byte-for-byte what
+        // it always was, so figure-free rubrics do not move. Written only when
+        // the problem has a stem.
+        //
+        // Grader-facing only. Students still get the real drawing everywhere,
+        // and the authored `.md` still carries the full `<svg>`.
+        ...(prob.description ? { problem_statement: stemForGrader(prob.description) } : {}),
         max_points: sub.points,
         // Handwritten is checked first: pages are cropped per region, so it never
         // falls through to the image or plain-human branches.

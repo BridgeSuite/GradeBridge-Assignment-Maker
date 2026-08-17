@@ -42,7 +42,17 @@ against the same WebCrypto the browser uses.
   copy gets its own id namespace; `.tex` and a rasteriser-less `.pdf` degrade to
   `[figure: ...]` and never to raw SVG; the rubric carries `problem_statement`
   only when the problem has a stem; and a figure-free description is still
-  reserved by character count alone. `services/figureBlocks.ts` is
+  reserved by character count alone.
+
+  The **grader's** copy of the stem is checked separately: it carries each figure
+  as its `<title>`/`<desc>` words and no `<svg>`/`<path>` at all, the prose around
+  it is untouched, and the payload no longer grows with the drawing — doubling the
+  path count leaves `problem_statement` identical. All three fallback rungs are
+  exercised (desc, title-only, neither), along with the alt text of the image form.
+  Student-facing output is asserted unchanged in the same check: the HTML still
+  inlines the real SVG and the `.md` round trip still carries it.
+
+  `services/figureBlocks.ts` is
   mirrored like the delimiter file, checked from both sides
   (`tests/figure-tests.mjs` in the Student app).
 
