@@ -40,10 +40,11 @@ import {
 } from './qrPayload';
 import {
   COLUMN_X0_MM, COLUMN_X1_MM, FURNITURE_MAX_WIDTH_MM, LayoutRow, PAGE1_FURNITURE_TOP_MM,
-  DESC_FONT_PT, PAGE1_INSTRUCTION_LINE_MM, PAGE1_INSTRUCTION_LINES, PAGE1_INSTRUCTION_TOP_MM,
-  PAGE1_TITLE_H_MM, PROBLEM_HEADING_MM, PROMPT_ROW_MM, PlacedRegion, TemplateLayout,
-  WRITING_LINE_MM, buildLayout, toLayoutCsv, toLayoutRows,
+  DESC_FONT_PT, DESC_LINE_MM, FIGURE_LINES, PAGE1_INSTRUCTION_LINE_MM, PAGE1_INSTRUCTION_LINES,
+  PAGE1_INSTRUCTION_TOP_MM, PAGE1_TITLE_H_MM, PROBLEM_HEADING_MM, PROMPT_ROW_MM, PlacedRegion,
+  TemplateLayout, WRITING_LINE_MM, buildLayout, descBlockMm, toLayoutCsv, toLayoutRows,
 } from './templateLayout';
+import { splitFigures, trimAroundFigures } from './figureBlocks';
 import { SelfTestReport, runInkChecks, runSelfTest } from './templateSelfTest';
 
 const PX_PER_MM = 96 / 25.4;
@@ -173,6 +174,56 @@ const drawAuthoredText = async (
   ink.push({ pageK, what, x0: box.x0, y0: box.y0, x1: box.x1, y1: box.y0 + shown.length * lineMm });
 };
 
+/**
+ * An authored block that may carry a figure: the prose and each drawing are
+ * rasterised **separately**, stacked in authored order inside the reserved box.
+ *
+ * This is the whole fix for a stem printing smaller than the sub-parts under it.
+ * One canvas holding both meant one scale factor for both: a circuit that ran a
+ * millimetre over its `FIGURE_LINES` allotment set `scale < 1` on the shared
+ * raster, and the prose — already at 9 pt — shrank with the drawing. Sub-part
+ * descriptions have no figure to share with, so they stayed at 9 pt, and the
+ * stem printed visibly smaller than its own sub-parts. Every ENG17 problem has a
+ * circuit, so every ENG17 stem had it.
+ *
+ * The rule the split enforces: **a figure may scale to its box; text may not.**
+ * Each prose run gets a box the height of its own reservation, so its scale is
+ * always 1; each figure gets the `FIGURE_LINES` allotment the layout reserved
+ * for it, and only the drawing is scaled into it.
+ */
+const drawAuthoredBlock = async (
+  doc: jsPDF, text: string, box: RectMm, opts: { fontPt: number; bold?: boolean; grey?: number },
+  ink: InkBox[], pageK: number, what: string
+): Promise<void> => {
+  const segs = trimAroundFigures(splitFigures(text));
+  // No figure, no shared canvas: the block is one raster, exactly as before, so
+  // a figure-free stem or description is untouched.
+  if (!segs.some(s => s.kind === 'figure')) {
+    await drawAuthoredText(doc, text, box, opts, ink, pageK, what);
+    return;
+  }
+
+  const widthMm = box.x1 - box.x0;
+  let cursor = box.y0;
+  for (const seg of segs) {
+    if (cursor >= box.y1 - 0.01) break;
+    const natural = seg.kind === 'figure'
+      ? FIGURE_LINES * DESC_LINE_MM
+      : descBlockMm(seg.value, widthMm);
+    if (natural <= 0) continue;
+
+    const height = Math.min(natural, box.y1 - cursor);
+    await drawAuthoredText(
+      doc,
+      seg.kind === 'figure' ? seg.source : seg.value,
+      { x0: box.x0, y0: round4(cursor), x1: box.x1, y1: round4(cursor + height) },
+      opts, ink, pageK,
+      seg.kind === 'figure' ? `figure in ${what}` : what
+    );
+    cursor = round4(cursor + height);
+  }
+};
+
 const applyText = (doc: jsPDF, fontPt: number, bold: boolean, grey: number) => {
   doc.setFont('helvetica', bold ? 'bold' : 'normal');
   doc.setFontSize(fontPt);
@@ -244,7 +295,7 @@ const drawPage1Furniture = async (
   // The assignment's own instructions. Held to the furniture width so it stays
   // clear of the QR column, which it would otherwise reach at this height.
   if (layout.preambleBoxMm && assignment.preamble) {
-    await drawAuthoredText(doc, assignment.preamble,
+    await drawAuthoredBlock(doc, assignment.preamble,
       { ...layout.preambleBoxMm, x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM },
       { fontPt: DESC_FONT_PT, grey: 40 }, ink, 1, 'preamble');
   }
@@ -265,7 +316,9 @@ const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
     drawPlain(doc, b.heading, COLUMN_X0_MM, b.boxMm.y0,
       { fontPt: 11, bold: true }, ink, r.pageK, `problem heading ${r.partId}`);
     if (b.text) {
-      await drawAuthoredText(doc, b.text,
+      // The stem is where figures live, so this is the call that must never put
+      // prose and a drawing on one canvas.
+      await drawAuthoredBlock(doc, b.text,
         { x0: COLUMN_X0_MM, y0: round4(b.boxMm.y0 + PROBLEM_HEADING_MM), x1: COLUMN_X1_MM, y1: b.boxMm.y1 },
         { fontPt: DESC_FONT_PT }, ink, r.pageK, `problem text ${r.partId}`);
     }
@@ -298,7 +351,7 @@ const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
   }
 
   if (r.descBoxMm) {
-    await drawAuthoredText(doc, r.description, r.descBoxMm, { fontPt: DESC_FONT_PT, grey: 60 },
+    await drawAuthoredBlock(doc, r.description, r.descBoxMm, { fontPt: DESC_FONT_PT, grey: 60 },
       ink, r.pageK, `description ${r.partId}`);
   }
 
