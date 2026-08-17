@@ -97,15 +97,23 @@ identity field or em-dash reaching the page, and Appendix C — that none of the
 exam generator's choices leaked into a homework template.
 
 **Authored answer space** (2026-08-17) is checked here too, since it is the whole
-sizing model: the authored line count is what is reserved, what is drawn (the
-inked box is compared to the declared rectangle edge by edge) and what the map
-crops; points influence nothing; parts pack down a page and then break rather
-than being squeezed; a part whose answer exceeds a page continues with an `x2`
-region and no line is lost across the break; long prose is reserved in full and
-never scaled, with the one remaining clamp (prose that cannot fit a page at all)
-reported to the author. A text box is ruled at `WRITING_LINE_MM` and a sketch box
-is not. The prompt row carries no injected "write your answer below this line" —
-the PDF's own text operators are searched for all three retired sentences.
+sizing model: the authored line count is what is reserved, what is ruled and what
+the map crops; points influence nothing; parts pack down a page and then break
+rather than being squeezed; a part whose answer exceeds a page continues with an
+`x2` region and no line is lost across the break; long prose is reserved in full
+and never scaled, with the one remaining clamp (prose that cannot fit a page at
+all) reported to the author. A text region is ruled at `WRITING_LINE_MM` and a
+sketch region is left blank. The prompt row carries no injected "write your answer
+below this line" — the PDF's own text operators are searched for all three retired
+sentences.
+
+**Nothing is boxed** (page-format §4.1). The suite scans the PDF's `re`
+operators for a rectangle matching any declared region and asserts there is none,
+then ties the drawn writing area to the cropped one the way that survives without
+a frame: every ruled line falls inside the declared rectangle. It also reads the
+page-1 instruction back out of the PDF and asserts it says "write on the ruled
+lines" and that the word "box" is printed nowhere — the questions themselves ask
+students to box their final answer, so the sheet must not spend that word.
 
 `> template:` parsing is compared **against `converter/convert.py`** over
 `fixtures/ENG17_AnswerSpaceFixture.md`, which covers `lines=N`, an absent

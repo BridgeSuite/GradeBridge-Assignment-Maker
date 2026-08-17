@@ -177,11 +177,11 @@ A third key configures the **printed QR template** (§10) and is handwritten-onl
 
 | Key | Purpose |
 |---|---|
-| `> template: lines=N, sketch` | The printed handwritten template only. `lines=N` reserves **N writing lines** for the student's answer to this part; the box drawn is exactly the region the layout map crops. `sketch` marks a drawing region (a plain box, no rules). Both optional, order-free — `> template: sketch` alone is valid. |
+| `> template: lines=N, sketch` | The printed handwritten template only. `lines=N` reserves **N writing lines** for the student's answer to this part, and the lines printed are exactly the region the layout map crops. `sketch` marks a drawing region (the space is reserved and left blank, no rules). Both optional, order-free — `> template: sketch` alone is valid. |
 
 Omit `lines=N` and the part gets `DEFAULT_ANSWER_LINES` (6). The generator reserves exactly the
-requested lines, draws them as a ruled box (a plain box for `sketch`), and never shrinks the question
-text to make room: if a part's question and answer box do not fit the rest of a page, the part starts
+requested lines, prints them as ruled writing lines (blank space for a `sketch`), and never shrinks the question
+text to make room: if a part's question and writing lines do not fit the rest of a page, the part starts
 a new page, and a part whose answer exceeds a page continues onto the next. The older
 `space=half|full|short|medium|tall|xtall` values still import, mapped to a line count, but Export
 always writes `lines=N`.
@@ -265,15 +265,17 @@ The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Pa
 | Top 25 mm, every page | The QR, the four corner marks, one header line. Nothing else, ever. |
 | Page 1, under the band | Course and title, the print instruction, then the assignment **preamble**. |
 | Above each problem's first part | `Problem 2: Rectangular waveguide` and the problem's **shared setup text**. On a later page the heading repeats as `(continued)`; the setup does not. |
-| Each region | `1(a).`, the sub-part title, the points, the **question text**, a rule, then the **ruled answer box** of the part's authored size. |
+| Each region | `1(a).`, the sub-part title, the points, the **question text**, a rule, then the part's authored number of **ruled writing lines** (blank space for a sketch). |
 
 Prompt, problem and question text all go through the same KaTeX renderer as the other exports, so `$\delta_s$` and a bare `ω` print as glyphs rather than being garbled by jsPDF's Latin-1 fonts.
 
-The prompt row is the authored sub-part name and nothing else. No page instruction is injected into it — the ruled box beneath is the cue, and a continuation says so in its heading.
+The prompt row is the authored sub-part name and nothing else. No page instruction is injected into it — the ruled lines beneath are the cue, and a continuation says so in its heading.
+
+**Nothing is boxed.** Page-format §4.1 is explicit that there is no printed answer box, and the questions themselves ask students to box their final answer — so the student's box is the only box on the sheet. A region is a rule, then ruled writing lines, and nothing detects any of it: the crop comes from the declared rectangle alone.
 
 Question text is set at a fixed 9 pt and is never scaled down. Each part reserves its authored answer
 space (`> template: lines=N`, §7) and the generator honours it: the question prints at full size and
-the answer box is drawn at exactly N lines. When a page cannot hold a part's question plus its box, the
+exactly N writing lines are ruled. When a page cannot hold a part's question plus its writing lines, the
 part moves to a new page rather than the text being shrunk; a part whose answer needs more than a page
 continues onto the next. Heights are estimated from character count, not measured, so the map is
 identical in a browser and in a test and `layout_id` stays stable across them.
@@ -285,8 +287,8 @@ identical in a browser and in a test and `layout_id` stays stable across them.
 Pack, then break. Nothing is derived from points, and nothing is squeezed to avoid a break:
 
 1. **Every problem starts a new page**, carrying its heading and shared setup text.
-2. Its parts then **pack down the page**: a part's prompt, its fixed-size question text, and its N-line answer box. When the **next** part's prompt, text and box do not fit in what is left of the page, that part **breaks to a new page**. However many fit at their authored sizes is however many the page carries.
-3. If a single part's prompt, text and answer box **exceed a whole page**, it **continues**: same `part_id`, `region_id` suffixed `x2`, heading `(continued)`.
+2. Its parts then **pack down the page**: a part's prompt, its fixed-size question text, and its N ruled lines. When the **next** part's prompt, text and lines do not fit in what is left of the page, that part **breaks to a new page**. However many fit at their authored sizes is however many the page carries.
+3. If a single part's prompt, text and writing area **exceed a whole page**, it **continues**: same `part_id`, `region_id` suffixed `x2`, heading `(continued)`.
 4. Never squeeze to avoid a break. A break is the correct outcome — paper is cheap, unreadable text is not.
 
 **Rule 3 means a part can own more than one region.** The continuation row carries the same `part_id` and a `region_id` suffixed `x2`, so the Submission app receives two crops for one answer. The spec allows this — `region_id` is unique, `part_id` is a display string — but a consumer that assumed one crop per part will be surprised, so: **group crops by `part_id`, and grade the part once.**

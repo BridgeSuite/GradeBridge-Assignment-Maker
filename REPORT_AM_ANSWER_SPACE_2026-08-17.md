@@ -9,8 +9,8 @@ gives.
 | | |
 |---|---|
 | **Work orders** | `WORKORDER_AM_ANSWER_SPACE_2026-08-17.md`, `WORKORDER_AM_DROP_ANSWER_INSTRUCTION_2026-08-17.md` |
-| **Commit** | `ef30eb2` → `main` (14 files, +691 −350) |
-| **Tests** | 127 + 64 + 3 pass; `tsc --noEmit` clean |
+| **Commits** | `ef30eb2` (the build) + the no-printed-box follow-up → `main` |
+| **Tests** | 127 + 66 + 3 pass; `tsc --noEmit` clean |
 | **Deploy** | Published to `gh-pages` — https://bridgesuite.github.io/GradeBridge-Assignment-Maker/ |
 
 *Scope: handwritten QR template only. Electronic exports are untouched. Companion document:
@@ -22,7 +22,7 @@ gives.
 
 Space was derived — half a page or a full page, split between two parts by their point values. The
 printed question was whatever was left. When a page got tight, a page-level `squeeze` scaled every
-prose block down and the renderer scaled the rendered text into whatever box survived.
+prose block down and the renderer scaled the rendered text into whatever space survived.
 
 Two symptoms, one cause. A problem stem printed noticeably **smaller** than the sub-part questions
 under it — it is the longest block, so it shrank most, and an eight-line cap finished the job. And
@@ -44,30 +44,30 @@ third of one.
   │   stem, squeezed           │             │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄            │
   │ ───────────────────────    │             │   stem, 9 pt, full size    │
   │                            │             │ ━━━━━━━━━━━━━━━━━━━━━━━━━━ │
-  │      45 pts → 65%          │             │ │ ─────────────────────  │ │
-  │                            │             │ │ ─────────────────────  │ │
-  │ ───────────────────────    │             │ │ ─────────────────────  │ │
-  │      5 pts → 35%           │             │ │ ────────── lines=14 ─  │ │
-  │                            │             │ ━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+  │      45 pts → 65%          │             │   ──────────────────────   │
+  │                            │             │   ──────────────────────   │
+  │ ───────────────────────    │             │   ──────────────────────   │
+  │      5 pts → 35%           │             │   ───────────── lines=14   │
+  │                            │             │                            │
   └────────────────────────────┘             │ ▄▄▄▄ next part: won't fit  │
    1 page, always                            └────────────────────────────┘
                                               page 1
                                              ┌────────────────────────────┐
    The page is a fixed container             │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │
    and the question text is the              │ ━━━━━━━━━━━━━━━━━━━━━━━━━━ │
-   thing that gives.                         │ │ ─────────────────────  │ │
-                                             │ │ ─────────────────────  │ │
-                                             │ │ ─────────────────────  │ │
-                                             │ │ ─────────────────────  │ │
-                                             │ │ ────────── lines=20 ─  │ │
-                                             │ ━━━━━━━━━━━━━━━━━━━━━━━━━━ │
+   thing that gives.                         │   ──────────────────────   │
+                                             │   ──────────────────────   │
+                                             │   ──────────────────────   │
+                                             │   ──────────────────────   │
+                                             │   ───────────── lines=20   │
+                                             │                            │
                                              └────────────────────────────┘
                                               page 2, unshrunk
 ```
 
 The same two parts under both models. Before, one page is a fixed container and the question text is
-the thing that gives. After, the question and the authored box are both fixed and the part that no
-longer fits starts a page — paper is cheap, unreadable text is not.
+the thing that gives. After, the question and the authored writing lines are both fixed, and the part
+that no longer fits starts a page — paper is cheap, unreadable text is not.
 
 ---
 
@@ -82,7 +82,7 @@ Find every group of two or more elements in series.
 
 - `lines=N` reserves N writing lines. N is a positive integer.
 - `sketch` still combines and is order-free: `> template: lines=20, sketch` reserves 20 lines' height
-  as a plain, unruled drawing box. `> template: sketch` alone is still valid.
+  as reserved, unruled space to draw in. `> template: sketch` alone is still valid.
 - **Absent means 6 lines** (`DEFAULT_ANSWER_LINES`) and stores nothing on the sub-part, so a file that
   never carried the directive still round-trips byte-for-byte.
 
@@ -104,27 +104,27 @@ page pills are gone, replaced by an **Answer lines** number input; the Sketch pi
 
 ## One rectangle, end to end
 
-The authored line count is what is reserved, what is drawn, and what `layout_{id}.csv` crops — so
+The authored line count is what is reserved, what is ruled, and what `layout_{id}.csv` crops — so
 there is no drift between the space the student writes in and the space the grader sees.
 
 ```
    1(c). Find the series groups              [25 pts]   ← prompt row: the authored name alone
    ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
    ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄                ← question text: fixed 9 pt, never scaled
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   ← the rule = the box's top edge
- ┬ ┃                                                ┃
- │ ┃ ──────────────────────────────────────────     ┃
- │ ┃ ──────────────────────────────────────────     ┃
- │ ┃ ──────────────────────────────────────────     ┃  → reserved
- │ ┃ ──────────────────────────────────────────     ┃  → = drawn
- │ ┃ ──────────────────────────────────────────     ┃  → = cropped
- │ ┃ ──────────────────────────────────────────     ┃
- ┴ ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-   N × 8.0 mm            a sketch part gets the same box with no rules inside it
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   ← the rule: where the region starts
+ ┬
+ │   ────────────────────────────────────────────
+ │   ────────────────────────────────────────────     the N ruled lines are the
+ │   ────────────────────────────────────────────     writing area, and they sit
+ │   ────────────────────────────────────────────     inside the rectangle the
+ │   ────────────────────────────────────────────     map crops — no frame,
+ ┴   ────────────────────────────────────────────     nothing is boxed
+   N × 8.0 mm       a sketch part gets the rule, then reserved blank space
 ```
 
-The rule that spec 4.1 requires is the top edge of the box, so nothing is drawn twice and the printed
-rectangle is the row in the layout map.
+Nothing is drawn twice, and nothing is framed. The identity that matters — reserved, ruled, cropped —
+never depended on a border: the crop comes from the declared rectangle alone, and every rule falls
+inside it.
 
 ---
 
@@ -136,7 +136,7 @@ Replacing the old four rules. Nothing derives from points, and nothing is squeez
 |---|---|
 | **open** | **A problem opens a new page** — carrying its heading and shared setup text. |
 | **pack** | **Its parts pack down the page at their authored sizes** — however many fit is however many the page carries; no two-per-page cap. |
-| **break** | **A part that does not fit what is left starts a new page** — prompt, question text and answer box move together, at full size. |
+| **break** | **A part that does not fit what is left starts a new page** — prompt, question text and writing lines move together, at full size. |
 | **x2** | **A part bigger than a page continues** — same `part_id`, `region_id` suffixed `x2`, heading marked `(continued)`. Group crops by `part_id` and grade the part once, unchanged. |
 
 > **A problem with a single sub-part no longer gets an automatic second page.** That rule existed
@@ -173,17 +173,26 @@ section for a feature nobody asked to use.
 
 ---
 
-## One deliberate deviation
+## Follow-up: nothing is boxed
 
-The page-format spec's §4.1 says, emphatically, *"there is no printed answer box."* Its stated reason
-is that **nothing detects** a box — a region is found by registering the page and applying the
-declared rectangle, never by looking for an edge.
+The first build drew a faint bounding rectangle around each writing area, and flagged that
+page-format §4.1 says plainly *"there is no printed answer box."* Andre ruled to honour the spec, and
+the rectangle is gone.
 
-That reason still holds here: the box is drawn *from* the declared rectangle, never read back from
-it, and no consumer behaviour depends on it. The work order asks for it explicitly, and it is what
-makes the authored line count visible to the student and the sheet's own "write only inside the ruled
-areas" instruction true. Raised here rather than silently — if the format's authors object, the box is
-one `doc.rect` call to drop, and the ruled lines stand on their own.
+Two reasons, and the second is the one that would have bitten. The spec's own reason is that
+**nothing detects** a box — a region is located solely by registering the page and applying the
+declared rectangle, never by looking for an edge. And the ENG17 questions already tell students to
+**box their final answer** — "box the three currents", "box the final value" — so a printed frame
+around the whole writing area put two different boxes on one sheet. The student's final-answer box is
+now the only box on the page, which was the intent all along.
+
+What stayed: the rule under the prompt, and the N ruled writing lines. What changed with it: the
+page-1 instruction now reads *"write on the ruled lines"* rather than *"write only inside the ruled
+areas"*, so the sheet never spends the words "box" or "area" on something else.
+
+**`layout_id` did not move.** The map is the region rectangles; the frame was drawn ink, not a map
+entry. Removing it is paint-only — the same assignment hashes to the same `layout_id` it did before
+(verified: `38AE82C0` on the EEC130B HW3 fixture, either side of the change).
 
 ---
 
@@ -193,7 +202,7 @@ one `doc.rect` call to drop, and the ruled lines stand on their own.
 |---|---|
 | `types.ts` | `AnswerSpace` → `AnswerLines`; `answerSpace` → `answerLines`. |
 | `services/templateLayout.ts` | New: `WRITING_LINE_MM`, `DEFAULT_ANSWER_LINES`, `FULL_PAGE_LINES`, `LEGACY_SPACE_LINES`, `answerLinesFor`. Removed: `DESC_MAX_LINES`, `MAX_REGIONS_PER_PAGE`, `MIN_SHARE`, `MIN_REGION_MM`, `splitByPoints`, `paginate`, the squeeze loop. `buildLayout` rewritten as one pack-then-break walk that also does continuations. |
-| `services/templateGenerator.ts` | Prompt tail dropped; `drawAnswerBox` added; the rule became the box's top edge. |
+| `services/templateGenerator.ts` | Prompt tail dropped; `drawWritingArea` added — a rule and N ruled lines, no frame; print instruction reworded to "write on the ruled lines". |
 | `services/templateSelfTest.ts` | The clamp warning now reports unfittable question text, not a squeezed writing area. |
 | `services/mdParserService.ts`, `converter/convert.py` | `lines=N` parsed, legacy `space=` mapped, explicit wins. Kept in lockstep and now tested against each other. |
 | `services/exportService.ts` | Writes `lines=N`, never `space=`. |
@@ -205,7 +214,7 @@ one `doc.rect` call to drop, and the ruled lines stand on their own.
 The estimator's average character advance widened from 0.5 em to 0.55 em (`CHAR_ADVANCE_EM`).
 Reservation is still counted from characters and never measured — the map is hashed into every page's
 QR, so it must be identical in a browser and in a test — but with nothing scaled down to fit any more,
-an under-reservation would print question text over the answer box beneath it. Word wrap loses part of
+an under-reservation would print question text over the writing area beneath it. Word wrap loses part of
 a line at every break, so the advance is deliberately wider than Helvetica measures. Over-reserving
 costs a little paper, which is the cheap direction.
 
@@ -213,17 +222,20 @@ costs a little paper, which is the cheap direction.
 
 ## How it is held down
 
-127 + 64 + 3 checks pass, type-check clean. New or rewritten:
+127 + 66 + 3 checks pass, type-check clean. New or rewritten:
 
-- The authored line count is what is reserved, drawn and cropped — the **inked** box is compared to the
-  declared rectangle edge by edge, not intent to intent.
+- The authored line count is what is reserved, ruled and cropped — the **inked** rules are checked to
+  fall inside the declared rectangle, not intent against intent.
 - Points influence nothing; parts pack past the old two-per-page cap; a part that will not fit breaks
   unshrunk.
 - A 40-line answer continues onto an `x2` region with no line lost across the break.
 - Long prose is reserved in full and never clamped. The one remaining clamp — prose that cannot fit a
   page even alone — is reachable only by a pathological description and is reported to the author.
 - The stem is reserved at the same line height as a sub-part description.
-- A text box carries exactly N rules at the writing pitch; a sketch box carries none.
+- A text region carries exactly N rules at the writing pitch; a sketch region carries none.
+- **No region is framed:** the PDF's `re` operators are scanned for a rectangle matching any declared
+  region, and the page-1 instruction is read back out and asserted to say "ruled lines" — with the
+  word "box" printed nowhere on the sheet.
 - The PDF's own text operators are searched for all three retired instruction sentences.
 - **Parser parity is no longer on trust:** the real `converter/convert.py` is run in a temp directory
   against `mdParserService.ts` over `tests/fixtures/ENG17_AnswerSpaceFixture.md`, covering `lines=N`,
@@ -231,4 +243,4 @@ costs a little paper, which is the cheap direction.
 
 ---
 
-*`ef30eb2` · BridgeSuite/GradeBridge-Assignment-Maker · pushed to main, published to gh-pages*
+*BridgeSuite/GradeBridge-Assignment-Maker · `ef30eb2` and the no-printed-box follow-up · pushed to main, published to gh-pages*

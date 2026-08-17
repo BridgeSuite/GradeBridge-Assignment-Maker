@@ -689,22 +689,51 @@ check('the stem is reserved at the same line height as a sub-part description', 
     'the stem is reserved at a different line height from a description');
 });
 
-check('the drawn answer box is exactly the rectangle the map crops', () => {
-  // One rectangle: reserved, drawn, cropped, graded. The generator records the
-  // box it inked, so this compares ink to map rather than intent to intent.
-  const boxes = t.ink.filter(b => /^answer box /.test(b.what));
-  assertEqual(boxes.length, t.rows.length, 'not one drawn box per region');
-  for (const r of t.layout.regions) {
-    const box = boxes.find(b => b.what === `answer box ${r.partId}` && b.pageK === r.pageK);
-    assert(box, `${r.regionId}: no box was drawn`);
-    for (const edge of ['x0', 'y0', 'x1', 'y1']) {
-      assertEqual(round(box[edge]), round(r.declaredMm[edge]),
-        `${r.regionId}: the drawn box's ${edge} is not the declared rectangle's`);
-    }
+check('no answer region is boxed — spec 4.1, and the student\'s own box wins', () => {
+  // Page-format 4.1: "there is no printed answer box." The questions themselves
+  // ask students to box their final answer, so a printed frame around the whole
+  // writing area would put two different "boxes" on one sheet.
+  const declared = t.layout.regions.map(r => r.declaredMm);
+  const framed = pdfRects.filter(rect => declared.some(d =>
+    near(rect.xMm, d.x0, 0.3) && near(rect.yMm, d.y0, 0.3)
+    && near(rect.wMm, d.x1 - d.x0, 0.3) && near(rect.hMm, d.y1 - d.y0, 0.3)));
+  assertEqual(framed.length, 0, 'a bounding rectangle is still drawn around an answer region');
+  assertEqual(t.ink.filter(b => /answer box/.test(b.what)), [], 'a region box is still being inked');
+});
+
+check('the ruled lines stay inside the region the map crops', () => {
+  // The frame is gone, so this is what now ties the drawn writing area to the
+  // cropped rectangle: every rule lands inside the declared region.
+  const bands = t.ink.filter(b => /^writing lines /.test(b.what));
+  const ruled = t.layout.regions.filter(r => !r.isDrawing);
+  assertEqual(bands.length, ruled.length, 'not one ruled band per text region');
+  for (const r of ruled) {
+    const band = bands.find(b => b.what === `writing lines ${r.partId}` && b.pageK === r.pageK);
+    assert(band, `${r.regionId}: no writing lines were drawn`);
+    assert(band.x0 >= r.declaredMm.x0 - 0.01 && band.x1 <= r.declaredMm.x1 + 0.01,
+      `${r.regionId}: the rules run outside the cropped region horizontally`);
+    assert(band.y0 >= r.declaredMm.y0 - 0.01 && band.y1 <= r.declaredMm.y1 + 0.01,
+      `${r.regionId}: the rules run outside the cropped region vertically`);
+  }
+  // A sketch region draws no rules at all — reserved blank space.
+  for (const r of t.layout.regions.filter(r => r.isDrawing)) {
+    assertEqual(t.ink.filter(b => b.what === `writing lines ${r.partId}`), [],
+      `${r.regionId}: a sketch region was ruled`);
   }
 });
 
-check('a text answer is ruled at the writing pitch; a sketch box is left plain', async () => {
+check('the sheet says "ruled lines", and never says "box"', () => {
+  // "Box" belongs to the questions ("box the three currents"), so the sheet's own
+  // furniture must not spend the word on something else.
+  // Joined with a space, not a separator: the instruction wraps across two drawn
+  // lines, so the phrase spans two text operators.
+  const text = [...pdfText.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' ');
+  assert(/write on the ruled lines/i.test(text), `the print instruction does not say "ruled lines": ${text.slice(0, 300)}`);
+  assert(!/ruled areas?/i.test(text), 'the print instruction still says "ruled area"');
+  assert(!/\bbox\w*\b/i.test(text), 'the template prints the word "box"');
+});
+
+check('a text answer is ruled at the writing pitch; a sketch area is left blank', async () => {
   // One page per template, so every drawing op in the file belongs to the one
   // region under test. jsPDF writes a stroked line as "x y m x y l".
   const horizontals = async (template) => {
@@ -730,7 +759,7 @@ check('a text answer is ruled at the writing pitch; a sketch box is left plain',
   const sketch = await gen.generateTemplate(
     makeAssignment([[part('Sketch', 100, { isDrawing: true, answerLines: 7 })]]));
   assertEqual(insideBox(await horizontals(sketch), sketch.layout.regions[0]).length, 0,
-    'a sketch box was ruled');
+    'a sketch area was ruled');
 });
 
 check('item 4: authored text with Greek and math is not silently garbled', async () => {
