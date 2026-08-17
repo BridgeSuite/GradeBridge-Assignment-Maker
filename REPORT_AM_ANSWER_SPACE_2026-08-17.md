@@ -198,6 +198,8 @@ entry. Removing it is paint-only — the same assignment hashes to the same `lay
 
 ## Follow-up: a stem's prose never shares a raster with its figure
 
+*Reported in full in `REPORT_AM_STEM_FIGURE_FONT_2026-08-17.md`; summarised here.*
+
 Even with the fixed 9 pt and the eight-line cap gone, every ENG17 stem still printed smaller than its
 own sub-parts. The reason was one line of drawing code, not the sizing model.
 
