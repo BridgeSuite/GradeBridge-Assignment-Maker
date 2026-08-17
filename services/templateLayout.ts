@@ -61,7 +61,7 @@ export const FURNITURE_MAX_WIDTH_MM = QR_KEEPOUT_MM.x0 - COLUMN_X0_MM - 2.0; // 
 // ---- Per-region header ---------------------------------------------------
 /** `1(a). Title` on the left, `[N pts]` on the right. */
 export const PROMPT_ROW_MM = 6.0;
-/** Breath between the question text and the rule that tops the answer box. */
+/** Breath between the question text and the rule that tops the writing area. */
 export const RULE_GAP_MM = 2.5;
 /** Blank space under one region before the next part's header. */
 export const REGION_GAP_MM = 6.0;
@@ -94,7 +94,7 @@ export const FIGURE_LINES = 12;
  * The average advance is 0.55 em rather than the 0.5 em Helvetica prose actually
  * measures, deliberately: word wrap loses part of a line at every break, and now
  * that nothing is scaled down to fit, an under-reservation would print text over
- * the answer box below it. Over-reserving costs a little paper, which is the
+ * the writing area below it. Over-reserving costs a little paper, which is the
  * cheap direction.
  */
 export const CHAR_ADVANCE_EM = 0.55;
@@ -251,8 +251,8 @@ export interface PlacedRegion extends TemplatePart {
   /** Box the question text is rendered into, mm. Absent when there is none. */
   descBoxMm?: RectMm;
   /**
-   * The rule the student writes below, mm. It is the top edge of the drawn
-   * answer box, which is why it sits exactly on `declaredMm.y0`.
+   * The rule the student writes below, mm. It sits exactly on `declaredMm.y0`,
+   * so the region's visual start and its cropped rectangle begin together.
    */
   ruleYMm: number;
   /** The writing area the student sees, mm — exactly `answerLines` lines tall. */
@@ -319,7 +319,7 @@ export const continuationOf = (p: TemplatePart, seq: number, lines: number): Tem
  *
  * Pack, then break. A problem opens a new page carrying its heading and shared
  * setup; its parts then pack down the page at their authored sizes, and the
- * moment the next part's question plus its answer box does not fit the rest of
+ * moment the next part's question plus its writing area does not fit the rest of
  * the page, that part starts a new one. A part whose own answer is bigger than a
  * page continues onto the next with the same `part_id`. Nothing is ever squeezed
  * to avoid a break — a break is the correct outcome, paper is cheap and
@@ -422,9 +422,9 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
         x1: COLUMN_X1_MM, y1: round4(promptTop + PROMPT_ROW_MM + descMm),
       } : undefined;
 
-      // The rule is the top edge of the drawn box, so it sits on the declared
-      // rectangle: what is reserved, what is drawn and what is cropped are one
-      // rectangle, with no drift between them.
+      // The rule sits on the declared rectangle rather than a millimetre above
+      // it, so the region's visual start and its cropped rectangle begin at the
+      // same y: what is reserved, ruled and cropped is one rectangle.
       const header = PROMPT_ROW_MM + descMm + RULE_GAP_MM;
       const declaredTop = round4(promptTop + header);
       const nominalTop = round4(declaredTop + REGION_PAD_MM);

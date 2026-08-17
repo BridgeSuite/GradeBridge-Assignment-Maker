@@ -231,7 +231,10 @@ const drawPage1Furniture = async (
   );
 
   applyText(doc, 7.5, false, 110);
-  const instruction = 'Print at 100%, not "fit to page". Check all four corner squares are on the paper before you start, and write only inside the ruled areas.';
+  // Says "ruled lines", never "box" or "area": the questions themselves ask
+  // students to box their final answer, and the sheet must not compete for that
+  // word with a second meaning.
+  const instruction = 'Print at 100%, not "fit to page". Check all four corner squares are on the paper before you start, and write on the ruled lines.';
   const lines: string[] = doc.splitTextToSize(instruction, FURNITURE_MAX_WIDTH_MM);
   lines.slice(0, PAGE1_INSTRUCTION_LINES).forEach((line, i) => {
     drawPlain(doc, line, COLUMN_X0_MM, PAGE1_INSTRUCTION_TOP_MM + i * PAGE1_INSTRUCTION_LINE_MM,
@@ -248,10 +251,10 @@ const drawPage1Furniture = async (
 };
 
 /**
- * The prompt row, the question text, and the rule that tops the answer box.
+ * The prompt row, the question text, and the rule that tops the writing area.
  *
  * Nothing drawn here is inside the declared rectangle: it all sits above the
- * rule, and the rule is the rectangle's top edge.
+ * rule, and the rule sits on the rectangle's top edge.
  */
 const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
   // The problem's heading and shared setup, above its first part. Without this
@@ -280,7 +283,7 @@ const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
   // The prompt row is the authored sub-part name and nothing else. It used to
   // append "Write your answer below this line." to every part — 117 repetitions
   // across three homeworks of a sentence the instructor could not control,
-  // landing ahead of the authored question. The ruled box directly beneath is
+  // landing ahead of the authored question. The ruled lines directly beneath are
   // the cue, and a continuation is announced by its "(continued)" heading.
   // Goes through the math renderer, so `$…$` in a sub-part name still renders.
   if (r.name.trim()) {
@@ -299,48 +302,53 @@ const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
       ink, r.pageK, `description ${r.partId}`);
   }
 
-  drawAnswerBox(doc, r, ink);
+  drawWritingArea(doc, r, ink);
 };
 
 /**
- * The answer box: exactly the rectangle the layout map crops, drawn so the
- * student can see it. Its top edge is the region's rule, drawn solid black; the
- * other three sides are faint, and a text part is ruled inside at
- * `WRITING_LINE_MM` pitch. A sketch gets the bounding box only.
+ * The writing area: a rule under the prompt, then `answerLines` faint ruled
+ * lines at `WRITING_LINE_MM` pitch. A sketch part gets the rule and then
+ * nothing — reserved blank space to draw in.
  *
- * The page-format spec's 4.1 is written the other way round ("there is no
- * printed answer box"), but its reason is that **nothing detects** a box — a
- * region is found by registering the page and applying the declared rectangle,
- * never by looking for an edge. That still holds: this box is drawn from the
- * declared rectangle, not read back from it. Drawing it is what makes the sheet's
- * own "write only inside the ruled areas" instruction true, and what makes the
- * authored line count the same rectangle that is reserved, drawn and graded.
+ * **No bounding rectangle**, per page-format spec 4.1: "there is no printed
+ * answer box." An earlier build drew one around the declared rectangle; it is
+ * gone. Two reasons it had to go. The spec is plain, and nothing in the pipeline
+ * detects a box, a rule or an edge anyway — a region is located solely by
+ * registering the page and applying the declared rectangle. And the ENG17
+ * questions ask students to **box their final answer**, so a printed box around
+ * the whole writing area put two different "boxes" on one sheet. The student's
+ * final-answer box is now the only box on the page.
+ *
+ * The lines still land inside the declared rectangle, so what is reserved is
+ * still what is cropped and graded — that identity never depended on the frame.
  */
-const drawAnswerBox = (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
-  const box = r.declaredMm;
-
-  doc.setDrawColor(170);
-  doc.setLineWidth(0.2);
-  doc.rect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0, 'S');
-
-  if (!r.isDrawing) {
-    doc.setDrawColor(205);
-    doc.setLineWidth(0.15);
-    for (let i = 1; i <= r.answerLines; i++) {
-      const y = round4(r.nominalMm.y0 + i * WRITING_LINE_MM);
-      doc.line(r.nominalMm.x0, y, r.nominalMm.x1, y);
-    }
-  }
-
-  // The rule that tops the region, per spec 4.1 — solid, and the one edge of the
-  // box a student's eye should land on.
+const drawWritingArea = (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
+  // The rule that tops the region (spec 4.1): the region's visual start, and the
+  // line the student's eye should land on.
   doc.setDrawColor(0);
   doc.setLineWidth(0.3);
   doc.line(COLUMN_X0_MM, r.ruleYMm, COLUMN_X1_MM, r.ruleYMm);
+  ink.push({
+    pageK: r.pageK, what: `rule ${r.partId}`,
+    x0: COLUMN_X0_MM, y0: r.ruleYMm - 0.2, x1: COLUMN_X1_MM, y1: r.ruleYMm + 0.2,
+  });
 
-  // One ink box for the whole region. The rules inside it are not recorded
-  // separately: they would read as dozens of blocks overlapping their own frame.
-  ink.push({ pageK: r.pageK, what: `answer box ${r.partId}`, ...box });
+  if (r.isDrawing) return;
+
+  doc.setDrawColor(205);
+  doc.setLineWidth(0.15);
+  for (let i = 1; i <= r.answerLines; i++) {
+    const y = round4(r.nominalMm.y0 + i * WRITING_LINE_MM);
+    doc.line(r.nominalMm.x0, y, r.nominalMm.x1, y);
+  }
+
+  // One ink band spanning the ruled lines rather than one box per line, which
+  // would read as dozens of blocks stacked in the same column.
+  ink.push({
+    pageK: r.pageK, what: `writing lines ${r.partId}`,
+    x0: r.nominalMm.x0, y0: round4(r.nominalMm.y0 + WRITING_LINE_MM - 0.2),
+    x1: r.nominalMm.x1, y1: round4(r.nominalMm.y1 + 0.2),
+  });
 };
 
 // ---- Generate ------------------------------------------------------------
