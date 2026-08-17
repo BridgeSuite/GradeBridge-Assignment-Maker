@@ -24,8 +24,9 @@
 
 import { build } from 'esbuild';
 import jsQR from 'jsqr';
+import { spawnSync } from 'node:child_process';
 import { webcrypto } from 'node:crypto';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -53,6 +54,7 @@ const check = (name, fn) => {
 };
 const pending = [];
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+const round = (n) => Math.round(n * 1000) / 1000;
 const assertEqual = (actual, expected, msg) => {
   const a = JSON.stringify(actual), e = JSON.stringify(expected);
   if (a !== e) throw new Error(`${msg}\n          expected: ${e}\n          actual:   ${a}`);
@@ -128,10 +130,11 @@ check('the self-test passed every check it gates generation on', () => {
 });
 
 check('part ids follow the spec worked example: 1(a), 1(b), 2, 3(a), 3(b)', () => {
-  // Problem 2 has a single sub-part, so it gets a second page of writing space
-  // for the same answer: two rows sharing part_id "2", distinct region_ids.
-  assertEqual(t.rows.map(r => r.partId), ['1(a)', '1(b)', '2', '2', '3(a)', '3(b)'], 'wrong part ids');
-  assertEqual(t.rows.map(r => r.regionId), ['p1a', 'p1b', 'p2', 'p2x2', 'p3a', 'p3b'], 'wrong region ids');
+  // One region per part: writing space is authored now, so a lone sub-part no
+  // longer gets an automatic second page. A part only owns two regions when its
+  // own authored answer does not fit one page — checked further down.
+  assertEqual(t.rows.map(r => r.partId), ['1(a)', '1(b)', '2', '3(a)', '3(b)'], 'wrong part ids');
+  assertEqual(t.rows.map(r => r.regionId), ['p1a', 'p1b', 'p2', 'p3a', 'p3b'], 'wrong region ids');
   assertEqual([...new Set(t.rows.map(r => r.regionId))].length, t.rows.length, 'a region_id repeats');
 });
 
@@ -448,78 +451,97 @@ check('a long assignment paginates, and every page carries its own correct k of 
     'some page has no regions');
 });
 
-// ---------- correction item 3: two regions per page, by rule ----------
-check('at most two regions on any page', () => {
-  const perPage = new Map();
-  for (const r of t.rows) perPage.set(r.pageK, (perPage.get(r.pageK) || 0) + 1);
-  const over = [...perPage.entries()].filter(([, n]) => n > lay.MAX_REGIONS_PER_PAGE);
-  assertEqual(over.map(([p, n]) => `page ${p} has ${n}`), [], 'a page carries more than two regions');
-});
-
-check('a sketch, and anything marked full page, gets a page to itself', () => {
+// ---------- authored answer space (2026-08-17) ----------
+check('the authored line count is what is reserved, and what the map crops', () => {
   const l = lay.buildLayout(makeAssignment([[
-    part('Shared one', 10), part('Sketch', 10, { isDrawing: true }),
-    part('Shared two', 10), part('Big', 10, { answerSpace: 'full' }),
+    part('Short answer', 10, { answerLines: 3 }),
+    part('Long answer', 10, { answerLines: 14 }),
+    part('Never said', 10),
   ]]));
-  const pageOf = (id) => l.regions.find(r => r.regionId === id).pageK;
-  const alone = (id) => l.regions.filter(r => r.pageK === pageOf(id)).length === 1;
-  assert(alone('p1b'), 'the sketch shares its page');
-  assert(alone('p1d'), 'the full-page part shares its page');
-  assert(l.regions.find(r => r.regionId === 'p1b').isDrawing, 'the sketch lost its is_drawing flag');
+  const height = (id) => {
+    const r = l.regions.find(x => x.regionId === id);
+    return r.nominalMm.y1 - r.nominalMm.y0;
+  };
+  assert(Math.abs(height('p1a') - 3 * lay.WRITING_LINE_MM) < 0.001, `3 lines came out ${height('p1a')} mm`);
+  assert(Math.abs(height('p1b') - 14 * lay.WRITING_LINE_MM) < 0.001, `14 lines came out ${height('p1b')} mm`);
+  assert(Math.abs(height('p1c') - lay.DEFAULT_ANSWER_LINES * lay.WRITING_LINE_MM) < 0.001,
+    'an unset part did not get DEFAULT_ANSWER_LINES');
+  // The declared rectangle — what layout_{id}.csv carries — is that box padded,
+  // and it is what the generator draws. Nothing else determines the size.
+  for (const r of l.regions) {
+    assertEqual(round(r.nominalMm.y1 - r.nominalMm.y0), round(r.answerLines * lay.WRITING_LINE_MM),
+      `${r.regionId}: the drawn box is not its authored line count`);
+  }
 });
 
-check('a full-page part really does get most of the sheet', () => {
-  const l = lay.buildLayout(makeAssignment([[part('Solo', 10, { answerSpace: 'full' })]]));
-  const r = l.regions[0];
-  const h = r.nominalMm.y1 - r.nominalMm.y0;
-  assert(h > 150, `a lone part got only ${h.toFixed(0)} mm of writing space`);
-  assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.001, 'the region ran past the bottom limit');
-});
-
-check('two parts sharing a page split it by points, but neither is squeezed', () => {
+check('points no longer influence the answer size at all', () => {
   const l = lay.buildLayout(makeAssignment([[part('Small', 5), part('Large', 45)]]));
   const [a, b] = l.regions.map(r => r.nominalMm.y1 - r.nominalMm.y0);
-  assert(b > a, 'the 45-point part did not get more room than the 5-point one');
-  assert(a / (a + b) >= lay.MIN_SHARE - 0.01, `the small part got only ${(100 * a / (a + b)).toFixed(0)}% of the page`);
-  assertEqual(lay.splitByPoints(10, 10), [0.5, 0.5], 'equal points should split evenly');
-  assertEqual(lay.splitByPoints(0, 0), [0.5, 0.5], 'zero points should split evenly');
+  assertEqual(a, b, 'a 45-point part got different space from a 5-point one at the same line count');
 });
 
-check('every problem starts a new page, and that page carries one sub-part only', () => {
+check('parts pack down the page at their authored sizes, then break', () => {
+  // Six lines each: three fit under a problem heading, the fourth starts a page.
+  const l = lay.buildLayout(makeAssignment([Array.from({ length: 7 }, (_, i) => part(`Part ${i + 1}`, 10))]));
+  const perPage = new Map();
+  for (const r of l.regions) perPage.set(r.pageK, (perPage.get(r.pageK) || 0) + 1);
+  assert([...perPage.values()].some(n => n > 2), 'nothing packs more than the old two-per-page cap');
+  // No region runs past the bottom limit, and none runs into the next prompt.
+  const byPage = new Map();
+  for (const r of l.regions) byPage.set(r.pageK, [...(byPage.get(r.pageK) || []), r]);
+  for (const [k, rs] of byPage) {
+    for (let i = 0; i + 1 < rs.length; i++) {
+      assert(rs[i].declaredMm.y1 <= rs[i + 1].promptTopMm + 0.01, `page ${k}: region ${i} runs into the next prompt`);
+    }
+    assert(rs[rs.length - 1].declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.001, `page ${k}: ran past the bottom limit`);
+  }
+});
+
+check('a sketch keeps its is_drawing flag and its authored space', () => {
+  const l = lay.buildLayout(makeAssignment([[
+    part('Written', 10), part('Sketch', 10, { isDrawing: true, answerLines: 18 }),
+  ]]));
+  const sketch = l.regions.find(r => r.regionId === 'p1b');
+  assert(sketch.isDrawing, 'the sketch lost its is_drawing flag');
+  assertEqual(sketch.answerLines, 18, 'the sketch did not get the space it asked for');
+});
+
+check('every problem starts a new page; no page mixes two problems', () => {
   const l = lay.buildLayout(makeAssignment([
     [part('1a', 10), part('1b', 10), part('1c', 10)],
     [part('2a', 10), part('2b', 10)],
   ]));
   const perPage = new Map();
   for (const r of l.regions) perPage.set(r.pageK, [...(perPage.get(r.pageK) || []), r]);
-
-  // No page mixes two problems.
   for (const [k, rs] of perPage) {
     assertEqual([...new Set(rs.map(r => r.problemIndex))].length, 1, `page ${k} mixes problems`);
   }
-  // A problem's first page holds exactly one part.
-  const firstPageOf = new Map();
-  for (const r of l.regions) {
-    if (!firstPageOf.has(r.problemIndex)) firstPageOf.set(r.problemIndex, r.pageK);
-  }
-  for (const [prob, k] of firstPageOf) {
-    assertEqual(perPage.get(k).length, 1, `problem ${prob + 1}'s first page carries more than one sub-part`);
-  }
-  // 1(a) alone, then 1(b)+1(c); 2(a) alone, then 2(b).
   assertEqual(l.regions.map(r => `${r.partId}@${r.pageK}`),
-    ['1(a)@1', '1(b)@2', '1(c)@2', '2(a)@3', '2(b)@4'], 'wrong pagination');
+    ['1(a)@1', '1(b)@1', '1(c)@1', '2(a)@2', '2(b)@2'], 'wrong pagination');
 });
 
-check('a problem with a single sub-part gets a second page of writing space', () => {
-  const l = lay.buildLayout(makeAssignment([[part('Only', 20)]]));
-  assertEqual(l.pageCount, 2, 'a lone question did not get its extra page');
-  assertEqual(l.regions.map(r => r.partId), ['1', '1'], 'the extra page is not the same part');
+check('a part whose answer exceeds a page continues, and crops group by part_id', () => {
+  const l = lay.buildLayout(makeAssignment([[part('Enormous', 20, { answerLines: 40 })]]));
+  assertEqual(l.pageCount, 2, 'a 40-line answer did not spill onto a second page');
+  assertEqual(l.regions.map(r => r.partId), ['1', '1'], 'the continuation is not the same part');
   assertEqual(l.regions.map(r => r.regionId), ['p1', 'p1x2'], 'the continuation needs its own region_id');
   assertEqual(l.regions.map(r => r.pageK), [1, 2], 'the continuation is not on the next page');
   assert(!l.regions[0].isContinuation && l.regions[1].isContinuation, 'wrong region flagged as the continuation');
+  // Every authored line is drawn somewhere, once.
+  assertEqual(l.regions.reduce((n, r) => n + r.answerLines, 0), 40, 'lines were lost or invented across the break');
   // The continuation is writing space, not a restatement.
   assertEqual([l.regions[1].name, l.regions[1].description], ['', ''], 'the continuation repeats the question');
-  assert(l.regions[1].nominalMm.y1 - l.regions[1].nominalMm.y0 > 150, 'the continuation page is not mostly writing space');
+  assert(/continued/.test(l.regions[1].problemBlock.heading), 'the continuation page does not say continued');
+});
+
+check('a part that will not fit the rest of a page moves to a new one, unshrunk', () => {
+  const l = lay.buildLayout(makeAssignment([[
+    part('First', 10, { answerLines: 18 }), part('Second', 10, { answerLines: 18 }),
+  ]]));
+  assertEqual(l.regions.map(r => r.pageK), [1, 2], 'the second part did not break to a new page');
+  for (const r of l.regions) {
+    assertEqual(r.answerLines, 18, `${r.regionId}: the authored space was shrunk to avoid a break`);
+  }
 });
 
 // ---------- the payload cap is a hard failure, not a shrug ----------
@@ -622,8 +644,93 @@ check('item 2: the QR still decodes with every ink box on the page overlaid', ()
 check('item 5: no em-dash in any printed text', () => {
   const text = [...pdfText.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join('');
   assert(!text.includes('—') && !text.includes(''), 'an em-dash reached the page');
-  assert(/Write your answer below this line\./.test(text) || t.ink.some(b => /^prompt /.test(b.what)),
-    'the prompt line is missing');
+  assert(t.ink.some(b => /^prompt /.test(b.what)), 'the prompt row is missing');
+});
+
+// ---------- the injected page instruction is gone (2026-08-17) ----------
+check('no sub-part prompt carries an injected "below this line" instruction', () => {
+  // 117 repetitions across three homeworks of a sentence the instructor could
+  // not control, landing ahead of the authored question. The ruled box is the
+  // cue instead, and a continuation is announced by its "(continued)" heading.
+  const text = [...pdfText.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' | ');
+  for (const banned of [/Write your answer below/i, /Sketch your answer below/i, /Keep writing below/i]) {
+    assert(!banned.test(text), `the template still prints ${banned}`);
+  }
+});
+
+check('the prompt row is the authored name alone, and an unnamed part has none', async () => {
+  const named = makeAssignment([[
+    { ...part('Find the series groups', 50), description: 'Name every series pair.' },
+    { ...part('', 50), description: 'And the parallel ones.' },
+  ]]);
+  const g = await gen.generateTemplate(named);
+  assertEqual(g.ink.filter(b => /^prompt /.test(b.what)).length, 1,
+    'an empty sub-part name still drew a prompt row');
+  // The label and the points still print for both.
+  assertEqual(g.ink.filter(b => b.what === 'part label').length, 2, 'a part lost its 1(x). label');
+  assertEqual(g.ink.filter(b => b.what === 'points label').length, 2, 'a part lost its [N pts] label');
+});
+
+check('the stem is reserved at the same line height as a sub-part description', () => {
+  // The stem used to print smallest of all: it is the longest block, so the page
+  // squeeze hit it hardest, and the eight-line cap finished the job. Both are
+  // gone — every question block now reserves DESC_LINE_MM per estimated line.
+  const stem = 'The network below uses six identical resistors, three in series with a parallel pair, '
+    + 'driven from an ideal source. All values are in ohms unless stated otherwise, and every current '
+    + 'is measured in the direction of the arrow printed beside it on the diagram.';
+  const withStem = makeAssignment([[{ ...part('A', 50), description: 'Find R1.' }]]);
+  withStem.problems[0].description = stem;
+  const l = lay.buildLayout(withStem);
+  const block = l.regions[0].problemBlock;
+  const stemMm = block.boxMm.y1 - block.boxMm.y0 - lay.PROBLEM_HEADING_MM;
+  assertEqual(round(stemMm), round(lay.descBlockMm(stem)), 'the stem was reserved smaller than it estimates');
+  const wide = lay.COLUMN_X1_MM - lay.COLUMN_X0_MM;
+  assertEqual(round(lay.descBlockMm(stem) / lay.estimateDescLines(stem, wide)), round(lay.DESC_LINE_MM),
+    'the stem is reserved at a different line height from a description');
+});
+
+check('the drawn answer box is exactly the rectangle the map crops', () => {
+  // One rectangle: reserved, drawn, cropped, graded. The generator records the
+  // box it inked, so this compares ink to map rather than intent to intent.
+  const boxes = t.ink.filter(b => /^answer box /.test(b.what));
+  assertEqual(boxes.length, t.rows.length, 'not one drawn box per region');
+  for (const r of t.layout.regions) {
+    const box = boxes.find(b => b.what === `answer box ${r.partId}` && b.pageK === r.pageK);
+    assert(box, `${r.regionId}: no box was drawn`);
+    for (const edge of ['x0', 'y0', 'x1', 'y1']) {
+      assertEqual(round(box[edge]), round(r.declaredMm[edge]),
+        `${r.regionId}: the drawn box's ${edge} is not the declared rectangle's`);
+    }
+  }
+});
+
+check('a text answer is ruled at the writing pitch; a sketch box is left plain', async () => {
+  // One page per template, so every drawing op in the file belongs to the one
+  // region under test. jsPDF writes a stroked line as "x y m x y l".
+  const horizontals = async (template) => {
+    const bytes = Buffer.from(await template.pdf.arrayBuffer()).toString('latin1');
+    return [...bytes.matchAll(/([\d.]+) ([\d.]+) m\s*([\d.]+) ([\d.]+) l/g)].map(m => ({
+      x0: Number(m[1]) * PT_TO_MM, y0: fmt.PAGE_H_MM - Number(m[2]) * PT_TO_MM,
+      x1: Number(m[3]) * PT_TO_MM, y1: fmt.PAGE_H_MM - Number(m[4]) * PT_TO_MM,
+    })).filter(l => Math.abs(l.y0 - l.y1) < 0.01);
+  };
+  const insideBox = (lines, r) => lines.filter(l =>
+    l.y0 > r.nominalMm.y0 + 0.01 && l.y0 <= r.nominalMm.y1 + 0.01
+    && l.x0 >= r.nominalMm.x0 - 0.01 && l.x1 <= r.nominalMm.x1 + 0.01);
+
+  const written = await gen.generateTemplate(makeAssignment([[part('Written', 100, { answerLines: 7 })]]));
+  assertEqual(written.pageCount, 1, 'the text fixture should be one page');
+  const wr = written.layout.regions[0];
+  const rules = insideBox(await horizontals(written), wr);
+  assertEqual(rules.length, 7, 'wrong number of writing rules');
+  const offsets = rules.map(l => round(l.y0 - wr.nominalMm.y0)).sort((a, b) => a - b);
+  assertEqual(offsets, Array.from({ length: 7 }, (_, i) => round((i + 1) * lay.WRITING_LINE_MM)),
+    'the writing rules are not at the WRITING_LINE_MM pitch');
+
+  const sketch = await gen.generateTemplate(
+    makeAssignment([[part('Sketch', 100, { isDrawing: true, answerLines: 7 })]]));
+  assertEqual(insideBox(await horizontals(sketch), sketch.layout.regions[0]).length, 0,
+    'a sketch box was ruled');
 });
 
 check('item 4: authored text with Greek and math is not silently garbled', async () => {
@@ -763,7 +870,7 @@ check('a problem continued on a later page repeats the heading, not the setup', 
   assert(/continued/.test(opener.problemBlock.heading), 'the heading does not say continued');
 });
 
-check('long prose is squeezed before the writing area is, and never overflows', () => {
+check('long prose is never squeezed — the page count is what gives instead', () => {
   const wordy = 'A '.repeat(400);
   const l = lay.buildLayout({
     ...makeAssignment([[{ ...part('Wordy one', 50), description: wordy },
@@ -772,17 +879,23 @@ check('long prose is squeezed before the writing area is, and never overflows', 
     preamble: wordy,
   });
   l.problems = undefined;
+  assertEqual(l.clamped, [], 'ordinary long prose was clamped');
   for (const r of l.regions) {
-    const h = r.nominalMm.y1 - r.nominalMm.y0;
-    assert(h >= lay.MIN_REGION_MM - 0.01, `${r.regionId}: writing area collapsed to ${h.toFixed(1)} mm`);
+    // Reserved in full: the estimate for this description, with nothing scaled.
+    assertEqual(round(r.descBoxMm.y1 - r.descBoxMm.y0), round(lay.descBlockMm(wordy)),
+      `${r.regionId}: the question text was reserved smaller than it estimates`);
+    assertEqual(r.answerLines, lay.DEFAULT_ANSWER_LINES, `${r.regionId}: the answer box was shrunk`);
     assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.01,
       `${r.regionId}: ran past the bottom limit at ${r.declaredMm.y1.toFixed(1)} mm`);
   }
-  // Two regions that really do share a page must not run into each other.
-  const shared = l.regions.filter(r => r.pageK === 2);
-  assertEqual(shared.length, 2, 'expected parts (b) and (c) to share page 2');
-  assert(shared[0].declaredMm.y1 <= shared[1].promptTopMm + 0.01,
-    'the first region runs into the second prompt');
+  // Regions that do share a page must not run into each other.
+  const byPage = new Map();
+  for (const r of l.regions) byPage.set(r.pageK, [...(byPage.get(r.pageK) || []), r]);
+  for (const [k, rs] of byPage) {
+    for (let i = 0; i + 1 < rs.length; i++) {
+      assert(rs[i].declaredMm.y1 <= rs[i + 1].promptTopMm + 0.01, `page ${k}: region ${i} runs into the next prompt`);
+    }
+  }
 });
 
 // ---------- question text sizes to fit, since the sheet is the assignment ----------
@@ -798,8 +911,22 @@ check('a long question reserves more room than a short one, deterministically', 
   assertEqual(lay.estimateDescLines('', wide), 0, 'an empty description reserved a line');
   // Deterministic: the map is hashed into the QR, so this must not vary by host.
   assertEqual(lay.descBlockMm(long), lay.descBlockMm(long), 'not deterministic');
-  assert(lay.estimateDescLines('x'.repeat(100000), wide) === lay.DESC_MAX_LINES,
-    'an enormous description was not capped');
+  // No ceiling any more: a long stem reserves its full height rather than being
+  // crushed into eight lines and then scaled down into them.
+  assert(lay.estimateDescLines('x'.repeat(100000), wide) > 500,
+    'a huge description is still being capped');
+});
+
+check('question text that cannot fit a page at all is clamped, and reported', () => {
+  // The one remaining path where text is scaled: prose that would not fit a page
+  // even with a single writing line under it. Reported so the author hears it.
+  const l = lay.buildLayout(makeAssignment([[{ ...part('Impossible', 100), description: 'x'.repeat(100000) }]]));
+  assertEqual(l.clamped.length, 1, 'an unfittable description was not reported');
+  assert(l.clamped[0].usedMm < l.clamped[0].requestedMm, 'the clamp did not actually reduce anything');
+  for (const r of l.regions) {
+    assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.01, `${r.regionId}: ran past the bottom limit`);
+    assert(r.answerLines >= 1, `${r.regionId}: a region with no writing line at all`);
+  }
 });
 
 check('the question text box always sits between the prompt row and the rule', () => {
@@ -822,8 +949,8 @@ check('the question text box always sits between the prompt row and the rule', (
   const mdParser = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParser.mjs');
 
   const authored = makeAssignment([[
-    part('Cutoff frequency', 40, { answerSpace: 'full' }),
-    part('Field sketch', 60, { isDrawing: true, answerSpace: 'half' }),
+    part('Cutoff frequency', 40, { answerLines: 12 }),
+    part('Field sketch', 60, { isDrawing: true, answerLines: 20 }),
   ]], { pageFormatId: 'EEC130BHW3' });
 
   const md = exportSvc.assignmentToMd(authored);
@@ -831,24 +958,98 @@ check('the question text box always sits between the prompt row and the rule', (
 
   check('md: the template settings survive export and import', () => {
     assert(/^\*\*Template ID:\*\* EEC130BHW3$/m.test(md), `no Template ID line in:\n${md}`);
-    assert(/^> template: space=full$/m.test(md), 'the full-page setting was not written');
-    assert(/^> template: space=half, sketch$/m.test(md), 'the sketch flag was not written');
+    assert(/^> template: lines=12$/m.test(md), 'the line count was not written');
+    assert(/^> template: lines=20, sketch$/m.test(md), 'lines and the sketch flag did not both survive');
     assertEqual(back.pageFormatId, 'EEC130BHW3', 'the Template ID was lost');
     const [a, b] = back.problems[0].subsections;
-    assertEqual([a.answerSpace, a.isDrawing], ['full', undefined], 'part (a) settings were lost');
-    assertEqual([b.answerSpace, b.isDrawing], ['half', true], 'part (b) settings were lost');
+    assertEqual([a.answerLines, a.isDrawing], [12, undefined], 'part (a) settings were lost');
+    assertEqual([b.answerLines, b.isDrawing], [20, true], 'part (b) settings were lost');
   });
 
-  check('md: the pre-correction size scale still imports', () => {
+  check('md: an absent directive means DEFAULT_ANSWER_LINES, and writes nothing back', () => {
+    const plain = [
+      '# EEC130B: Homework 3', '', '**Input:** handwritten', '',
+      '## Problem 1: Unset', '',
+      '### (a) Never said [100 pts] [handwritten]', 'Do it.', '',
+    ].join('\n');
+    const [a] = mdParser.parseMdToAssignment(plain).problems[0].subsections;
+    assertEqual(a.answerLines, undefined, 'an absent directive should not invent a stored value');
+    assertEqual(lay.answerLinesFor(a), lay.DEFAULT_ANSWER_LINES, 'an unset part did not default to 6');
+    assert(!exportSvc.assignmentToMd(mdParser.parseMdToAssignment(plain)).includes('> template:'),
+      'a template line was written for a part that never had one');
+  });
+
+  check('md: the retired space= scale imports to a line count, and exports as lines=N', () => {
     const legacy = [
       '# EEC130B: Homework 3', '', '**Input:** handwritten', '',
       '## Problem 1: Old scale', '',
-      '### (a) Was extra tall [50 pts] [handwritten]', 'Do it.', '', '> template: space=xtall', '',
-      '### (b) Was short [50 pts] [handwritten]', 'Do it.', '', '> template: space=short', '',
+      '### (a) Was extra tall [34 pts] [handwritten]', 'Do it.', '', '> template: space=xtall', '',
+      '### (b) Was short [33 pts] [handwritten]', 'Do it.', '', '> template: space=short', '',
+      '### (c) Was a full-page sketch [33 pts] [handwritten:human]', 'Do it.', '', '> template: space=full, sketch', '',
     ].join('\n');
-    const [a, b] = mdParser.parseMdToAssignment(legacy).problems[0].subsections;
-    assertEqual(a.answerSpace, 'full', 'xtall should map to a full page');
-    assertEqual(b.answerSpace, 'half', 'short should map to a half page');
+    const parsed = mdParser.parseMdToAssignment(legacy);
+    const [a, b, c] = parsed.problems[0].subsections;
+    assertEqual(a.answerLines, lay.FULL_PAGE_LINES, 'xtall should map to a full page of lines');
+    assertEqual(b.answerLines, lay.LEGACY_SPACE_LINES.short, 'short should map to its line count');
+    assertEqual([c.answerLines, c.isDrawing], [lay.FULL_PAGE_LINES, true], 'full + sketch did not both survive');
+    // One-way migration: the old spelling is read, the new one is written.
+    const out = exportSvc.assignmentToMd(parsed);
+    assert(!/space=/.test(out), 'an old space= spelling was written back out');
+    assert(new RegExp(`^> template: lines=${lay.FULL_PAGE_LINES}$`, 'm').test(out), 'xtall did not export as lines=N');
+    assertEqual(exportSvc.assignmentToMd(mdParser.parseMdToAssignment(out)), out, 'the migrated file is not a fixed point');
+  });
+
+  // The Python converter is the reference implementation mdParserService.ts is
+  // ported from, and the two are only ever right together. Compare them on one
+  // fixture covering every form of the directive.
+  {
+    const FIXTURE = resolve(REPO, 'tests', 'fixtures', 'ENG17_AnswerSpaceFixture.md');
+    const fixtureMd = readFileSync(FIXTURE, 'utf8').replace(/\r\n/g, '\n');
+    const expected = [
+      { name: 'Authored line count', answerLines: 14, isDrawing: undefined },   // lines=N
+      { name: 'Never said', answerLines: undefined, isDrawing: undefined },     // absent → the default
+      { name: 'A ruled-free sketch', answerLines: 20, isDrawing: true },        // lines + sketch
+      { name: 'Written against the retired scale', answerLines: 24, isDrawing: undefined }, // space=full
+    ];
+
+    check('md: every form of the template directive parses as documented', () => {
+      const subs = mdParser.parseMdToAssignment(fixtureMd).problems[0].subsections;
+      assertEqual(subs.map(s => ({ name: s.name, answerLines: s.answerLines, isDrawing: s.isDrawing })),
+        expected, 'the fixture did not parse as the spec describes');
+      assertEqual(subs.map(s => lay.answerLinesFor(s)), [14, lay.DEFAULT_ANSWER_LINES, 20, lay.FULL_PAGE_LINES],
+        'the resolved line counts are wrong');
+    });
+
+    const python = ['python', 'python3', 'py'].find(exe =>
+      spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
+    const pyCheck = 'converter/convert.py agrees with mdParserService.ts on that fixture';
+    if (!python) results.push(`  SKIP  ${pyCheck} (no Python interpreter on PATH)`);
+    else check(pyCheck, () => {
+      const work = mkdtempSync(join(tmpdir(), 'gb-convert-'));
+      const md = join(work, 'ENG17_AnswerSpaceFixture.md');
+      copyFileSync(FIXTURE, md);
+      const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), md], { encoding: 'utf8' });
+      assert(run.status === 0, `convert.py failed: ${run.stderr || run.stdout}`);
+      const spec = JSON.parse(readFileSync(join(work, 'ENG17_AnswerSpaceFixture_spec.json'), 'utf8'));
+      assertEqual(
+        spec.problems[0].subsections.map(s => ({
+          name: s.name,
+          answerLines: s.answerLines === null ? undefined : s.answerLines,
+          isDrawing: s.isDrawing === null ? undefined : s.isDrawing,
+        })),
+        expected, 'the Python converter and the browser parser disagree');
+      rmSync(work, { recursive: true, force: true });
+    });
+  }
+
+  check('md: an explicit lines= wins over a space= in the same directive', () => {
+    const both = [
+      '# EEC130B: Homework 3', '', '**Input:** handwritten', '',
+      '## Problem 1: Both', '',
+      '### (a) Mixed [100 pts] [handwritten]', 'Do it.', '', '> template: space=full, lines=5, sketch', '',
+    ].join('\n');
+    const [a] = mdParser.parseMdToAssignment(both).problems[0].subsections;
+    assertEqual([a.answerLines, a.isDrawing], [5, true], 'the explicit line count did not win');
   });
 
   check('md: the round trip is a fixed point, and the layout is unchanged by it', async () => {

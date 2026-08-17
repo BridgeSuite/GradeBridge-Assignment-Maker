@@ -178,7 +178,8 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
 
   const failures = checks.filter(c => !c.passed).map(c => `check ${c.id || '–'} — ${c.name}: ${c.detail}`);
   const warnings = layout.clamped.map(c =>
-    `part ${c.partId} has only ${c.usedMm} mm of writing space; consider marking it "full page" or splitting the problem.`
+    `part ${c.partId}: the question text needs ${c.requestedMm} mm, more than a page can hold beside an ` +
+    `answer, so it was reserved at ${c.usedMm} mm and scaled into it. Consider splitting the problem.`
   );
 
   return { passed: failures.length === 0, checks, failures, warnings };

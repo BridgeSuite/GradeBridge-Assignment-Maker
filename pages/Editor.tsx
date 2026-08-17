@@ -18,7 +18,7 @@ import {
   strandedSubsectionLabels,
   typeAllowedInMode
 } from '../services/inputModeService';
-import { answerSpaceFor } from '../services/templateLayout';
+import { DEFAULT_ANSWER_LINES, answerLinesFor } from '../services/templateLayout';
 import { derivePageFormatId } from '../services/qrPayload';
 import { apportionPoints } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
@@ -807,32 +807,23 @@ const Editor: React.FC = () => {
                            </button>
                          ))}
 
-                         {/* Printed-template controls: how much room this part gets on the
-                             QR template, and whether it is a sketch. Both only affect the
-                             printed sheet and the layout map. */}
+                         {/* Printed-template controls: how much writing room this part gets
+                             on the QR template, and whether it is a sketch. Both only affect
+                             the printed sheet and the layout map. */}
                          <span className="text-xs text-academic-300 mx-1">|</span>
-                         <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Template page:</span>
-                         {([
-                           { label: 'Half page', value: 'half' as const,
-                             title: 'Shares a page with one other part. Two parts per page is the cap.' },
-                           { label: 'Full page', value: 'full' as const,
-                             title: 'This part gets a page to itself.' },
-                         ]).map(({ label, value, title }) => (
-                           <button
-                             key={value}
-                             type="button"
-                             disabled={!!sub.isDrawing}
-                             onClick={() => updateSubsection(pIndex, sIndex, { answerSpace: value })}
-                             title={sub.isDrawing ? 'Sketches always take a full page' : title}
-                             className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                               answerSpaceFor(sub) === value
-                                 ? 'bg-academic-700 text-white border-academic-700'
-                                 : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
-                             } ${sub.isDrawing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                           >
-                             {label}
-                           </button>
-                         ))}
+                         <div className="flex items-center gap-1.5">
+                           <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Answer lines:</span>
+                           <input
+                             type="number"
+                             min={1}
+                             value={answerLinesFor(sub)}
+                             onChange={e => updateSubsection(pIndex, sIndex, {
+                               answerLines: Math.max(1, parseInt(e.target.value, 10) || DEFAULT_ANSWER_LINES),
+                             })}
+                             title={`Writing lines reserved for this answer on the printed sheet, drawn at exactly this size. ${DEFAULT_ANSWER_LINES} if you never set it; a part that no longer fits its page simply starts a new one.`}
+                             className="w-14 text-xs border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
+                           />
+                         </div>
                          <button
                            type="button"
                            onClick={() => updateSubsection(pIndex, sIndex, { isDrawing: !sub.isDrawing })}
@@ -841,7 +832,7 @@ const Editor: React.FC = () => {
                                ? 'bg-academic-700 text-white border-academic-700'
                                : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
                            }`}
-                           title="Sketch part. Takes a full page and is flagged is_drawing in the layout map."
+                           title="Sketch part. The reserved space is drawn as a plain box with no rules, and flagged is_drawing in the layout map."
                          >
                            Sketch
                          </button>

@@ -42,7 +42,7 @@ import {
   COLUMN_X0_MM, COLUMN_X1_MM, FURNITURE_MAX_WIDTH_MM, LayoutRow, PAGE1_FURNITURE_TOP_MM,
   DESC_FONT_PT, PAGE1_INSTRUCTION_LINE_MM, PAGE1_INSTRUCTION_LINES, PAGE1_INSTRUCTION_TOP_MM,
   PAGE1_TITLE_H_MM, PROBLEM_HEADING_MM, PROMPT_ROW_MM, PlacedRegion, TemplateLayout,
-  buildLayout, toLayoutCsv, toLayoutRows,
+  WRITING_LINE_MM, buildLayout, toLayoutCsv, toLayoutRows,
 } from './templateLayout';
 import { SelfTestReport, runInkChecks, runSelfTest } from './templateSelfTest';
 
@@ -130,10 +130,12 @@ export interface InkBox extends RectMm { pageK: number; what: string }
  * as glyphs. jsPDF's built-in fonts are Latin-1 and silently garble anything
  * outside it — the WinAnsi trap the math deep fix already had to solve once.
  *
- * The raster is placed inside a box the layout reserved, and scaled down to fit
- * if it comes out taller. Scaling keeps the geometry deterministic: the map is
- * computed with no text measurement at all, so it is identical in a browser and
- * in a test.
+ * Every question block on the sheet — the problem stem, the sub-part prompt, the
+ * sub-part description — is drawn at the same fixed `DESC_FONT_PT`, so a stem can
+ * never print smaller than the sub-parts beneath it. The layout reserves against
+ * a deliberately generous character-count estimate (`CHAR_ADVANCE_EM`), so the
+ * scale-down below is a backstop against a pathological block, not the routine
+ * path it used to be when a page-level squeeze drove it.
  */
 const drawAuthoredText = async (
   doc: jsPDF, text: string, box: RectMm, opts: { fontPt: number; bold?: boolean; grey?: number },
@@ -246,9 +248,10 @@ const drawPage1Furniture = async (
 };
 
 /**
- * A ruled prompt, never a printed box (spec 4.1). The rule sits above the
- * writing area; the declared rectangle covers the writing area only, so nothing
- * printed here is inside it.
+ * The prompt row, the question text, and the rule that tops the answer box.
+ *
+ * Nothing drawn here is inside the declared rectangle: it all sits above the
+ * rule, and the rule is the rectangle's top edge.
  */
 const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
   // The problem's heading and shared setup, above its first part. Without this
@@ -274,29 +277,70 @@ const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
   const label = `${r.partId}.`;
   const labelW = drawPlain(doc, label, COLUMN_X0_MM, r.promptTopMm, { fontPt: 10, bold: true }, ink, r.pageK, 'part label') + 2.0;
 
-  // Joiner is a period, not an em-dash (correction item 5).
-  const tail = r.isContinuation
-    ? 'Continued. Keep writing below this line.'
-    : r.isDrawing ? 'Sketch your answer below this line.' : 'Write your answer below this line.';
-  const titleText = r.name.trim() ? `${r.name.trim()}. ${tail}` : tail;
-  await drawAuthoredText(
-    doc, titleText,
-    {
-      x0: COLUMN_X0_MM + labelW, y0: r.promptTopMm,
-      x1: COLUMN_X1_MM - pointsW - 3.0, y1: r.promptTopMm + PROMPT_ROW_MM - 0.5,
-    },
-    { fontPt: 9 }, ink, r.pageK, `prompt ${r.partId}`
-  );
+  // The prompt row is the authored sub-part name and nothing else. It used to
+  // append "Write your answer below this line." to every part — 117 repetitions
+  // across three homeworks of a sentence the instructor could not control,
+  // landing ahead of the authored question. The ruled box directly beneath is
+  // the cue, and a continuation is announced by its "(continued)" heading.
+  // Goes through the math renderer, so `$…$` in a sub-part name still renders.
+  if (r.name.trim()) {
+    await drawAuthoredText(
+      doc, r.name.trim(),
+      {
+        x0: COLUMN_X0_MM + labelW, y0: r.promptTopMm,
+        x1: COLUMN_X1_MM - pointsW - 3.0, y1: r.promptTopMm + PROMPT_ROW_MM - 0.5,
+      },
+      { fontPt: DESC_FONT_PT }, ink, r.pageK, `prompt ${r.partId}`
+    );
+  }
 
   if (r.descBoxMm) {
-    await drawAuthoredText(doc, r.description, r.descBoxMm, { fontPt: 9, grey: 60 },
+    await drawAuthoredText(doc, r.description, r.descBoxMm, { fontPt: DESC_FONT_PT, grey: 60 },
       ink, r.pageK, `description ${r.partId}`);
   }
 
+  drawAnswerBox(doc, r, ink);
+};
+
+/**
+ * The answer box: exactly the rectangle the layout map crops, drawn so the
+ * student can see it. Its top edge is the region's rule, drawn solid black; the
+ * other three sides are faint, and a text part is ruled inside at
+ * `WRITING_LINE_MM` pitch. A sketch gets the bounding box only.
+ *
+ * The page-format spec's 4.1 is written the other way round ("there is no
+ * printed answer box"), but its reason is that **nothing detects** a box — a
+ * region is found by registering the page and applying the declared rectangle,
+ * never by looking for an edge. That still holds: this box is drawn from the
+ * declared rectangle, not read back from it. Drawing it is what makes the sheet's
+ * own "write only inside the ruled areas" instruction true, and what makes the
+ * authored line count the same rectangle that is reserved, drawn and graded.
+ */
+const drawAnswerBox = (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
+  const box = r.declaredMm;
+
+  doc.setDrawColor(170);
+  doc.setLineWidth(0.2);
+  doc.rect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0, 'S');
+
+  if (!r.isDrawing) {
+    doc.setDrawColor(205);
+    doc.setLineWidth(0.15);
+    for (let i = 1; i <= r.answerLines; i++) {
+      const y = round4(r.nominalMm.y0 + i * WRITING_LINE_MM);
+      doc.line(r.nominalMm.x0, y, r.nominalMm.x1, y);
+    }
+  }
+
+  // The rule that tops the region, per spec 4.1 — solid, and the one edge of the
+  // box a student's eye should land on.
   doc.setDrawColor(0);
   doc.setLineWidth(0.3);
   doc.line(COLUMN_X0_MM, r.ruleYMm, COLUMN_X1_MM, r.ruleYMm);
-  ink.push({ pageK: r.pageK, what: `rule ${r.partId}`, x0: COLUMN_X0_MM, y0: r.ruleYMm - 0.2, x1: COLUMN_X1_MM, y1: r.ruleYMm + 0.2 });
+
+  // One ink box for the whole region. The rules inside it are not recorded
+  // separately: they would read as dozens of blocks overlapping their own frame.
+  ink.push({ pageK: r.pageK, what: `answer box ${r.partId}`, ...box });
 };
 
 // ---- Generate ------------------------------------------------------------

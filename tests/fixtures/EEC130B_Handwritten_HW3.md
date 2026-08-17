@@ -26,7 +26,7 @@ For a WR-90 guide with $a = 22.86$ mm, determine $f_c$ using $f_c = c/(2a)$, the
 ### (b) Field sketch [25 pts] [handwritten:human]
 Sketch the transverse field pattern of the $TE_{10}$ mode, marking $\vec{E}$ and $\vec{H}$.
 
-> template: sketch
+> template: lines=20, sketch
 
 > grader_note: Look for arrows normal to the walls. Award full marks when both E and H are shown.
 
@@ -35,6 +35,6 @@ Sketch the transverse field pattern of the $TE_{10}$ mode, marking $\vec{E}$ and
 ### (a) Reflection coefficient $\Gamma$ [20 pts] [handwritten]
 A wave in air strikes a medium with $\epsilon_r = 4$. Compute $\Gamma$ and the resulting VSWR, and comment on the phase.
 
-> template: space=full
+> template: lines=16
 
 > grading_prompt: Required elements: (1) the magnitude of $\Gamma$; (2) its phase.

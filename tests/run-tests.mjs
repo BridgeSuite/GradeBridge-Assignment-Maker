@@ -1154,13 +1154,19 @@ if (fixture) {
   }
 
   // --- the printed handwritten template ---
-  check('template layout: text with no figure reserves exactly what it always did', () => {
+  check('template layout: text with no figure is counted per paragraph, uncapped', () => {
+    // Since 2026-08-17 the estimate carries no ceiling — a long stem reserves its
+    // full height and prints at full size rather than being crushed into eight
+    // lines. Advance is CHAR_ADVANCE_EM, deliberately wider than Helvetica
+    // measures, because nothing is scaled down to fit any more.
     const width = 169.9;
-    for (const text of ['', 'A short line.', 'x'.repeat(400), 'one\n\ntwo\nthree']) {
-      const old = text.trim()
-        ? Math.min(text.split('\n').reduce((n, p) => n + Math.max(1, Math.ceil(p.trim().length / Math.max(20, Math.floor(width / (9 * 0.5 * 25.4 / 72))))), 0), 8)
+    const perLine = Math.max(20, Math.floor(width / (9 * 0.55 * 25.4 / 72)));
+    for (const text of ['', 'A short line.', 'x'.repeat(400), 'x'.repeat(20000), 'one\n\ntwo\nthree']) {
+      // A blank line inside a block still costs a line — it is a paragraph break.
+      const expected = text.trim()
+        ? text.split('\n').reduce((n, p) => n + Math.max(1, Math.ceil(p.trim().length / perLine)), 0)
         : 0;
-      assertEqual(estimateDescLines(text, width), old, `reservation moved for: ${JSON.stringify(text.slice(0, 20))}`);
+      assertEqual(estimateDescLines(text, width), expected, `reservation moved for: ${JSON.stringify(text.slice(0, 20))}`);
     }
   });
   check('template layout: a figure reserves a block, not eight lines of character count', () => {
