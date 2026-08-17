@@ -1,0 +1,15 @@
+# Line endings, settled once.
+#
+# Without this, a Windows checkout with core.autocrlf=true writes CRLF into the
+# working copy while the repo stores LF, so every line of every text file reads
+# as modified with byte-identical content — twenty phantom diffs hiding the one
+# real edit. `text=auto` still lets git detect binaries and leave them alone
+# (logos/BridgeSuite.png stays untouched); `eol=lf` pins the working copy to what the
+# repo already holds, on every platform.
+* text=auto eol=lf
+
+# Belt and braces for the one binary in the tree, so no future detection change
+# can rewrite it.
+*.png binary
+*.woff2 binary
+*.ttf binary
