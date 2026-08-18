@@ -138,6 +138,7 @@ const mathRender = await loadModule(join(REPO, 'services', 'mathRender.ts'), 'ma
 const pointsSvc = await loadModule(join(REPO, 'services', 'pointsService.ts'), 'pointsService.mjs');
 const figures = await loadModule(join(REPO, 'services', 'figureBlocks.ts'), 'figureBlocks.mjs');
 const layoutSvc = await loadModule(join(REPO, 'services', 'templateLayout.ts'), 'templateLayout.mjs');
+const retiredSvc = await loadModule(join(REPO, 'services', 'retiredTypes.ts'), 'retiredTypes.mjs');
 
 // Same module, but with a real jsPDF so the PDF can actually be inspected.
 const exportPdfSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportServicePdf.mjs', {
@@ -154,6 +155,7 @@ const { apportionPoints, tooManyPartsForTarget } = pointsSvc;
 const { splitFigures, figureSegsToSource, hasFigure, trimAroundFigures, figureLabel,
         figurePlaceholder, sanitizeSvg, namespaceSvgIds, prepareSvgForInline } = figures;
 const { estimateDescLines } = layoutSvc;
+const { degradeRetiredTypes } = retiredSvc;
 
 // ---------- helpers ----------
 const spkiPem = (der) =>
@@ -1287,6 +1289,94 @@ ${r.problem_statement}`);
         'Student Submission repo not alongside this one');
     }
   }
+}
+
+// =====================================================
+// 12. Retired types — AI Formative is gone, but a file carrying it still opens
+// =====================================================
+// The authoring path is removed: no pill, no export mapping, no enum member.
+// What is left is the one-way door — an .md or a saved project written before
+// the removal degrades to Text and says which sub-part changed.
+{
+  const RETIRED_MD = [
+    '# EEC1: Lab 9 Post-Lab',
+    '',
+    '**Preamble:** Complete all parts.',
+    '',
+    '## Problem 1: Reflection',
+    '',
+    '### (a) What surprised you [40 pts] [ai-graded:formative]',
+    'Describe one thing that surprised you in lab.',
+    '> grading_prompt: Required elements: (1) a specific observation.',
+    '',
+    '### (b) Measured value [60 pts] [text]',
+    'State the measured resistance.',
+    '> grader_note: 4.7 kilohm ± 5%.',
+    '',
+  ].join('\n');
+
+  const warnings = [];
+  const retiredAssignment = parseMdToAssignment(RETIRED_MD, warnings);
+  const partA = retiredAssignment.problems[0].subsections[0];
+
+  check('retired: an .md carrying the retired tag imports as a Text sub-part', () => {
+    assertEqual(partA.submissionType, 'Text', 'the retired tag did not degrade to Text');
+    assertEqual(partA.points, 40, 'the points did not survive the degrade');
+    assert(partA.description.includes('surprised you in lab'),
+      'the description was lost with the type');
+    assert(partA.minWords === undefined, `a degraded part kept minWords: ${partA.minWords}`);
+  });
+
+  check('retired: the authored rubric survives, as a grader note', () => {
+    assert(!partA.aiGradingPrompt,
+      `a part that is no longer AI graded kept an invisible AI prompt: ${partA.aiGradingPrompt}`);
+    assert((partA.graderNote || '').includes('a specific observation'),
+      `the authored rubric was dropped instead of kept as a grader note: ${partA.graderNote}`);
+    assert(assignmentToMd(retiredAssignment).includes('grader_note: Required elements'),
+      'the preserved rubric does not survive the .md export');
+  });
+
+  check('retired: the import warns, naming the sub-part', () => {
+    assertEqual(warnings.length, 1, `expected exactly one warning, got ${warnings.length}`);
+    assert(warnings[0].includes('What surprised you'),
+      `the warning does not name the sub-part: ${warnings[0]}`);
+    assert(warnings[0].includes('retired'),
+      `the warning does not say the type was retired: ${warnings[0]}`);
+  });
+
+  check('retired: a file with no retired tag warns about nothing', () => {
+    const clean = [];
+    parseMdToAssignment(RETIRED_MD.replace('[ai-graded:formative]', '[ai-graded:short]'), clean);
+    assertEqual(clean, [], 'a clean file produced warnings');
+  });
+
+  check('retired: nothing downstream can write the retired tag or grading type', () => {
+    const md = assignmentToMd(retiredAssignment);
+    assert(!md.includes('formative'), 'the .md export still writes the retired tag');
+    const rubric = generateGradingRubric(retiredAssignment);
+    const types = Object.values(rubric.rubrics).map(r => r.grading_type);
+    assert(!types.includes('ai_formative'),
+      `the rubric still emits ai_formative: ${JSON.stringify(types)}`);
+    assertEqual(types, ['human', 'human'], 'the degraded part is not graded as plain human text');
+  });
+
+  check('retired: a saved project carrying the retired value degrades on load', () => {
+    const stored = makeAssignment();
+    stored.problems[0].subsections[0].name = 'Design reflection';
+    stored.problems[0].subsections[0].submissionType = 'AI Formative';
+    const found = degradeRetiredTypes(stored);
+    assertEqual(stored.problems[0].subsections[0].submissionType, 'Text',
+      'a stored retired value was left in place');
+    assertEqual(found.length, 1, `expected one warning, got ${found.length}`);
+    assert(found[0].includes('Design reflection'),
+      `the warning does not name the sub-part: ${found[0]}`);
+  });
+
+  check('retired: an assignment with no retired value is left alone', () => {
+    const clean = makeAssignment();
+    assertEqual(degradeRetiredTypes(clean), [], 'a clean assignment reported a degrade');
+    assertEqual(clean.problems[0].subsections[0].submissionType, 'Text', 'a clean part was rewritten');
+  });
 }
 
 // ---------- report ----------

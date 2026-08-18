@@ -9,6 +9,7 @@ import { Layout, Card, Button } from '../components/Common';
 import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
 import { parseMdToAssignment } from '../services/mdParserService';
+import { degradeRetiredTypes } from '../services/retiredTypes';
 import { isEncoded, decryptJson } from '../services/cryptoService';
 
 const Dashboard: React.FC = () => {
@@ -78,6 +79,10 @@ const Dashboard: React.FC = () => {
         // Ensure ID is string and trimmed
         importedAssignment.id = String(importedAssignment.id).trim();
 
+        // A project saved before a submission type was retired still opens —
+        // the part degrades to Text and the instructor is told which one.
+        const retired = degradeRetiredTypes(importedAssignment);
+
         // Ensure timestamps exist
         const now = Date.now();
         if (typeof importedAssignment.createdAt !== 'number') {
@@ -101,7 +106,9 @@ const Dashboard: React.FC = () => {
 
         storageService.save(importedAssignment);
         loadAssignments();
-        alert("Assignment imported successfully!");
+        alert(retired.length
+          ? ['Assignment imported.', '', ...retired].join('\n')
+          : "Assignment imported successfully!");
       } catch (error) {
         console.error(error);
         alert("Failed to import assignment. Please ensure the file is a valid assignment JSON.");
@@ -127,7 +134,10 @@ const Dashboard: React.FC = () => {
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
-        const assignment = parseMdToAssignment(content);
+        // Retired type tags degrade to Text rather than failing the import; the
+        // warning names the sub-part so the instructor can re-pick its type.
+        const warnings: string[] = [];
+        const assignment = parseMdToAssignment(content, warnings);
 
         // Check for existing assignment with same courseCode + title
         const existing = storageService.getAll().find(
@@ -151,6 +161,7 @@ const Dashboard: React.FC = () => {
         }
 
         storageService.save(assignment);
+        if (warnings.length) alert(warnings.join('\n'));
         navigate(`/edit/${assignment.id}`);
       } catch (error) {
         console.error(error);

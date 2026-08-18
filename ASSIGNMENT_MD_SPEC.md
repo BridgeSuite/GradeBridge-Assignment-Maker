@@ -68,7 +68,7 @@ A lossless 50-ohm line terminated in Z_L = 75 + j25 ohm.
 
 **Flat (a problem that is itself a single sub-part):** put the points and type tag on the problem header.
 ```markdown
-## Problem 3: Short reflection [10 pts] [ai-graded:formative]
+## Problem 3: Short reflection [10 pts] [ai-graded:short]
 Describe one thing that surprised you in lab.
 > grading_prompt: Full credit for any genuine, on-topic reflection of 2+ sentences.
 ```
@@ -87,7 +87,9 @@ This auto-promotes to a single sub-part `(a)` with the problem's body as its des
 - `{type}` — one type tag from §5. **The `[... pts]` and `[type]` brackets are both required** on a sub-part header.
 - Any non-blockquote text on the following lines is the sub-part **description**.
 
-An unrecognised type tag falls back to `text`.
+An unrecognised type tag falls back to `text`. So does a **retired** tag — one this
+app once wrote but no longer authors — and the import surfaces a line naming the
+sub-part, so a file written against an older spec opens rather than failing.
 
 ---
 
@@ -104,7 +106,6 @@ An unrecognised type tag falls back to `text`.
 | `ai-graded:short` | Typed text, ~50–100 words | AI first pass |
 | `ai-graded:medium` | Typed text, ~100–150 words | AI first pass |
 | `ai-graded:long` | Typed text, ~150–250 words | AI first pass |
-| `ai-graded:formative` | Typed text, feedback-oriented | AI first pass |
 | `handwritten` | Handwritten answer (photographed, transcribed) | AI first pass (OCR then grade) |
 | `handwritten:human` | Handwritten answer | Human (TA grades from the crop, no OCR) |
 

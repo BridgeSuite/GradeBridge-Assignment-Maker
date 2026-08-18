@@ -156,7 +156,6 @@ The parser auto-promotes a flat problem into a single `(a)` subsection on import
 | `[ai-graded:short]` | Short free-text, AI graded | 50 word min; 3 grading bands |
 | `[ai-graded:medium]` | Medium free-text, AI graded | 100 word min; 4 grading bands |
 | `[ai-graded:long]` | Long free-text, AI graded | 150 word min; 5 grading bands |
-| `[ai-graded:formative]` | Report section, AI formative feedback | No enforced word min; no score emitted |
 
 ### Math notation (LaTeX)
 
@@ -283,7 +282,6 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
 | Value | Meaning |
 |---|---|
 | `"ai"` | AI-graded text response (scored) |
-| `"ai_formative"` | AI formative feedback — per-element status only, no numeric score |
 | `"human"` | TA reviews text response (also used for Text + Image) |
 | `"human_image"` | TA reviews uploaded image |
 | `"ai_image_completion"` | Auto-award if `images_submitted > 0` |
