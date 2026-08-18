@@ -481,8 +481,11 @@ check('points no longer influence the answer size at all', () => {
 });
 
 check('parts pack down the page at their authored sizes, then break', () => {
-  // Six lines each: three fit under a problem heading, the fourth starts a page.
-  const l = lay.buildLayout(makeAssignment([Array.from({ length: 7 }, (_, i) => part(`Part ${i + 1}`, 10))]));
+  // Short answers, so several genuinely fit: the point is that the page carries
+  // however many fit at their authored size, with no cap. Asserted against the
+  // authored sizes rather than a page count, which moves with WRITING_LINE_MM.
+  const l = lay.buildLayout(makeAssignment(
+    [Array.from({ length: 9 }, (_, i) => part(`Part ${i + 1}`, 10, { answerLines: 2 }))]));
   const perPage = new Map();
   for (const r of l.regions) perPage.set(r.pageK, (perPage.get(r.pageK) || 0) + 1);
   assert([...perPage.values()].some(n => n > 2), 'nothing packs more than the old two-per-page cap');
@@ -516,8 +519,16 @@ check('every problem starts a new page; no page mixes two problems', () => {
   for (const [k, rs] of perPage) {
     assertEqual([...new Set(rs.map(r => r.problemIndex))].length, 1, `page ${k} mixes problems`);
   }
-  assertEqual(l.regions.map(r => `${r.partId}@${r.pageK}`),
-    ['1(a)@1', '1(b)@1', '1(c)@1', '2(a)@2', '2(b)@2'], 'wrong pagination');
+  // Where the break falls depends on WRITING_LINE_MM, so assert the rules that
+  // do not: every problem opens a page, parts follow in order, and a part is
+  // never split across pages unless its own answer is bigger than one.
+  const pages = l.regions.map(r => r.pageK);
+  assertEqual(pages, [...pages].sort((a, b) => a - b), 'the parts are not in page order');
+  assertEqual(l.regions[0].pageK, 1, '1(a) does not start on page 1');
+  const problem2 = l.regions.find(r => r.problemIndex === 1);
+  assert(problem2.pageK > l.regions.filter(r => r.problemIndex === 0).at(-1).pageK,
+    'problem 2 did not start a new page');
+  assertEqual(l.regions.map(r => r.partId), ['1(a)', '1(b)', '1(c)', '2(a)', '2(b)'], 'a part was lost');
 });
 
 check('a part whose answer exceeds a page continues, and crops group by part_id', () => {
@@ -780,6 +791,83 @@ check('the sheet says "ruled lines", and never says "box"', () => {
   assert(!/\bbox\w*\b/i.test(text), 'the template prints the word "box"');
 });
 
+check('the interior rules are dashed and the region top rule is solid', async () => {
+  // A solid horizontal rule next to handwritten maths is the exact shape of a
+  // fraction bar, a minus sign or an overbar, and the grader reads it as one.
+  // The top rule is a region separator, not a line anyone writes maths against,
+  // so it stays solid. jsPDF writes the dash as `[a b] phase d`.
+  const t1 = await gen.generateTemplate(makeAssignment([[part('Written', 100, { answerLines: 4 })]]));
+  const bytes = Buffer.from(await t1.pdf.arrayBuffer()).toString('latin1');
+
+  const dashOps = [...bytes.matchAll(/\[([\d.\s]*)\]\s*[\d.]+\s*d\b/g)].map(m => m[1].trim());
+  assert(dashOps.some(p => p !== ''), `no dash pattern was set:\n${dashOps.join(' | ')}`);
+  assert(dashOps.some(p => p === ''), 'the dash pattern was never reset to solid');
+
+  // The top rule is drawn solid black before any dashing starts, and the dash is
+  // reset afterwards, so nothing else on the page inherits it.
+  const firstDash = bytes.search(/\[[\d.\s]+\]\s*[\d.]+\s*d\b/);
+  const lastReset = bytes.lastIndexOf('[] 0. d');
+  assert(firstDash > 0, 'no dashed run in the content stream');
+  assert(bytes.indexOf('0 G') < firstDash, 'the solid black rule was set after dashing began');
+  assert(lastReset > firstDash, 'the dash pattern outlives the writing lines');
+
+  // Weight and grey, as the OCR review asked: 0.5 pt at 0.75 grey. jsPDF writes
+  // widths in points, so 0.5 pt is what lands in the stream.
+  assert(/\b0\.75 G\b/.test(bytes), 'the interior rules are not at 0.75 grey');
+  assert(/\b0\.5 w\b/.test(bytes), 'the interior rules are not 0.5 pt');
+});
+
+check('the writing pitch is 9 mm — sub- and superscripts clear the next line', () => {
+  assertEqual(lay.WRITING_LINE_MM, 9.0, 'the pitch is not 9 mm');
+  const l = lay.buildLayout(makeAssignment([[part('A', 100, { answerLines: 5 })]]));
+  const r = l.regions[0];
+  assertEqual(round(r.nominalMm.y1 - r.nominalMm.y0), round(5 * 9.0), 'five lines is not five times the pitch');
+});
+
+check('no authored text is ever scaled — one font size across the document', async () => {
+  // The bug this pins is the one that survived two fixes: drawAuthoredText used
+  // to shrink a block whose measured height beat its reservation, so the stem —
+  // the longest block on the page — was the only one that shrank, and it printed
+  // smaller than its own sub-parts. Text is now drawn at its natural size come
+  // what may; only a figure may be scaled into its box.
+  const longStem = 'For the bridge circuit provided (text problem 1.11): a 20 V source and six '
+    + 'resistors, with every node lettered on the drawing. Take the bottom node as the reference, '
+    + 'and give every current in the direction of the arrow printed beside it. State units at every '
+    + 'step, and do not round intermediate values.';
+  const a = makeAssignment([[{ ...part('Node table', 100), description: 'Give a table with one row per node.' }]]);
+  a.problems[0].description = longStem;
+
+  const g = await gen.generateTemplate(a);
+  // Every authored-text raster occupies its full natural height: in the no-DOM
+  // path that means every wrapped line was drawn, none clipped to the box.
+  const stem = g.ink.find(b => b.what === 'problem text 1');
+  const desc = g.ink.find(b => b.what === 'description 1');
+  assert(stem && desc, 'the stem or the description was not drawn');
+
+  // Same line height for both — the property "one font size" reduces to on the page.
+  const lineMm = lay.DESC_FONT_PT * 1.35 * 25.4 / 72;
+  for (const [name, box] of [['stem', stem], ['description', desc]]) {
+    const lines = (box.y1 - box.y0) / lineMm;
+    assert(Math.abs(lines - Math.round(lines)) < 0.01,
+      `${name} was scaled: its height is ${lines.toFixed(3)} line heights, not a whole number`);
+  }
+  // And the reservation covered it, so nothing overran into the writing area.
+  assertEqual(g.selfTest.failures, [], 'the template did not pass its own checks');
+});
+
+check('a question longer than a page is refused, not shrunk', async () => {
+  // The other half of "text is never scaled": if it cannot fit, that is the
+  // author's to fix, and the generator says so instead of printing it small.
+  let threw = null;
+  try {
+    await gen.generateTemplate(makeAssignment([[{ ...part('Impossible', 100), description: 'x'.repeat(100000) }]]));
+  } catch (err) { threw = err; }
+  assert(threw !== null, 'a question longer than a page produced a template anyway');
+  assert(/fits the page at full size/.test(threw.message),
+    `the refusal does not name the cause:\n${threw.message}`);
+  assert(/split the problem/i.test(threw.message), 'the refusal does not say what to do about it');
+});
+
 check('a text answer is ruled at the writing pitch; a sketch area is left blank', async () => {
   // One page per template, so every drawing op in the file belongs to the one
   // region under test. jsPDF writes a stroked line as "x y m x y l".
@@ -981,8 +1069,12 @@ check('a long question reserves more room than a short one, deterministically', 
     + 'Determine the skin depth, the attenuation constant, the phase constant, and the intrinsic '
     + 'impedance, stating units for each and showing the formula you used at every step.';
   const wide = lay.COLUMN_X1_MM - lay.COLUMN_X0_MM;
-  assert(lay.estimateDescLines(short, wide) === 1, 'a one-line question took more than one line');
-  assert(lay.estimateDescLines(long, wide) >= 2, 'a long question was estimated as one line');
+  // One wrapped line plus the deliberate slack line — text is never scaled, so
+  // the estimate is built to come out over rather than under.
+  assertEqual(lay.estimateDescLines(short, wide), 1 + lay.DESC_SLACK_LINES,
+    'a one-line question did not reserve one line plus slack');
+  assert(lay.estimateDescLines(long, wide) > lay.estimateDescLines(short, wide),
+    'a long question reserved no more than a short one');
   assert(lay.descBlockMm(long) > lay.descBlockMm(short), 'a long question reserved no extra room');
   assertEqual(lay.estimateDescLines('', wide), 0, 'an empty description reserved a line');
   // Deterministic: the map is hashed into the QR, so this must not vary by host.

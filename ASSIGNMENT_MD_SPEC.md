@@ -273,12 +273,25 @@ The prompt row is the authored sub-part name and nothing else. No page instructi
 
 **Nothing is boxed.** Page-format §4.1 is explicit that there is no printed answer box, and the questions themselves ask students to box their final answer — so the student's box is the only box on the sheet. A region is a rule, then ruled writing lines, and nothing detects any of it: the crop comes from the declared rectangle alone.
 
-Question text is set at a fixed 9 pt and is never scaled down. Each part reserves its authored answer
-space (`> template: lines=N`, §7) and the generator honours it: the question prints at full size and
-exactly N writing lines are ruled. When a page cannot hold a part's question plus its writing lines, the
-part moves to a new page rather than the text being shrunk; a part whose answer needs more than a page
-continues onto the next. Heights are estimated from character count, not measured, so the map is
-identical in a browser and in a test and `layout_id` stays stable across them.
+**The writing lines are dashed, at a 9 mm pitch.** Dashed because a solid horizontal rule beside handwritten maths is the exact shape of a fraction bar, a minus sign or an overbar, and a grader reads it as one; a dash gives the same alignment and skew reference with no long connected run to mistake for a glyph. 9 mm because at 8 mm a sub- or superscript (`V_{32} = V_3 - V_2`) pushes into the next line's zone. They print at 0.5 pt in 75% grey — heavy enough to survive a toner-saving laser, pale enough to threshold out cleanly, since students print these themselves. The region's own top rule stays solid: it is a separator above the writing area, not a line anyone writes maths against. A sketch region carries no rules at all.
+
+**One font size across the whole sheet. Question text is never scaled — at all.** Stem, sub-part
+prompt, sub-part description and preamble all print at 9 pt, and nothing shrinks any of them to make
+something fit. A drawing may be scaled into its reserved block; words may not. Each part reserves its
+authored answer space (`> template: lines=N`, §7) and the generator honours it: the question prints at
+full size and exactly N writing lines are ruled. When a page cannot hold a part's question plus its
+writing lines, the part moves to a new page; a part whose answer needs more than a page continues onto
+the next.
+
+Heights are estimated from character count, never measured — the map is hashed into every page's QR, so
+it has to be identical in a browser and in a test. The estimate therefore **over-reserves on purpose**
+(`CHAR_ADVANCE_EM` = 0.62 against a render font measuring 0.40, plus a slack line per block): with
+nothing scaled to fit, a short reservation would not shrink the text, it would overrun. Text is also
+always rendered at the full writing column, so a line breaks where the text runs out of column and
+never because a box was made narrow.
+
+**A question that cannot fit a page is refused, not shrunk.** The generator emits nothing and names the
+part and the overflow; splitting the problem is the author's call and nobody else can make it.
 
 **There is no name, student ID or date field, deliberately.** Identity comes from Gradescope authenticating the upload, so a blank for it is redundant; students are told not to write their name on the pages, so a labelled blank is a mixed message; a filled-in name is exactly the PII the band gate exists to keep out; and grading is meant to be blind to identity. Appendix C of the page-format spec says the same — because the app authenticates the student, there is no identity page.
 

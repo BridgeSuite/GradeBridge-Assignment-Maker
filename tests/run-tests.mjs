@@ -1223,19 +1223,45 @@ ${r.problem_statement}`);
   }
 
   // --- the printed handwritten template ---
-  check('template layout: text with no figure is counted per paragraph, uncapped', () => {
-    // Since 2026-08-17 the estimate carries no ceiling — a long stem reserves its
-    // full height and prints at full size rather than being crushed into eight
-    // lines. Advance is CHAR_ADVANCE_EM, deliberately wider than Helvetica
-    // measures, because nothing is scaled down to fit any more.
+  check('template layout: text is counted per paragraph, uncapped, plus a slack line', () => {
+    // No ceiling — a long stem reserves its full height and prints at full size
+    // rather than being crushed into eight lines. The advance and the slack line
+    // both over-reserve on purpose: text is never scaled, so a short reservation
+    // would overrun rather than shrink.
     const width = 169.9;
-    const perLine = Math.max(20, Math.floor(width / (9 * 0.55 * 25.4 / 72)));
+    const perLine = Math.max(20, Math.floor(width / (9 * 0.62 * 25.4 / 72)));
     for (const text of ['', 'A short line.', 'x'.repeat(400), 'x'.repeat(20000), 'one\n\ntwo\nthree']) {
       // A blank line inside a block still costs a line — it is a paragraph break.
       const expected = text.trim()
-        ? text.split('\n').reduce((n, p) => n + Math.max(1, Math.ceil(p.trim().length / perLine)), 0)
+        ? text.split('\n').reduce((n, p) => n + Math.max(1, Math.ceil(p.trim().length / perLine)), 0) + 1
         : 0;
       assertEqual(estimateDescLines(text, width), expected, `reservation moved for: ${JSON.stringify(text.slice(0, 20))}`);
+    }
+  });
+
+  check('template layout: the reservation covers what the render font actually needs', async () => {
+    // The calibration this rests on, asserted rather than assumed: for real
+    // question text the estimate must be >= the lines the render font wraps to.
+    // Measured with jsPDF's own metrics for Times, the family
+    // renderTextToCanvas sets. If this ever goes red the estimator has drifted
+    // from the renderer and stems will start overrunning their boxes.
+    const width = 169.9;
+    const jsPdfMod = await import('jspdf');
+    const JsPDF = jsPdfMod.jsPDF || jsPdfMod.default;
+    const doc = new JsPDF({ unit: 'mm', format: [215.9, 279.4] });
+    doc.setFont('times', 'normal');
+    doc.setFontSize(9);
+    const samples = [
+      'For the bridge circuit provided (text problem 1.11): a 20 V source and six resistors, with every node lettered on the drawing. Take the bottom node as the reference.',
+      'A uniform plane wave at 1 GHz propagates in a medium with sigma = 4 S/m and mu_r = 1. Determine the skin depth, the attenuation constant, the phase constant, and the intrinsic impedance, stating units for each and showing the formula you used at every step.',
+      'Given $V_{32} = V_3 - V_2$ and $I_{ab} = (V_a - V_b)/R$, find every branch current in the network shown, expressing each in mA to three significant figures.',
+      'Find every group of two or more elements in series.',
+    ];
+    for (const text of samples) {
+      const real = doc.splitTextToSize(text, width).length;
+      const estimated = estimateDescLines(text, width);
+      assert(estimated >= real,
+        `the estimate under-reserves: ${estimated} lines for text that wraps to ${real}\n          ${text.slice(0, 60)}…`);
     }
   });
   check('template layout: a figure reserves a block, not eight lines of character count', () => {

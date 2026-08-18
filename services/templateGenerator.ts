@@ -131,15 +131,31 @@ export interface InkBox extends RectMm { pageK: number; what: string }
  * as glyphs. jsPDF's built-in fonts are Latin-1 and silently garble anything
  * outside it — the WinAnsi trap the math deep fix already had to solve once.
  *
- * Every question block on the sheet — the problem stem, the sub-part prompt, the
- * sub-part description — is drawn at the same fixed `DESC_FONT_PT`, so a stem can
- * never print smaller than the sub-parts beneath it. The layout reserves against
- * a deliberately generous character-count estimate (`CHAR_ADVANCE_EM`), so the
- * scale-down below is a backstop against a pathological block, not the routine
- * path it used to be when a page-level squeeze drove it.
+ * **One font size across the whole document. Authored text is never scaled.**
+ * Every question block — problem stem, sub-part prompt, sub-part description,
+ * preamble — renders at exactly `DESC_FONT_PT`, at scale 1, always. A drawing
+ * may be scaled into its reserved block (`allowScale`); words may not.
+ *
+ * There used to be a "backstop" here that shrank a block when its measured
+ * height exceeded the reservation. It read as prudent and was the whole bug: the
+ * stem is the longest block on the page, so it was the one that overran and the
+ * only one that shrank, and it printed smaller than its own sub-parts. A shrink
+ * is not a safe fallback for text — it is a silent quality failure that nothing
+ * downstream can see.
+ *
+ * What replaces it: the reservation over-reserves on purpose (`CHAR_ADVANCE_EM`
+ * plus `DESC_SLACK_LINES`, both calibrated wider than the render font actually
+ * measures), and if a block still overruns, the ink it laid down is recorded at
+ * its true size so the post-draw collision check **refuses to emit the
+ * template** and names the block. Loud beats quiet.
+ *
+ * Nothing is wrapped early either: every prose block is handed the full writing
+ * column, so a line break happens where the text runs out of column, never
+ * because the box was made narrow.
  */
 const drawAuthoredText = async (
-  doc: jsPDF, text: string, box: RectMm, opts: { fontPt: number; bold?: boolean; grey?: number },
+  doc: jsPDF, text: string, box: RectMm,
+  opts: { fontPt: number; bold?: boolean; grey?: number; allowScale?: boolean },
   ink: InkBox[], pageK: number, what: string
 ): Promise<void> => {
   if (!text.trim()) return;
@@ -158,20 +174,23 @@ const drawAuthoredText = async (
 
   if (canvas) {
     const naturalHeightMm = canvas.height / (RASTER_SCALE * PX_PER_MM);
-    const scale = naturalHeightMm > maxHeightMm ? maxHeightMm / naturalHeightMm : 1;
+    // Only a figure may be scaled to fit. Text is drawn at its natural size
+    // whatever the box says, and the overrun becomes visible ink.
+    const scale = opts.allowScale && naturalHeightMm > maxHeightMm ? maxHeightMm / naturalHeightMm : 1;
     const w = widthMm * scale, h = naturalHeightMm * scale;
     doc.addImage(canvas.toDataURL('image/png'), 'PNG', box.x0, box.y0, w, h, undefined, 'FAST');
     ink.push({ pageK, what, x0: box.x0, y0: box.y0, x1: box.x0 + w, y1: box.y0 + h });
     return;
   }
 
-  // No DOM: fall back to WinAnsi-safe vector text, wrapped into the same box.
-  applyText(doc, opts.fontPt, !!opts.bold, grey);
+  // No DOM: fall back to WinAnsi-safe vector text, wrapped to the same column.
+  // Same rule — every line is drawn, none clipped to the box, so an overrun is
+  // caught here too rather than losing a sentence off the bottom in silence.
+  applyText(doc, opts.fontPt, !!opts.bold, grey, AUTHORED_TEXT_FONT);
   const lines: string[] = doc.splitTextToSize(toPdfText(text), widthMm);
   const lineMm = opts.fontPt * 1.35 * 25.4 / 72;
-  const shown = lines.slice(0, Math.max(1, Math.floor(maxHeightMm / lineMm)));
-  shown.forEach((line, i) => doc.text(line, box.x0, box.y0 + i * lineMm, { baseline: 'top' }));
-  ink.push({ pageK, what, x0: box.x0, y0: box.y0, x1: box.x1, y1: box.y0 + shown.length * lineMm });
+  lines.forEach((line, i) => doc.text(line, box.x0, box.y0 + i * lineMm, { baseline: 'top' }));
+  ink.push({ pageK, what, x0: box.x0, y0: box.y0, x1: box.x1, y1: box.y0 + lines.length * lineMm });
 };
 
 /**
@@ -217,15 +236,27 @@ const drawAuthoredBlock = async (
       doc,
       seg.kind === 'figure' ? seg.source : seg.value,
       { x0: box.x0, y0: round4(cursor), x1: box.x1, y1: round4(cursor + height) },
-      opts, ink, pageK,
+      // A drawing may be scaled into its block. The words beside it may not.
+      { ...opts, allowScale: seg.kind === 'figure' },
+      ink, pageK,
       seg.kind === 'figure' ? `figure in ${what}` : what
     );
     cursor = round4(cursor + height);
   }
 };
 
-const applyText = (doc: jsPDF, fontPt: number, bold: boolean, grey: number) => {
-  doc.setFont('helvetica', bold ? 'bold' : 'normal');
+/**
+ * The face authored question text renders in. The browser rasteriser sets
+ * `'Times New Roman', Times, serif` (`renderTextToCanvas`), so the no-DOM
+ * fallback names the same family: an estimator calibrated against one font and
+ * a renderer using another is how a reservation quietly stops covering its
+ * block. Page furniture — the header line, part labels, points — stays
+ * helvetica; it is chrome, not authored text, and it is never wrapped.
+ */
+const AUTHORED_TEXT_FONT = 'times';
+
+const applyText = (doc: jsPDF, fontPt: number, bold: boolean, grey: number, font = 'helvetica') => {
+  doc.setFont(font, bold ? 'bold' : 'normal');
   doc.setFontSize(fontPt);
   doc.setTextColor(grey);
 };
@@ -285,7 +316,12 @@ const drawPage1Furniture = async (
   // Says "ruled lines", never "box" or "area": the questions themselves ask
   // students to box their final answer, and the sheet must not compete for that
   // word with a second meaning.
-  const instruction = 'Print at 100%, not "fit to page". Check all four corner squares are on the paper before you start, and write on the ruled lines.';
+  //
+  // "resting each line of writing on a rule" is worth its width: sitting the
+  // baseline on the rule leaves descenders as the only strokes that cross one,
+  // which is the easy case for the OCR pass. Writing that floats between rules
+  // is what produces baseline drift.
+  const instruction = 'Print at 100%, not "fit to page". Check all four corner squares are on the paper before you start, and write on the ruled lines, resting each line of writing on a rule.';
   const lines: string[] = doc.splitTextToSize(instruction, FURNITURE_MAX_WIDTH_MM);
   lines.slice(0, PAGE1_INSTRUCTION_LINES).forEach((line, i) => {
     drawPlain(doc, line, COLUMN_X0_MM, PAGE1_INSTRUCTION_TOP_MM + i * PAGE1_INSTRUCTION_LINE_MM,
@@ -388,12 +424,25 @@ const drawWritingArea = (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
 
   if (r.isDrawing) return;
 
-  doc.setDrawColor(205);
-  doc.setLineWidth(0.15);
+  // **Dashed, not solid.** This is the one that matters in a circuits course: a
+  // solid horizontal rule sitting next to handwritten maths is the exact shape
+  // of a fraction bar, a minus sign, an overbar, or the top of an equals — and
+  // the grader reads it as one. A dash gives the same alignment and skew
+  // reference with no long connected run to mistake for a glyph, and it filters
+  // out cleanly downstream.
+  //
+  // 0.5 pt at 75% grey, not 0.425 pt at 80%: students print these themselves, so
+  // the rule has to survive a toner-saving laser without blooming into the
+  // handwriting on a low-ink inkjet. Heavier and lighter at the same time —
+  // thicker stroke, paler ink — thresholds out more reliably than either alone.
+  doc.setDrawColor(191);                    // 0.75 grey
+  doc.setLineWidth(0.5 * 25.4 / 72);        // 0.5 pt
+  doc.setLineDashPattern([1.2, 1.2], 0);
   for (let i = 1; i <= r.answerLines; i++) {
     const y = round4(r.nominalMm.y0 + i * WRITING_LINE_MM);
     doc.line(r.nominalMm.x0, y, r.nominalMm.x1, y);
   }
+  doc.setLineDashPattern([], 0);            // solid again for whatever draws next
 
   // One ink band spanning the ruled lines rather than one box per line, which
   // would read as dozens of blocks stacked in the same column.
