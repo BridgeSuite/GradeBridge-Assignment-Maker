@@ -1,5 +1,6 @@
 
 import { Assignment } from '../types';
+import { degradeRetiredTypes } from './retiredTypes';
 
 const STORAGE_KEY = 'gradebridge_assignments_v1';
 
@@ -15,12 +16,19 @@ export const storageService = {
       // normalize IDs to strings and trim whitespace to prevent mismatch issues
       // also ensure createdAt and updatedAt exist as numbers
       const now = Date.now();
-      return parsed.map((a: any) => ({
-        ...a,
-        id: String(a.id).trim(),
-        createdAt: typeof a.createdAt === 'number' ? a.createdAt : now,
-        updatedAt: typeof a.updatedAt === 'number' ? a.updatedAt : now
-      }));
+      return parsed.map((a: any) => {
+        const assignment: Assignment = {
+          ...a,
+          id: String(a.id).trim(),
+          createdAt: typeof a.createdAt === 'number' ? a.createdAt : now,
+          updatedAt: typeof a.updatedAt === 'number' ? a.updatedAt : now
+        };
+        // An assignment saved before a submission type was retired loads with
+        // that part as plain Text — an unknown type would render blank in the
+        // editor and export as `human` without anyone being told.
+        for (const w of degradeRetiredTypes(assignment)) console.warn(`[GradeBridge] ${w}`);
+        return assignment;
+      });
     } catch (error) {
       console.error("Failed to load assignments", error);
       return [];

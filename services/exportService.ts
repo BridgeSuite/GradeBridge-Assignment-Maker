@@ -41,7 +41,6 @@ const AI_GRADED_TYPES = new Set([
   SubmissionType.AI_GRADED_SHORT,
   SubmissionType.AI_GRADED_MEDIUM,
   SubmissionType.AI_GRADED_LONG,
-  SubmissionType.AI_FORMATIVE,
 ]);
 
 const MIN_WORDS_BY_TYPE: Partial<Record<SubmissionType, number>> = {
@@ -85,7 +84,6 @@ export const convertSubmissionType = (type: SubmissionType): string[] => {
     case SubmissionType.AI_GRADED_SHORT:
     case SubmissionType.AI_GRADED_MEDIUM:
     case SubmissionType.AI_GRADED_LONG:
-    case SubmissionType.AI_FORMATIVE:
       return [type]; // pass through the category string
     case SubmissionType.CODE:
       return ['Answer as text'];
@@ -597,7 +595,6 @@ export const generateGradingRubric = (assignment: Assignment): object => {
     prob.subsections.forEach((sub, sIndex) => {
       const subsectionId = `p${pIndex}s${sIndex}`;
       const isAi = AI_GRADED_TYPES.has(sub.submissionType);
-      const isFormative = sub.submissionType === SubmissionType.AI_FORMATIVE;
       const isImage = sub.submissionType === SubmissionType.IMAGE;
       const isTextAndImage = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
       const isHandwritten = sub.submissionType === SubmissionType.HANDWRITTEN;
@@ -626,7 +623,6 @@ export const generateGradingRubric = (assignment: Assignment): object => {
         // falls through to the image or plain-human branches.
         grading_type: isHandwritten
             ? (sub.handwrittenGradingMode === 'human' ? 'human_handwritten' : 'ai_handwritten')
-          : isFormative ? 'ai_formative'
           : isAi ? 'ai'
           : isImage ? (sub.imageGradingMode === 'auto' ? 'ai_image_completion' : 'human_image')
           : 'human',
@@ -665,7 +661,6 @@ const TYPE_TAG: Partial<Record<SubmissionType, string>> = {
   [SubmissionType.AI_GRADED_SHORT]:  'ai-graded:short',
   [SubmissionType.AI_GRADED_MEDIUM]: 'ai-graded:medium',
   [SubmissionType.AI_GRADED_LONG]:   'ai-graded:long',
-  [SubmissionType.AI_FORMATIVE]:     'ai-graded:formative',
   [SubmissionType.HANDWRITTEN]:      'handwritten',
 };
 

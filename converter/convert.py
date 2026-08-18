@@ -33,9 +33,18 @@ TYPE_MAP = {
     'ai-graded:short':     'AI Graded: Short',
     'ai-graded:medium':    'AI Graded: Medium',
     'ai-graded:long':      'AI Graded: Long',
-    'ai-graded:formative': 'AI Formative',
     'handwritten':         'Handwritten',
 }
+
+# Type tags this converter once wrote and no longer authors. They import as the
+# type named here, and the sub-part is listed in the summary, so a .md written
+# against an older spec still converts instead of failing. Keep in lockstep
+# with services/retiredTypes.ts.
+RETIRED_TYPE_TAGS = {
+    'ai-graded:formative': 'Text',
+}
+
+RETIRED_TAG_WARNINGS = []
 
 MIN_WORDS_MAP = {
     'ai-graded:binary': 20,
@@ -43,7 +52,6 @@ MIN_WORDS_MAP = {
     'ai-graded:medium': 100,
     'ai-graded:long':   150,
 }
-# Formative has no enforced word minimum — deliberately absent from MIN_WORDS_MAP.
 
 AI_GRADED_TYPES = set(TYPE_MAP[k] for k in TYPE_MAP if k.startswith('ai-graded:'))
 
@@ -180,6 +188,13 @@ def parse_subsection_header(line):
             max_images = 1
     # ai-graded:* tags are kept as-is for TYPE_MAP lookup
     # bare `handwritten` leaves the mode unset — it is read as 'ai' downstream
+
+    if base_type in RETIRED_TYPE_TAGS:
+        RETIRED_TAG_WARNINGS.append(
+            f'"{name}" was authored as [{base_type}], which has been retired. '
+            f'It is now a plain {RETIRED_TYPE_TAGS[base_type]} part — '
+            'review its points and rubric before exporting.'
+        )
 
     submission_type = TYPE_MAP.get(base_type, 'Text')
     min_words = MIN_WORDS_MAP.get(base_type)
@@ -481,6 +496,13 @@ def parse_md(filepath):
                 subsection['graderNote'] = grader_note
             if sub_meta['minWords'] is not None:
                 subsection['minWords'] = sub_meta['minWords']
+            if sub_meta['raw_type'] in RETIRED_TYPE_TAGS:
+                # No longer AI graded, so the prompt would go quietly: the
+                # editor stops showing it and the next export stops writing it.
+                # Keep the words in the grader note, which every type shows.
+                if subsection['aiGradingPrompt'] and not subsection.get('graderNote'):
+                    subsection['graderNote'] = subsection['aiGradingPrompt']
+                subsection['aiGradingPrompt'] = ''
 
             current_problem['subsections'].append(subsection)
 
@@ -545,6 +567,10 @@ def print_summary(assignment):
                 label += f" / {sub.get('handwrittenGradingMode', 'ai')}"
             print(f"    - {sub['name']} ({sub['points']} pts, {label}){flag}")
     print()
+    for w in RETIRED_TAG_WARNINGS:
+        print(f"  ⚠ {w}")
+    if RETIRED_TAG_WARNINGS:
+        print()
 
 
 def main():

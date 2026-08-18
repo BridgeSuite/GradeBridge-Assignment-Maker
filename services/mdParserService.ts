@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
 import { LEGACY_SPACE_LINES } from './templateLayout';
 import { FIGURE_FENCE_CLOSE_RE, FIGURE_FENCE_OPEN_RE, splitFigures } from './figureBlocks';
+import { RETIRED_TYPE_TAGS, keepPromptAsGraderNote, retiredTypeWarning } from './retiredTypes';
 
 const DEFAULT_AI_CONFIG: AiGradingConfig = {
   model: 'claude-haiku-4-5-20251001',
@@ -23,7 +24,6 @@ const TYPE_MAP: Record<string, SubmissionType> = {
   'ai-graded:short':      SubmissionType.AI_GRADED_SHORT,
   'ai-graded:medium':     SubmissionType.AI_GRADED_MEDIUM,
   'ai-graded:long':       SubmissionType.AI_GRADED_LONG,
-  'ai-graded:formative':  SubmissionType.AI_FORMATIVE,
   'handwritten':          SubmissionType.HANDWRITTEN,
 };
 
@@ -49,6 +49,7 @@ interface ProblemHeaderMeta {
   submissionType?: SubmissionType;
   maxImages: number;
   handwrittenGradingMode?: 'ai' | 'human';
+  rawType?: string;
 }
 
 function parseTypeTag(typeTag: string): {
@@ -92,7 +93,8 @@ function parseProblemHeader(line: string): ProblemHeaderMeta | null {
   const flatM = line.trim().match(/^##\s+Problem\s+\d+:\s+(.+?)\s+\[(\d+)\s+pts?\]\s+\[([^\]]+)\]\s*$/i);
   if (flatM) {
     const { submissionType, maxImages, handwrittenGradingMode } = parseTypeTag(flatM[3]);
-    return { name: flatM[1].trim(), points: parseInt(flatM[2]), submissionType, maxImages, handwrittenGradingMode };
+    return { name: flatM[1].trim(), points: parseInt(flatM[2]), submissionType, maxImages,
+             handwrittenGradingMode, rawType: flatM[3].trim().toLowerCase() };
   }
   // Standard format: ## Problem N: Title
   const m = line.trim().match(/^##\s+Problem\s+\d+:\s+(.+)$/i);
@@ -213,7 +215,30 @@ function extractBlockquoteValue(key: string, body: string[]): string {
   return parts.join(' ');
 }
 
-export function parseMdToAssignment(content: string): Assignment {
+function isRetiredTag(rawType: string | undefined): boolean {
+  return !!rawType && rawType in RETIRED_TYPE_TAGS;
+}
+
+/**
+ * A retired type tag is not in TYPE_MAP any more, so `parseTypeTag` already
+ * falls back to Text (see `retiredTypes.ts` for the list and the reasoning).
+ * All this adds is the sentence the instructor needs to see: which sub-part
+ * changed, and to what.
+ */
+function noteRetiredTag(rawType: string | undefined, label: string, warnings?: string[]): void {
+  if (!isRetiredTag(rawType) || !warnings) return;
+  warnings.push(retiredTypeWarning(label, `[${rawType}]`, RETIRED_TYPE_TAGS[rawType!]));
+}
+
+/**
+ * Parse a GradeBridge assignment `.md` into an Assignment.
+ *
+ * `warnings`, if given, collects one line per thing that had to be changed to
+ * load the file — currently only a retired type tag degrading to Text (see
+ * `retiredTypes.ts`). The caller surfaces them to the instructor; nothing here
+ * throws over one, because losing the assignment is worse than losing a type.
+ */
+export function parseMdToAssignment(content: string, warnings?: string[]): Assignment {
   const lines = content.split('\n');
   const meta = parseMetadata(lines);
 
@@ -267,6 +292,7 @@ export function parseMdToAssignment(content: string): Assignment {
         currentProblem = { id: uuidv4(), name: prob.name, description: description0, subsections: [] };
 
         if (prob.points !== undefined && prob.submissionType !== undefined) {
+          noteRetiredTag(prob.rawType, prob.name, warnings);
           // Flat format — auto-promote body into a single (a) subsection
           const description = buildDescription(body, l =>
             !!l.trim() && !l.trim().startsWith('>') && !l.trim().startsWith('#') && !/^\*\*(Due|Preamble):/.test(l.trim())
@@ -291,6 +317,9 @@ export function parseMdToAssignment(content: string): Assignment {
             config: '',
             ...(minWords !== undefined && { minWords }),
           });
+          if (isRetiredTag(prob.rawType)) {
+            keepPromptAsGraderNote(currentProblem.subsections[currentProblem.subsections.length - 1]);
+          }
         }
       }
     } else if (type === 'subsection') {
@@ -301,6 +330,8 @@ export function parseMdToAssignment(content: string): Assignment {
       const description = buildDescription(body, l => !!l.trim() && !l.trim().startsWith('>'));
       const aiGradingPrompt = extractBlockquoteValue('grading_prompt', body);
       const graderNote = extractBlockquoteValue('grader_note', body);
+
+      noteRetiredTag(subMeta.rawType, `${currentProblem.name} — ${subMeta.name}`, warnings);
 
       const submissionType = subMeta.submissionType;
       const minWords = MIN_WORDS_MAP[submissionType];
@@ -321,6 +352,7 @@ export function parseMdToAssignment(content: string): Assignment {
         config: '',
         ...(minWords !== undefined && { minWords }),
       };
+      if (isRetiredTag(subMeta.rawType)) keepPromptAsGraderNote(subsection);
       currentProblem.subsections.push(subsection);
     }
   }
