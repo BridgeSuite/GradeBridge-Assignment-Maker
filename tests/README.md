@@ -126,6 +126,23 @@ top of the stem block and stops before the figure, that the prose's box never
 includes any of the figure's allotment, and that a figure-free stem is still drawn
 as a single raster with no figure block at all.
 
+**Authored text is never scaled.** The property is checked on the page, not in
+the source: every authored-text ink box measures a whole number of `DESC_LINE_MM`
+line-heights, which a scaled raster cannot. A stem and a description in the same
+document must both come out on that grid. The other half is asserted too — a
+question longer than a page makes the generator **refuse to emit**, with a message
+naming the part and saying to split the problem, rather than shrinking it.
+
+The reservation behind that is calibrated against the render font rather than
+assumed: a check measures real ENG17-shaped question text with jsPDF's Times
+metrics and asserts `estimateDescLines` is **≥** the real wrap. If the estimator
+ever drifts from the renderer, that check goes red before a stem overruns its box.
+
+**The ruling** is read back out of the PDF's own graphics operators: interior
+writing lines dashed at 0.5 pt / 0.75 grey, the dash set after the solid top rule
+and reset afterwards so nothing else inherits it, and the pitch exactly
+`WRITING_LINE_MM`.
+
 **Nothing is boxed** (page-format §4.1). The suite scans the PDF's `re`
 operators for a rectangle matching any declared region and asserts there is none,
 then ties the drawn writing area to the cropped one the way that survives without

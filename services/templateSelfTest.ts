@@ -176,13 +176,20 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
     payloads.length && !PAYLOAD_RE.test(payloads[0])
       ? [`"${payloads[0]}" does not parse into six fields`] : []);
 
-  const failures = checks.filter(c => !c.passed).map(c => `check ${c.id || '–'} — ${c.name}: ${c.detail}`);
-  const warnings = layout.clamped.map(c =>
-    `part ${c.partId}: the question text needs ${c.requestedMm} mm, more than a page can hold beside an ` +
-    `answer, so it was reserved at ${c.usedMm} mm and scaled into it. Consider splitting the problem.`
-  );
+  // Question text is never scaled, so a block the page cannot hold is not a
+  // warning about slightly small print any more — it is a template that would
+  // print its question over the writing area. Refuse it, and say which part and
+  // by how much, because "split the problem" is the only fix and the author is
+  // the only one who can make it.
+  add(0, 'every question fits the page at full size',
+    layout.clamped.map(c =>
+      `part ${c.partId} needs ${c.requestedMm} mm of question text; a page has room for ${c.usedMm} mm ` +
+      `beside an answer. Text is never shrunk to fit — split the problem, or move detail into the sub-parts.`
+    ));
 
-  return { passed: failures.length === 0, checks, failures, warnings };
+  const failures = checks.filter(c => !c.passed).map(c => `check ${c.id || '–'} — ${c.name}: ${c.detail}`);
+
+  return { passed: failures.length === 0, checks, failures, warnings: [] };
 };
 
 // ---- Post-draw: what actually landed on the page -------------------------

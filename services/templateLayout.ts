@@ -91,13 +91,26 @@ export const FIGURE_LINES = 12;
  * jsPDF or the DOM to measure anything. `$\delta_s$` counts as eleven characters
  * and renders as about two, so math over-reserves, which is the safe direction.
  *
- * The average advance is 0.55 em rather than the 0.5 em Helvetica prose actually
- * measures, deliberately: word wrap loses part of a line at every break, and now
- * that nothing is scaled down to fit, an under-reservation would print text over
- * the writing area below it. Over-reserving costs a little paper, which is the
- * cheap direction.
+ * **This must never come out short.** Authored text is drawn at 9 pt and is
+ * never scaled (`drawAuthoredText`), so a reservation smaller than the real
+ * render does not shrink the text — it overruns into whatever is beneath, and
+ * the generator refuses to emit. Over-reserving costs a little paper. That is
+ * the direction to err in, and both numbers below err in it deliberately:
+ *
+ * - `CHAR_ADVANCE_EM` is 0.62 against a render font that measures **0.40 em**
+ *   for prose at this size (Times New Roman, what `renderTextToCanvas` sets;
+ *   Helvetica, for comparison, is 0.44). Roughly half again as much width as the
+ *   text actually needs, which absorbs the part-line lost at every word wrap.
+ * - `DESC_SLACK_LINES` adds a whole line to every non-empty block. Width is not
+ *   the only way a block grows: an inline KaTeX span with a subscript is taller
+ *   than a plain line of prose, and the estimate assumes every line is exactly
+ *   `DESC_LINE_MM`. The slack line absorbs that.
+ *
+ * Neither number affects where text wraps — a block is always rendered at the
+ * full writing column. They buy vertical headroom only.
  */
-export const CHAR_ADVANCE_EM = 0.55;
+export const CHAR_ADVANCE_EM = 0.62;
+export const DESC_SLACK_LINES = 1;
 
 export const estimateDescLines = (text: string, widthMm: number): number => {
   if (!text.trim()) return 0;
@@ -118,7 +131,9 @@ export const estimateDescLines = (text: string, widthMm: number): number => {
 
   // No ceiling. A long stem reserves its full estimated height and prints at
   // full size; if that pushes the part onto a page of its own, it takes one.
-  return proseLines + figures * FIGURE_LINES;
+  // The slack line is per block, not per paragraph — one taller-than-nominal
+  // line is what it is there to absorb.
+  return (proseLines > 0 ? proseLines + DESC_SLACK_LINES : 0) + figures * FIGURE_LINES;
 };
 
 /**
@@ -147,8 +162,15 @@ export const headerHeightMm = (description: string): number =>
  *
  * Both numbers below are tunables. `WRITING_LINE_MM` is the one to turn if
  * printed sheets come out cramped or loose.
+ *
+ * 9.0 mm, not the 8.0 it started at: at 8 mm, engineering handwriting with
+ * sub- and superscripts collides across lines — `V_{32} = V_3 - V_2` pushes its
+ * subscript into the next line's zone, and the OCR pass then has to separate
+ * two rows of glyphs that overlap. 9 mm clears it for a little more paper. One
+ * global pitch rather than a per-part one: a single value is the clean first
+ * rollout, and there is no evidence yet that some parts want 8 and others 10.
  */
-export const WRITING_LINE_MM = 8.0;
+export const WRITING_LINE_MM = 9.0;
 export const DEFAULT_ANSWER_LINES = 6;
 
 /**
@@ -374,32 +396,33 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
       let blockTextMm = opens && !continued ? descBlockMm(part.problemDescription) : 0;
       let descMm = descBlockMm(slice.description);
 
-      // Everything that is not prose and not the writing area, plus the one
-      // writing line a region must have to be a region at all.
-      const fixedMm = blockHeadingMm + blockGapMm + PROMPT_ROW_MM + RULE_GAP_MM
-        + REGION_PAD_MM * 2 + WRITING_LINE_MM;
-      const proseBudget = REGION_Y_MAX_MM - cursor - fixedMm;
-
-      // Last resort, and only for prose that could not fit a page of its own:
-      // the reservation is trimmed and the renderer scales that block into it.
-      // Ordinary text is never touched — this is not the old squeeze.
-      if (blockTextMm + descMm > proseBudget) {
-        const requested = round4(blockTextMm + descMm);
-        descMm = Math.max(descMm > 0 ? DESC_LINE_MM : 0, Math.min(descMm, proseBudget - blockTextMm));
-        if (blockTextMm + descMm > proseBudget) {
-          blockTextMm = Math.max(blockTextMm > 0 ? DESC_LINE_MM : 0, proseBudget - descMm);
-        }
-        clamped.push({ partId: part.partId, requestedMm: requested, usedMm: round4(blockTextMm + descMm) });
-      }
-
-      // How many of the requested lines this page can still hold.
-      const overheadMm = blockHeadingMm + blockTextMm + blockGapMm + PROMPT_ROW_MM + descMm
-        + RULE_GAP_MM + REGION_PAD_MM * 2;
-      const fits = Math.floor((REGION_Y_MAX_MM - cursor - overheadMm + 1e-6) / WRITING_LINE_MM);
+      // Everything that is not prose and not the writing area.
+      const fixedMm = blockHeadingMm + blockGapMm + PROMPT_ROW_MM + RULE_GAP_MM + REGION_PAD_MM * 2;
+      const linesThatFit = () =>
+        Math.floor((REGION_Y_MAX_MM - cursor - fixedMm - blockTextMm - descMm + 1e-6) / WRITING_LINE_MM);
+      let fits = linesThatFit();
 
       // Not everything fits and this page already has something on it: break
-      // rather than shrink. On a page of its own, take what fits and continue.
+      // rather than shrink, and try again at the top of a clean page. Nothing is
+      // clamped on this path — a page break is the cheap, correct answer, and
+      // reaching for the clamp first is how ordinary prose used to get trimmed
+      // for no reason but its position on the page.
       if (fits < remaining && !opens) { newPage(); continue; }
+
+      // A page of its own and *still* no room for a single writing line: the
+      // question text is longer than a page. Last resort — trim the reservation,
+      // which the self-test then refuses to emit on, naming the part. It is the
+      // only case where a reservation is smaller than its text.
+      if (fits < 1) {
+        const requested = round4(blockTextMm + descMm);
+        const budget = REGION_Y_MAX_MM - cursor - fixedMm - WRITING_LINE_MM;
+        descMm = Math.max(descMm > 0 ? DESC_LINE_MM : 0, Math.min(descMm, budget - blockTextMm));
+        if (blockTextMm + descMm > budget) {
+          blockTextMm = Math.max(blockTextMm > 0 ? DESC_LINE_MM : 0, budget - descMm);
+        }
+        clamped.push({ partId: part.partId, requestedMm: requested, usedMm: round4(blockTextMm + descMm) });
+        fits = linesThatFit();
+      }
 
       const lines = Math.max(1, Math.min(remaining, fits));
 
