@@ -66,12 +66,13 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
   // 1. Every part in the source assignment is in the map, nothing else is, and
   //    no region_id repeats.
   //
-  //    Note the shape: a part may own MORE THAN ONE region. A problem with a
-  //    single sub-part gets a second page of writing space for the same answer,
-  //    so two rows share that `part_id` and differ by `region_id`. The spec
-  //    requires region_id unique and treats part_id as a display string, so this
-  //    is legal — but a consumer that assumed one crop per part would be
-  //    surprised, which is why it is called out here and in the map's docs.
+  //    Note the shape: a part MAY own more than one region. `region_id` is the
+  //    map's unique key and `part_id` is a display string the spec lets repeat,
+  //    so a consumer must group crops by `part_id` rather than assume one each.
+  //    That capability is kept deliberately — but as of 2026-08-18 the generator
+  //    no longer produces it: an answer is never split across pages, so a part
+  //    that outgrows an empty page takes the whole page rather than spilling a
+  //    15 mm orphan onto the next one. Every `part_id` gets exactly one row.
   {
     const expected = enumerateParts(assignment);
     const expectedParts = new Set(expected.map(p => p.partId));

@@ -40,9 +40,10 @@ import {
 } from './qrPayload';
 import {
   COLUMN_X0_MM, COLUMN_X1_MM, FURNITURE_MAX_WIDTH_MM, LayoutRow, PAGE1_FURNITURE_TOP_MM,
-  DESC_FONT_PT, DESC_LINE_MM, FIGURE_LINES, PAGE1_INSTRUCTION_LINE_MM, PAGE1_INSTRUCTION_LINES,
-  PAGE1_INSTRUCTION_TOP_MM, PAGE1_TITLE_H_MM, PROBLEM_HEADING_MM, PROMPT_ROW_MM, PlacedRegion,
-  TemplateLayout, WRITING_LINE_MM, buildLayout, descBlockMm, toLayoutCsv, toLayoutRows,
+  DESC_FONT_PT, DESC_LINE_MM, FIGURE_LINES, HEADING_FONT_PT, PAGE1_INSTRUCTION_LINE_MM,
+  PAGE1_INSTRUCTION_LINES, PAGE1_INSTRUCTION_TOP_MM, PAGE1_TITLE_H_MM, PROBLEM_HEADING_LINE_MM,
+  PROMPT_ROW_MM, PlacedRegion, TemplateLayout, WRITING_LINE_MM, buildLayout, descBlockMm,
+  toLayoutCsv, toLayoutRows,
 } from './templateLayout';
 import { splitFigures, trimAroundFigures } from './figureBlocks';
 import { SelfTestReport, runInkChecks, runSelfTest } from './templateSelfTest';
@@ -338,6 +339,50 @@ const drawPage1Furniture = async (
 };
 
 /**
+ * The problem heading, wrapped inside the writing column.
+ *
+ * It was the only authored string on the sheet drawn as a single unwrapped,
+ * untruncated line — no width budget at all — while everything else went through
+ * `drawAuthoredText` with an `x1` and the one other plain line truncated itself
+ * against the QR keep-out. Two ENG17 HW4 titles fitted the column on their own
+ * and ran 13–17 mm past it once ` (continued)` was appended, and the ink check
+ * refused the export rather than printing them.
+ *
+ * The wrap uses jsPDF's real metrics rather than the layout's estimate, so what
+ * is *drawn* is guaranteed inside the column and not merely inside the guess.
+ * The estimate's job is only to reserve the height, and it is deliberately
+ * pessimistic, so the real wrap should always need fewer lines than were
+ * reserved. Should is not never: if it needs more, the last drawn line is
+ * ellipsised. Losing the tail of an absurd title is a visible, understandable
+ * degradation; a refused export is not.
+ *
+ * Plain ASCII "..." rather than a real ellipsis: jsPDF's standard fonts are
+ * Latin-1 and re-encode anything outside it as UTF-16BE, which prints as
+ * mojibake — the same trap the math renderer had to solve once already.
+ */
+const drawProblemHeading = (
+  doc: jsPDF, heading: string, topMm: number, reservedMm: number,
+  ink: InkBox[], pageK: number, partId: string
+): void => {
+  const widthMm = COLUMN_X1_MM - COLUMN_X0_MM;
+  applyText(doc, HEADING_FONT_PT, true, 0);
+  const wrapped: string[] = doc.splitTextToSize(heading, widthMm);
+  const budget = Math.max(1, Math.round(reservedMm / PROBLEM_HEADING_LINE_MM));
+
+  const lines = wrapped.slice(0, budget);
+  if (wrapped.length > budget && lines.length > 0) {
+    let tail = lines[lines.length - 1];
+    while (tail.length > 1 && doc.getTextWidth(`${tail}...`) > widthMm) tail = tail.slice(0, -1);
+    lines[lines.length - 1] = `${tail.replace(/\s+$/, '')}...`;
+  }
+
+  lines.forEach((line, i) => {
+    drawPlain(doc, line, COLUMN_X0_MM, round4(topMm + i * PROBLEM_HEADING_LINE_MM),
+      { fontPt: HEADING_FONT_PT, bold: true }, ink, pageK, `problem heading ${partId}`);
+  });
+};
+
+/**
  * The prompt row, the question text, and the rule that tops the writing area.
  *
  * Nothing drawn here is inside the declared rectangle: it all sits above the
@@ -349,13 +394,12 @@ const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
   // own when the givens are stated once at the top of the problem.
   if (r.problemBlock) {
     const b = r.problemBlock;
-    drawPlain(doc, b.heading, COLUMN_X0_MM, b.boxMm.y0,
-      { fontPt: 11, bold: true }, ink, r.pageK, `problem heading ${r.partId}`);
+    drawProblemHeading(doc, b.heading, b.boxMm.y0, b.headingMm, ink, r.pageK, r.partId);
     if (b.text) {
       // The stem is where figures live, so this is the call that must never put
       // prose and a drawing on one canvas.
       await drawAuthoredBlock(doc, b.text,
-        { x0: COLUMN_X0_MM, y0: round4(b.boxMm.y0 + PROBLEM_HEADING_MM), x1: COLUMN_X1_MM, y1: b.boxMm.y1 },
+        { x0: COLUMN_X0_MM, y0: round4(b.boxMm.y0 + b.headingMm), x1: COLUMN_X1_MM, y1: b.boxMm.y1 },
         { fontPt: DESC_FONT_PT }, ink, r.pageK, `problem text ${r.partId}`);
     }
   }
