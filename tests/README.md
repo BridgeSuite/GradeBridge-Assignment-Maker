@@ -127,6 +127,17 @@ declared rectangle still passes the 262 mm bottom limit, and that growing it kep
 own edge. Because that region is deliberately larger than its authored size, the
 authored-size checks now exempt it and assert it exactly for every other region.
 
+**The column check is bound to the column it is named after.** It used to test
+against `REGION_X_MAX_MM` (203.9) while content is drawn to `COLUMN_X1_MM`
+(192.9), so a printed row could stand 11 mm out into the right margin and pass —
+which is why the unwrapped heading below did not trip it until it was 13 mm past
+the column. The bound is now 23.0 / 192.9 with 0.25 mm of tolerance, and the
+suite mutation-tests it: an ink box reaching x = 195 mm — inside the old bound,
+outside the new one — must produce exactly one failure, naming the row. The real
+template's widest legitimate ink lands exactly on 192.9 (the region top rule
+spans the full column), which is what the tolerance is for; the header line keeps
+its exemption at x = 20.0.
+
 **The problem heading is wrapped, and can never refuse an export.** It was the
 one printed row drawn as a single unwrapped, untruncated line, and two ENG17 HW4
 titles ran out of the writing column once ` (continued)` was appended — the ink

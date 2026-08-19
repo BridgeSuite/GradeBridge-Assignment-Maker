@@ -23,13 +23,15 @@
 
 import { Assignment } from '../types';
 import {
-  IDENTITY_BAND_MM, QR_KEEPOUT_MM, QR_PAYLOAD_MAX_CHARS, REGION_X_MAX_MM, REGION_X_MIN_MM,
+  IDENTITY_BAND_MM, QR_KEEPOUT_MM, QR_PAYLOAD_MAX_CHARS,
   fractionRectToMm, rectsOverlap, safeAreaViolations,
 } from './pageFormat';
 import {
   PAYLOAD_RE, computeLayoutId, parsePayload, payloadViolations,
 } from './qrPayload';
-import { LayoutRow, TemplateLayout, csvUnsafeFields, enumerateParts } from './templateLayout';
+import {
+  COLUMN_X0_MM, COLUMN_X1_MM, LayoutRow, TemplateLayout, csvUnsafeFields, enumerateParts,
+} from './templateLayout';
 import { encodeQr } from './qrEncoder';
 import { QR_MODULES, QR_VERSION } from './pageFormat';
 
@@ -226,9 +228,25 @@ export const runInkChecks = (ink: InkRect[], base: SelfTestReport): SelfTestRepo
   add('nothing but the header line is printed in the identity band (spec 4.5)',
     ink.filter(b => b.y0 < IDENTITY_BAND_MM && b.what !== 'header line').map(describe));
 
+  // The column the check is named after, not the page-wide safe area.
+  //
+  // It used to test against `REGION_X_MAX_MM` (203.9) while content is drawn in a
+  // column ending at `COLUMN_X1_MM` (192.9), so text could stand 11 mm out into
+  // the right margin and pass. That is why the unwrapped problem heading did not
+  // trip this when it first left the column — only once it was 13 mm past it.
+  //
+  // 0.25 mm of tolerance, and no more. The widest ink the generator legitimately
+  // draws lands exactly on the column edge — the region's top rule spans the full
+  // column, and the points label is right-aligned to it — so the tolerance is
+  // there to absorb float and font-metric rounding on those two, nothing else.
+  // The interior writing lines stop at `nominal.x1` (189.9) with room to spare.
+  //
+  // The header line keeps its exemption: the page format anchors it at x = 20.0,
+  // left of the column, by design.
+  const COLUMN_TOL_MM = 0.25;
   add('every printed row stays inside the writing column',
     ink.filter(b => b.what !== 'header line')
-      .filter(b => b.x0 < REGION_X_MIN_MM - 0.01 || b.x1 > REGION_X_MAX_MM + 0.01)
+      .filter(b => b.x0 < COLUMN_X0_MM - COLUMN_TOL_MM || b.x1 > COLUMN_X1_MM + COLUMN_TOL_MM)
       .map(describe));
 
   // Ink against ink. The zone checks above compare what was drawn to fixed

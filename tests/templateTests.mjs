@@ -91,6 +91,7 @@ const fmt = await loadModule(join(REPO, 'services', 'pageFormat.ts'), 'pageForma
 const qrp = await loadModule(join(REPO, 'services', 'qrPayload.ts'), 'qrPayload.mjs');
 const lay = await loadModule(join(REPO, 'services', 'templateLayout.ts'), 'templateLayout.mjs');
 const enc = await loadModule(join(REPO, 'services', 'qrEncoder.ts'), 'qrEncoder.mjs');
+const selfTest = await loadModule(join(REPO, 'services', 'templateSelfTest.ts'), 'templateSelfTest.mjs');
 
 console.log('\nAssignment Maker — GradeBridge page format (QR template)\n');
 
@@ -661,6 +662,34 @@ check('item 2: nothing printed enters the QR keep-out, on any page', () => {
     b.x0 < fmt.QR_KEEPOUT_MM.x1 - 0.01 && b.x1 > fmt.QR_KEEPOUT_MM.x0 + 0.01 &&
     b.y0 < fmt.QR_KEEPOUT_MM.y1 - 0.01 && b.y1 > fmt.QR_KEEPOUT_MM.y0 + 0.01);
   assertEqual(intruders.map(b => `page ${b.pageK} ${b.what}`), [], 'something is printed over the QR');
+});
+
+check('the column check is bound to the writing column, not the page-wide safe area', () => {
+  // It tested against REGION_X_MAX_MM (203.9) while content is drawn to
+  // COLUMN_X1_MM (192.9), so text could stand 11 mm out into the right margin
+  // and pass. That is why the unwrapped problem heading did not trip this when
+  // it first left the column, only once it was 13 mm past it.
+  const clean = selfTest.runInkChecks(t.ink, t.selfTest);
+  assertEqual(clean.failures, [], 'the real ink does not pass the tightened column check');
+
+  // A row 2.1 mm out of the column: inside the old bound, outside the new one.
+  const overWide = {
+    pageK: 1, what: 'deliberately over-wide row',
+    x0: lay.COLUMN_X0_MM, y0: 268.0, x1: 195.0, y1: 271.0,
+  };
+  assert(overWide.x1 < fmt.REGION_X_MAX_MM, 'the fixture is not inside the old, looser bound');
+  assert(overWide.x1 > lay.COLUMN_X1_MM, 'the fixture is not outside the column');
+
+  const dirty = selfTest.runInkChecks([...t.ink, overWide], t.selfTest);
+  const named = dirty.failures.filter(f => /stays inside the writing column/.test(f));
+  assertEqual(named.length, 1, `the over-wide row was not caught: ${dirty.failures.join(' | ')}`);
+  assert(/deliberately over-wide row/.test(named[0]), 'the failure does not name the offending row');
+
+  // The header line keeps its exemption — the page format anchors it left of
+  // the column at x = 20.0, by design.
+  const header = t.ink.filter(b => b.what === 'header line');
+  assert(header.length > 0, 'no header line was inked');
+  assert(header.some(b => b.x0 < lay.COLUMN_X0_MM), 'the header line is no longer left of the column');
 });
 
 check('item 2: the first prompt row on every page starts below the keep-out', () => {
