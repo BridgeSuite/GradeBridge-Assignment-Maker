@@ -183,7 +183,9 @@ A third key configures the **printed QR template** (§10) and is handwritten-onl
 Omit `lines=N` and the part gets `DEFAULT_ANSWER_LINES` (6). The generator reserves exactly the
 requested lines, prints them as ruled writing lines (blank space for a `sketch`), and never shrinks the question
 text to make room: if a part's question and writing lines do not fit the rest of a page, the part starts
-a new page, and a part whose answer exceeds a page continues onto the next. The older
+a new page, and a part whose answer exceeds a whole page simply takes the page. An answer is never
+split across two pages. Where a page has room left under the last part, that part's ruled lines run on
+to the bottom margin, so the extra paper belongs to a region that is actually cropped and graded. The older
 `space=half|full|short|medium|tall|xtall` values still import, mapped to a line count, but Export
 always writes `lines=N`.
 
@@ -270,7 +272,7 @@ The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Pa
 
 Prompt, problem and question text all go through the same KaTeX renderer as the other exports, so `$\delta_s$` and a bare `ω` print as glyphs rather than being garbled by jsPDF's Latin-1 fonts.
 
-The prompt row is the authored sub-part name and nothing else. No page instruction is injected into it — the ruled lines beneath are the cue, and a continuation says so in its heading.
+The prompt row is the authored sub-part name and nothing else. No page instruction is injected into it — the ruled lines beneath are the cue, and a problem carried onto another page says so in its heading.
 
 **Nothing is boxed.** Page-format §4.1 is explicit that there is no printed answer box, and the questions themselves ask students to box their final answer — so the student's box is the only box on the sheet. A region is a rule, then ruled writing lines, and nothing detects any of it: the crop comes from the declared rectangle alone.
 
@@ -280,9 +282,10 @@ The prompt row is the authored sub-part name and nothing else. No page instructi
 prompt, sub-part description and preamble all print at 9 pt, and nothing shrinks any of them to make
 something fit. A drawing may be scaled into its reserved block; words may not. Each part reserves its
 authored answer space (`> template: lines=N`, §7) and the generator honours it: the question prints at
-full size and exactly N writing lines are ruled. When a page cannot hold a part's question plus its
-writing lines, the part moves to a new page; a part whose answer needs more than a page continues onto
-the next.
+full size and at least N writing lines are ruled. When a page cannot hold a part's question plus its
+writing lines, the part moves to a new page; a part whose answer needs more than a page takes the whole
+page. The problem **heading** is wrapped to the writing column like any other block — a long title, or
+a title carrying ` (continued)`, runs onto a second line rather than out of the column.
 
 Heights are estimated from character count, never measured — the map is hashed into every page's QR, so
 it has to be identical in a browser and in a test. The estimate therefore **over-reserves on purpose**
@@ -302,10 +305,11 @@ Pack, then break. Nothing is derived from points, and nothing is squeezed to avo
 
 1. **Every problem starts a new page**, carrying its heading and shared setup text.
 2. Its parts then **pack down the page**: a part's prompt, its fixed-size question text, and its N ruled lines. When the **next** part's prompt, text and lines do not fit in what is left of the page, that part **breaks to a new page**. However many fit at their authored sizes is however many the page carries.
-3. If a single part's prompt, text and writing area **exceed a whole page**, it **continues**: same `part_id`, `region_id` suffixed `x2`, heading `(continued)`.
-4. Never squeeze to avoid a break. A break is the correct outcome — paper is cheap, unreadable text is not.
+3. If a single part's prompt, text and writing area **exceed a whole page**, the part takes the whole page. **An answer is never split across pages** — the next page is no bigger, so a break cannot help, and what splitting produced instead was a 15 mm orphan: one writing line under a repeated heading, which is not somewhere anyone finishes an answer.
+4. **The last region on each page runs to the bottom margin.** Earlier parts on the page keep exactly their authored lines; the final one absorbs the slack. Blank paper below a region is paper a student may write on that is never cropped and never graded, so the rectangle is extended to claim it. A sketch region grows the same way and stays unruled.
+5. Never squeeze to avoid a break. A break is the correct outcome — paper is cheap, unreadable text is not.
 
-**Rule 3 means a part can own more than one region.** The continuation row carries the same `part_id` and a `region_id` suffixed `x2`, so the Submission app receives two crops for one answer. The spec allows this — `region_id` is unique, `part_id` is a display string — but a consumer that assumed one crop per part will be surprised, so: **group crops by `part_id`, and grade the part once.**
+**Every `part_id` gets exactly one region.** The map still *permits* a part to own more than one — `region_id` is the unique key and `part_id` is a display string the spec lets repeat — and a consumer should still **group crops by `part_id` and grade the part once**, so that nothing breaks if the shape ever comes back. As of 2026-08-18 the generator does not produce it.
 
 ### Two more things to know
 

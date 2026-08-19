@@ -109,13 +109,33 @@ exam generator's choices leaked into a homework template.
 **Authored answer space** (2026-08-17) is checked here too, since it is the whole
 sizing model: the authored line count is what is reserved, what is ruled and what
 the map crops; points influence nothing; parts pack down a page and then break
-rather than being squeezed; a part whose answer exceeds a page continues with an
-`x2` region and no line is lost across the break; long prose is reserved in full
-and never scaled, with the one remaining clamp (prose that cannot fit a page at
-all) reported to the author. A text region is ruled at `WRITING_LINE_MM` and a
-sketch region is left blank. The prompt row carries no injected "write your answer
-below this line" — the PDF's own text operators are searched for all three retired
-sentences.
+rather than being squeezed; long prose is reserved in full and never scaled, with
+the one remaining clamp (prose that cannot fit a page at all) reported to the
+author. A text region is ruled at `WRITING_LINE_MM` and a sketch region is left
+blank. The prompt row carries no injected "write your answer below this line" —
+the PDF's own text operators are searched for all three retired sentences.
+
+**No split answers, and no unclaimed paper** (2026-08-18). A part is placed
+exactly once: no `part_id` owns two regions, in any shape of assignment, and a
+part whose authored lines outgrow an empty page takes the page rather than
+spilling a one-line orphan onto the next. What used to be checked as "continues
+with an `x2` region and loses no line" is now checked as its opposite. Against
+that, the **last region on every page runs to the bottom margin**: the suite
+asserts it ends within one `WRITING_LINE_MM` pitch of the margin, that its
+declared rectangle still passes the 262 mm bottom limit, and that growing it kept
+`y1 = y0 + n x pitch` — the identity that puts the last rule on the rectangle's
+own edge. Because that region is deliberately larger than its authored size, the
+authored-size checks now exempt it and assert it exactly for every other region.
+
+**The problem heading is wrapped, and can never refuse an export.** It was the
+one printed row drawn as a single unwrapped, untruncated line, and two ENG17 HW4
+titles ran out of the writing column once ` (continued)` was appended — the ink
+check then refused the whole export. The suite drives a 97-character title, and
+the HW4 `(continued)` shape itself, and asserts every drawn heading line stays
+inside `COLUMN_X1_MM` and that the reservation covers the lines drawn. A title
+past `MAX_HEADING_LINES` is asserted to **ellipsise** (plain ASCII "...", read
+back out of the PDF's own text operators) rather than throw: losing the tail of an
+absurd title is a visible degradation, a refused export is not.
 
 **A stem's prose never shares a raster with its figure.** The two used to go into
 one scale-to-fit canvas, so a drawing over its `FIGURE_LINES` allotment scaled the

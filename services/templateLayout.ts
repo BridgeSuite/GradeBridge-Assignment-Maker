@@ -210,9 +210,9 @@ export interface TemplatePart {
   maxPoints: number;
   isDrawing: boolean;
   /**
-   * Writing lines this region reserves and draws. On a whole part it is what
-   * the author asked for; on a slice of a part that ran past a page it is what
-   * that page could hold, and the rest lands on a continuation region.
+   * Writing lines this region reserves and draws — what the author asked for,
+   * clamped to what a page can hold, and then grown to the bottom margin if it
+   * is the last region on its page.
    */
   answerLines: number;
   /** Index of the problem this part belongs to, for keeping a problem together. */
@@ -223,8 +223,6 @@ export interface TemplatePart {
   problemHeading: string;
   /** The problem's shared setup text, printed once under its heading. */
   problemDescription: string;
-  /** A second writing area for the same part, on the page after it. */
-  isContinuation?: boolean;
 }
 
 /**
@@ -261,6 +259,12 @@ export interface ProblemBlock {
   text: string;
   /** True when the problem started on an earlier page — heading only, no repeat of the setup. */
   continued: boolean;
+  /**
+   * Height reserved for the heading itself, inside `boxMm` — `headingLines`
+   * lines at `PROBLEM_HEADING_LINE_MM`. The stem is drawn directly under it, so
+   * the generator reads this rather than re-deriving it from the string.
+   */
+  headingMm: number;
   boxMm: RectMm;
 }
 
@@ -299,14 +303,45 @@ export interface TemplateLayout {
   clamped: { partId: string; requestedMm: number; usedMm: number }[];
 }
 
-/** Heading line above a problem's first part. */
-export const PROBLEM_HEADING_MM = 5.5;
+/** One line of the problem heading above a problem's first part. */
+export const PROBLEM_HEADING_LINE_MM = 5.5;
 /** Gap under a problem block before the first part's prompt row. */
 export const PROBLEM_BLOCK_GAP_MM = 1.5;
 
+/**
+ * The heading is authored text in the writing column, so it has to be given a
+ * width budget like every other block. It used to have none: it was the one
+ * printed row drawn as a single unwrapped, untruncated line, and a long title
+ * ran out of the column. ` (continued)` was what pushed the two longest ENG17
+ * HW4 titles past the limit and refused the export outright.
+ *
+ * Estimated, never measured, for the same reason `estimateDescLines` is: the map
+ * is hashed into every QR, so the reservation must be identical in a browser and
+ * in a Node test. And like that estimate it must never come out short — the
+ * advance is set at the all-caps worst case rather than the title-case average,
+ * so a title-case heading that renders on one line may reserve two. The 5.5 mm
+ * that costs is given straight back by the page-fill pass.
+ */
+export const HEADING_FONT_PT = 11;
+export const HEADING_ADVANCE_EM = 0.68;   // ~0.50 measured for title case, ~0.68 all-caps worst case
+export const MAX_HEADING_LINES = 3;
+
+export const headingLines = (
+  heading: string, widthMm: number = COLUMN_X1_MM - COLUMN_X0_MM
+): number => {
+  if (!heading.trim()) return 1;
+  const charMm = HEADING_FONT_PT * HEADING_ADVANCE_EM * 25.4 / 72;
+  const perLine = Math.max(20, Math.floor(widthMm / charMm));
+  return Math.min(MAX_HEADING_LINES, Math.max(1, Math.ceil(heading.trim().length / perLine)));
+};
+
+/** Vertical space the heading itself reserves — one to `MAX_HEADING_LINES` lines. */
+export const problemHeadingMm = (heading: string): number =>
+  round4(headingLines(heading) * PROBLEM_HEADING_LINE_MM);
+
 /** Vertical space a problem block needs, given whether it repeats the setup. */
-export const problemBlockMm = (text: string, continued: boolean): number =>
-  PROBLEM_HEADING_MM + (continued ? 0 : descBlockMm(text)) + PROBLEM_BLOCK_GAP_MM;
+export const problemBlockMm = (heading: string, text: string, continued: boolean): number =>
+  problemHeadingMm(heading) + (continued ? 0 : descBlockMm(text)) + PROBLEM_BLOCK_GAP_MM;
 
 /** Usable vertical run for headers + writing areas on a page. */
 export const pageRunMm = (topMm: number): number => REGION_Y_MAX_MM - topMm;
@@ -317,21 +352,40 @@ const pad = (r: RectMm): RectMm => ({
 });
 
 /**
- * A further writing area for the same part, on the page after it. Same
- * `part_id`, so the two crops belong to the same answer; a new `region_id`,
- * because that is the map's unique key. `seq` is 2 for the first continuation.
+ * The last region on each page runs to the bottom margin.
  *
- * Continuations carry no name and no description: the question was asked on the
- * page before, and this is the rest of the room to answer it in.
+ * Before this, the bottom gaps down HW1's 21 pages were 44, 49, 66, 88, 100,
+ * 119, 133, 140, 154 and 163 mm. Page 9 carried four ruled lines and 150 mm of
+ * nothing, so a student needing a fifth line had blank paper right there and no
+ * sanctioned place to use it — anything written outside a declared rectangle is
+ * never cropped and never graded. Extending the rectangle is what makes that
+ * paper part of the answer rather than decoration.
+ *
+ * Only the *last* region on a page grows: earlier parts keep exactly the lines
+ * their author asked for, and the final one absorbs all the slack. And it only
+ * ever grows — a region is never shrunk to fit this rule.
+ *
+ * `y1 = y0 + n x WRITING_LINE_MM` is preserved deliberately: `drawWritingArea`
+ * draws line *i* at `y0 + i x pitch`, so that identity is what puts the last
+ * rule exactly on the rectangle's own edge.
  */
-export const continuationOf = (p: TemplatePart, seq: number, lines: number): TemplatePart => ({
-  ...p,
-  regionId: `${p.regionId}x${seq}`,
-  name: '',
-  description: '',
-  answerLines: lines,
-  isContinuation: true,
-});
+const fillPagesToBottom = (regions: PlacedRegion[]): void => {
+  const last = new Map<number, PlacedRegion>();
+  for (const r of regions) {
+    const held = last.get(r.pageK);
+    if (!held || r.nominalMm.y0 > held.nominalMm.y0) last.set(r.pageK, r);
+  }
+  for (const r of last.values()) {
+    // The most lines whose padded rectangle still ends at or above the bottom
+    // limit. REGION_Y_MAX_MM is 262 and the pad is 3, so the declared bottom
+    // lands at 262.0 at worst, which `safeAreaViolations` passes (`>`, not `>=`).
+    const lines = Math.floor((REGION_Y_MAX_MM - REGION_PAD_MM - r.nominalMm.y0) / WRITING_LINE_MM);
+    if (lines <= r.answerLines) continue;
+    r.answerLines = lines;
+    r.nominalMm = { ...r.nominalMm, y1: round4(r.nominalMm.y0 + answerBoxMm(lines)) };
+    r.declaredMm = pad(r.nominalMm);
+  }
+};
 
 /**
  * The sheet is the assignment, so it has to carry the whole question: the
@@ -339,13 +393,14 @@ export const continuationOf = (p: TemplatePart, seq: number, lines: number): Tem
  * first part, and each part's own text above its writing area. A student should
  * never need a second document to know what 1(a) is asking.
  *
- * Pack, then break. A problem opens a new page carrying its heading and shared
- * setup; its parts then pack down the page at their authored sizes, and the
- * moment the next part's question plus its writing area does not fit the rest of
- * the page, that part starts a new one. A part whose own answer is bigger than a
- * page continues onto the next with the same `part_id`. Nothing is ever squeezed
- * to avoid a break — a break is the correct outcome, paper is cheap and
- * unreadable text is not.
+ * Pack, then break, then fill. A problem opens a new page carrying its heading
+ * and shared setup; its parts then pack down the page at their authored sizes,
+ * and the moment the next part's question plus its writing area does not fit the
+ * rest of the page, that part starts a new one. A part is placed exactly once —
+ * an answer is never split across pages, so one that outgrows an empty page
+ * takes the whole page instead. Finally the last region on every page runs to
+ * the bottom margin. Nothing is ever squeezed to avoid a break — a break is the
+ * correct outcome, paper is cheap and unreadable text is not.
  */
 export const buildLayout = (assignment: Assignment): TemplateLayout => {
   const parts = enumerateParts(assignment);
@@ -381,20 +436,25 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
     if (part.problemIndex !== previousProblem) newPage();
     previousProblem = part.problemIndex;
 
-    let remaining = part.answerLines;
-    let seq = 1;
-
-    while (remaining > 0) {
+    // A part is placed exactly once. The loop is only a retry after a page
+    // break, never a second slice of the same answer: an answer is never split
+    // across pages. What a page-and-a-bit of authored lines used to produce was
+    // a 15 mm orphan on the next page — one writing line under a repeated
+    // heading, which is not somewhere anyone finishes an answer.
+    for (;;) {
       // The first region on a page carries the problem block: the heading
       // always, the shared setup only the first time the problem is seen.
       const opens = pageIsEmpty;
       const continued = opens && seenProblem.has(part.problemIndex);
-      const slice = seq === 1 ? part : continuationOf(part, seq, remaining);
+      // Built before the reservation, not after: the heading is wrapped text
+      // now, and ` (continued)` is what makes the longest ones wrap.
+      const heading = continued ? `${part.problemHeading} (continued)` : part.problemHeading;
+      const headingMm = problemHeadingMm(heading);
 
-      const blockHeadingMm = opens ? PROBLEM_HEADING_MM : 0;
+      const blockHeadingMm = opens ? headingMm : 0;
       const blockGapMm = opens ? PROBLEM_BLOCK_GAP_MM : 0;
       let blockTextMm = opens && !continued ? descBlockMm(part.problemDescription) : 0;
-      let descMm = descBlockMm(slice.description);
+      let descMm = descBlockMm(part.description);
 
       // Everything that is not prose and not the writing area.
       const fixedMm = blockHeadingMm + blockGapMm + PROMPT_ROW_MM + RULE_GAP_MM + REGION_PAD_MM * 2;
@@ -407,7 +467,7 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
       // clamped on this path — a page break is the cheap, correct answer, and
       // reaching for the clamp first is how ordinary prose used to get trimmed
       // for no reason but its position on the page.
-      if (fits < remaining && !opens) { newPage(); continue; }
+      if (fits < part.answerLines && !opens) { newPage(); continue; }
 
       // A page of its own and *still* no room for a single writing line: the
       // question text is longer than a page. Last resort — trim the reservation,
@@ -424,15 +484,21 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
         fits = linesThatFit();
       }
 
-      const lines = Math.max(1, Math.min(remaining, fits));
+      // A part that does not fit even an empty page simply takes the whole page.
+      // No warning and no report entry: with the page-fill pass below, a full
+      // page is the most room a page has to give, so this is not a degradation
+      // anyone can act on. (The `clamped` path above, for *question text* that
+      // will not fit a page, is a different thing and is still reported.)
+      const lines = Math.max(1, Math.min(part.answerLines, fits));
 
       let problemBlock: ProblemBlock | undefined;
       if (opens) {
-        const height = PROBLEM_HEADING_MM + blockTextMm;
+        const height = round4(headingMm + blockTextMm);
         problemBlock = {
-          heading: continued ? `${part.problemHeading} (continued)` : part.problemHeading,
+          heading,
           text: continued ? '' : part.problemDescription,
           continued,
+          headingMm,
           boxMm: { x0: COLUMN_X0_MM, y0: round4(cursor), x1: COLUMN_X1_MM, y1: round4(cursor + height) },
         };
         cursor = round4(cursor + height + PROBLEM_BLOCK_GAP_MM);
@@ -459,7 +525,7 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
       };
 
       regions.push({
-        ...slice,
+        ...part,
         answerLines: lines,
         pageK,
         problemBlock,
@@ -472,10 +538,11 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
 
       cursor = round4(nominal.y1 + REGION_PAD_MM + REGION_GAP_MM);
       pageIsEmpty = false;
-      remaining -= lines;
-      if (remaining > 0) { seq += 1; newPage(); }
+      break;
     }
   }
+
+  fillPagesToBottom(regions);
 
   return {
     parts, regions,
