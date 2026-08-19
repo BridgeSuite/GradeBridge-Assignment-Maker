@@ -315,6 +315,7 @@ Pack, then break. Nothing is derived from points, and nothing is squeezed to avo
 
 - **The QR is the same on every copy.** One class-wide master, no per-student code; the app identifies the student from their login, not from the paper.
 - **Nothing printed may enter the QR's keep-out**, so the first prompt row on every page starts below it. The generator checks the ink it actually laid down, not just the layout, and refuses to emit a template where anything overlaps the symbol — text over the modules can stop it decoding, and the QR is the whole registration mechanism.
+- **Nothing printed may leave the writing column** (x 23.0–192.9, plus 0.25 mm for rounding), checked the same way, against the ink rather than the layout. The header line is the one exemption — the page format anchors it at x = 20.0, left of the column, by design.
 
 ---
 
