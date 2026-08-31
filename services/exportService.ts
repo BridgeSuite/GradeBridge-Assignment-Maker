@@ -601,6 +601,13 @@ export const generateGradingRubric = (assignment: Assignment): object => {
       const isAiHandwritten = isHandwritten && (sub.handwrittenGradingMode ?? 'ai') !== 'human';
       const subsectionLetter = String.fromCharCode(97 + sIndex);
       const minWords = MIN_WORDS_BY_TYPE[sub.submissionType];
+      // Declared only where the app actually knows: a handwritten part declares
+      // it via `sketch`, and a written answer is a written answer. The image
+      // types and the unwired stubs declare nothing. See ASSIGNMENT_MD_SPEC.md §12.
+      const answerModality = isHandwritten
+          ? (sub.isDrawing ? 'figure' : 'text')
+        : (isAi || sub.submissionType === SubmissionType.TEXT) ? 'text'
+        : undefined;
 
       rubrics[subsectionId] = {
         subsection_id: subsectionId,
@@ -621,12 +628,19 @@ export const generateGradingRubric = (assignment: Assignment): object => {
         max_points: sub.points,
         // The declared modality of the *answer*, so a consumer holding the
         // rubric alone can route without guessing at read time (OCR addendum
-        // v1.5 §3, T19) and without joining to the layout map. Derived from the
-        // same `isDrawing` that writes `is_drawing` in `layout_*.csv`: the two
-        // are deliberately duplicated and must agree. `"hybrid"` is reserved in
-        // the documented value set but never emitted — this app declares one
-        // boolean per part today.
-        answer_modality: sub.isDrawing ? 'figure' : 'text',
+        // v1.5 §3, T19) and without joining to the layout map. For a handwritten
+        // part it comes from the same `isDrawing` that writes `is_drawing` in
+        // `layout_*.csv`: the two are deliberately duplicated and must agree.
+        //
+        // **Optional, and absent wherever the app does not know.** An `[image]`
+        // or `[text+image]` part is answered with a picture but carries no
+        // modality declaration — `isDrawing` is handwritten-only — so nothing is
+        // written for it. An absent field is an absence; `"text"` on a part
+        // answered with a picture would be a false statement in a field whose
+        // only purpose is routing, and a wrong value is worse than a missing one
+        // precisely because it does not prompt anyone to ask. `"hybrid"` is
+        // reserved in the documented set and never emitted.
+        ...(answerModality ? { answer_modality: answerModality } : {}),
         // Handwritten is checked first: pages are cropped per region, so it never
         // falls through to the image or plain-human branches.
         grading_type: isHandwritten
@@ -893,28 +907,86 @@ ${katexCss}
 // =====================================================
 // ASSIGNMENT SPEC — payload of assignment_spec.json
 // =====================================================
-// The spec is the Assignment object itself. `coursePublicKey` is the one
-// field with conditional presence: when set it is carried verbatim so the
-// Student Submission app switches to gb2; when unset the field is omitted
-// entirely, leaving the spec identical to pre-gb2 exports (→ gb1).
-export const buildAssignmentSpec = async (assignment: Assignment): Promise<Assignment> => {
-  // `aiGradingConfig` was a grader configuration nothing read. It rode inside
-  // the spec because it was a required field on `Assignment`, which put a
-  // grading-resource decision in the student's browser. Removed 2026-08-31;
-  // dropped here as well so an assignment loaded from a pre-change JSON or from
-  // localStorage cannot carry one back out. See ASSIGNMENT_MD_SPEC.md §12.
-  const { coursePublicKey, aiGradingConfig: _staleGraderConfig, ...withoutKey } =
-    assignment as Assignment & { aiGradingConfig?: unknown };
-  const pem = normalizeCoursePublicKey(coursePublicKey || '');
-  if (!pem) return withoutKey as Assignment;
+// The spec is built from an EXPLICIT LIST of the fields the Student Submission
+// app reads. It is not the Assignment object with fields subtracted, and the
+// direction is the whole point.
+//
+// **A blacklist is how the answer key got in.** `aiGradingPrompt` was added for
+// the grader; the spec shipped the whole object; nothing objected. On
+// 2026-08-31 a decrypt of a real ENG17 HW1 export showed 17 of 17 grading
+// prompts in the student's copy, `REFERENCE:` lines and all — one of them
+// stating the answer is 1.2 V and deriving it. `graderNote` travels the same
+// way on any assignment that has a `handwritten:human` part.
+//
+// With a whitelist, **the next field anyone adds to `Assignment` is excluded by
+// default** and reaches students only when someone decides it should. That is
+// the property worth having: the failure mode of a blacklist is silent and the
+// failure mode of a whitelist is a missing feature someone notices.
+//
+// Nothing is lost. Grading material reaches the grader by its proper route,
+// `{stem}_grading_rubric.json`, which stays with the instructor. The authoring
+// round trip is `Export .md` → `Import Markdown`, which carries the prompts and
+// the grader notes in full. See ASSIGNMENT_MD_SPEC.md §12.
+//
+// Keep this list in step with `GradeBridge-Student-Submission/types.ts`, which
+// is where "what the student app reads" is actually defined. `tests/run-tests.mjs`
+// asserts the built spec's field set is exactly this, so adding a field to
+// `Assignment` fails the suite until someone decides deliberately.
 
-  // A malformed key would silently produce unreadable submissions — stop instead.
-  const check = await validateCoursePublicKey(pem);
-  if (!check.ok) {
-    throw new Error(`Export stopped: the course public key on this assignment is not valid. ${check.error}`);
+/** Fields always written, in the order the spec serialises them. */
+const SPEC_ASSIGNMENT_REQUIRED = ['id', 'courseCode', 'title', 'preamble', 'problems', 'createdAt', 'updatedAt'] as const;
+/** Written only when the assignment actually carries them, so a spec from
+ *  before a field existed stays byte-for-byte what it was. */
+const SPEC_ASSIGNMENT_OPTIONAL = ['inputMode', 'aiFeedback', 'coursePublicKey'] as const;
+const SPEC_PROBLEM_REQUIRED = ['id', 'name', 'description', 'subsections'] as const;
+const SPEC_SUBSECTION_REQUIRED = ['id', 'name', 'description', 'points', 'submissionType'] as const;
+const SPEC_SUBSECTION_OPTIONAL = ['minWords', 'maxImages', 'config'] as const;
+
+/** The whole contract in one shape, exported so the test can assert against it. */
+export const STUDENT_SPEC_FIELDS = {
+  assignment: [...SPEC_ASSIGNMENT_REQUIRED, ...SPEC_ASSIGNMENT_OPTIONAL],
+  problem: [...SPEC_PROBLEM_REQUIRED],
+  subsection: [...SPEC_SUBSECTION_REQUIRED, ...SPEC_SUBSECTION_OPTIONAL],
+} as const;
+
+/**
+ * Copy `required` unconditionally and `optional` only where the source has the
+ * key. Presence, not truthiness: `aiFeedback: false` is a real answer and must
+ * survive, while an assignment that predates the flag must stay without it.
+ */
+const pickFields = (src: Record<string, unknown>, required: readonly string[], optional: readonly string[] = []) => {
+  const out: Record<string, unknown> = {};
+  for (const k of required) out[k] = src[k];
+  for (const k of optional) if (k in src && src[k] !== undefined) out[k] = src[k];
+  return out;
+};
+
+export const buildAssignmentSpec = async (assignment: Assignment): Promise<Assignment> => {
+  // Validate the key before building, so a malformed one stops the export
+  // rather than silently producing submissions nobody can read.
+  const pem = normalizeCoursePublicKey(assignment.coursePublicKey || '');
+  if (pem) {
+    const check = await validateCoursePublicKey(pem);
+    if (!check.ok) {
+      throw new Error(`Export stopped: the course public key on this assignment is not valid. ${check.error}`);
+    }
   }
 
-  return { ...(withoutKey as Assignment), coursePublicKey: pem };
+  const source = { ...(assignment as unknown as Record<string, unknown>) };
+  // An empty or whitespace-only key is not a key: omit the field entirely so
+  // the spec stays identical to a pre-gb2 export and the student app falls back
+  // to gb1.
+  if (pem) source.coursePublicKey = pem; else delete source.coursePublicKey;
+
+  const spec = pickFields(source, SPEC_ASSIGNMENT_REQUIRED, SPEC_ASSIGNMENT_OPTIONAL);
+  spec.problems = (assignment.problems || []).map(prob => {
+    const p = pickFields(prob as unknown as Record<string, unknown>, SPEC_PROBLEM_REQUIRED);
+    p.subsections = (prob.subsections || []).map(sub =>
+      pickFields(sub as unknown as Record<string, unknown>, SPEC_SUBSECTION_REQUIRED, SPEC_SUBSECTION_OPTIONAL));
+    return p;
+  });
+
+  return spec as unknown as Assignment;
 };
 
 /**

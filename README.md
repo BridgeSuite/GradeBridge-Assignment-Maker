@@ -271,7 +271,6 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
       "subsection_id": "p0s0",
       "max_points": 5,
       "grading_type": "human_image",
-      "answer_modality": "text",
       "grading_prompt": ""
     }
   }
@@ -294,9 +293,11 @@ if any exported artifact grows one back. See `ASSIGNMENT_MD_SPEC.md` §12.
 | `"ai_handwritten"` | Handwritten part, OCR then AI-graded from the page crop |
 | `"human_handwritten"` | Handwritten part, TA grades from the page crop |
 
-`answer_modality` values: `"text"` (a written answer) or `"figure"` (a drawing — a part authored
-`> template: sketch`). `"hybrid"` is reserved and not emitted. It is the declared modality a grader
-routes on, and it must agree with `is_drawing` in `layout_{TemplateID}.csv`.
+`answer_modality` is **optional**: `"text"` (a written answer), `"figure"` (a drawing — a `handwritten`
+part authored `> template: sketch`), or **absent** where the app does not know — an `[image]` or
+`[text+image]` part is answered with a picture but carries no modality declaration. `"hybrid"` is
+reserved and not emitted. Do not read an absent field as `"text"`. Every part of a handwritten
+assignment carries it, and it agrees with `is_drawing` in `layout_{TemplateID}.csv`.
 
 ---
 
@@ -304,7 +305,9 @@ routes on, and it must agree with `is_drawing` in `layout_{TemplateID}.csv`.
 
 - All data stored in browser `localStorage` — nothing is sent to any server
 - **Export your JSON regularly** — data is lost if browser cache is cleared
-- `aiGradingPrompt` (your rubric) is stored in `assignment_spec.json` so you can reload assignments as templates; the Student Submission app does not display it to students
+- **`aiGradingPrompt` and `graderNote` are NOT in `assignment_spec.json`.** The student's file is built from an explicit whitelist of the fields the Submission app reads, so no grading prompt, grader note, answer key or reference solution travels to a student's browser. Until 2026-08-31 the spec was the whole assignment object and did carry every prompt — if you hold an export made before then, treat its rubrics as disclosed. Nothing had been distributed.
+- **To reload an assignment as a template, use `Export .md` → `Import Markdown`**, which carries the prompts and grader notes in full. Importing an exported `assignment_spec.json` restores the questions but not the grading material, because that material is no longer in the file.
+- Your rubrics reach the autograder by their proper route, `{Course}_{Title}_grading_rubric.json`, which stays with you
 
 ---
 

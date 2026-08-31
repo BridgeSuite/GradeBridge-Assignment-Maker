@@ -56,6 +56,26 @@ against the same WebCrypto the browser uses.
   mirrored like the delimiter file, checked from both sides
   (`tests/figure-tests.mjs` in the Student app).
 
+- **The student spec carries no answer key** (§12, 2026-08-31) — the guard that
+  matters most in the suite. It takes a real export, decrypts `assignment_spec.json`
+  the way a student's browser does, and asserts it holds **no grading prompt, no
+  grader note and no grading configuration** — by key *and* by text, since the
+  fixture's prompt and grader note both contain sentences a student must not see
+  (one of them an answer value). This is the check that would have caught 17 of 17
+  ENG17 HW1 grading prompts, `REFERENCE:` lines and worked answers included,
+  sitting in the student's copy.
+
+  The second half asserts the spec's **field set is exactly the whitelist** at
+  every level — assignment, problem, sub-part — in both directions: nothing
+  outside it, and everything the student app needs present. A blacklist is how
+  `aiGradingPrompt` got in, so adding a field to `Assignment` now fails this test
+  until someone decides deliberately. A third check compares
+  `STUDENT_SPEC_FIELDS` against `GradeBridge-Student-Submission/types.ts`, which
+  is where "what the student app reads" is actually defined (SKIP if that repo is
+  not checked out alongside). Mutation-tested: reverting to a spread of the whole
+  object fails three checks; quietly adding `aiGradingPrompt` to the whitelist
+  fails one.
+
 - **The export contract** (§12, 2026-08-31) — the guard that makes the spec
   sentence real rather than advice. **No exported artifact carries a model name,
   a temperature or a token budget**: the rubric JSON, the decrypted spec JSON and
@@ -67,9 +87,14 @@ against the same WebCrypto the browser uses.
   shape does not occur in prose. The fixture's own prose says both words on
   purpose. Mutation-tested: putting `ai_grading_config` back fails two checks.
 
-  The second half asserts every rubric item declares an **`answer_modality`** in
-  the documented set, that the reserved `"hybrid"` is never emitted, and that it
-  **agrees with `is_drawing`** in the layout map for every region — the two are
+  The second half covers **`answer_modality`**, which is *optional*: a written
+  answer declares `"text"`, a `sketch` declares `"figure"`, and an `[image]` or
+  `[text+image]` part declares **nothing**, because the app does not know — a
+  wrong value in a routing field is worse than a missing one precisely because it
+  does not prompt anyone to ask. That asymmetry is asserted directly (hardcoding
+  `'text'` for every part fails). The reserved `"hybrid"` is never emitted, every
+  part of a handwritten assignment carries the field, and it **agrees with
+  `is_drawing`** in the layout map for every region — the two are
   deliberately duplicated so no consumer has to join two files to learn one fact,
   which only holds if they cannot drift. Both values have to appear or the check
   proves nothing. Also mutation-tested, in both directions (hardcode the value,

@@ -25,11 +25,32 @@
 //   three locations, redeploy both web apps and rebuild the Docker image.
 //   Old encoded files will no longer load after rotation.
 //
-// SECURITY LEVEL
-//   The key is embedded in the JavaScript bundle (minified, not plain
-//   text).  A determined student who reverse-engineers the bundle could
-//   find it, but for academic-integrity purposes this is a strong deterrent:
-//   students cannot simply open the file and edit it.
+// SECURITY LEVEL — read this before adding a field to the spec
+//   **This is tamper resistance, not confidentiality.** The key is embedded in
+//   the JavaScript bundle (minified, not plain text) and duplicated by design
+//   across three codebases, so a student who reverse-engineers the bundle can
+//   read anything the spec carries. It stops casual editing of an assignment
+//   file, which is what it was built for.
+//
+//   Therefore: **`assignment_spec.json` must never carry material whose
+//   disclosure matters** — no grading prompt, no grader note, no answer key, no
+//   reference solution, no grading-resource setting. This is enforced by
+//   construction: `buildAssignmentSpec()` in `services/exportService.ts` builds
+//   the spec from an explicit whitelist of the fields the Student Submission
+//   app reads, and a test decrypts a real export and asserts none of that
+//   material is in it.
+//
+//   The rule exists because it was broken. On 2026-08-31 a decrypt of a real
+//   ENG17 HW1 export — done in about a minute with this app's own exported
+//   `decryptJson` and nothing a student does not already have — found all 17
+//   grading prompts in the student's copy, `REFERENCE:` lines and worked
+//   answers included. The encryption was adequate for the payload it was
+//   written for; reference solutions were added to that payload later and this
+//   note was never revisited.
+//
+//   Rotating the key is a separate question, deliberately not coupled to this:
+//   once grading material is out of the spec, deterrent-grade encoding is
+//   adequate for what remains.
 // =====================================================
 
 const KEY_HEX = '4a7f3c2e9b1d8f5a0e6c4b3d9f2a7e1b5d8c3f9a2e7b4d0c6f8a3e1b5d9c2f4e';

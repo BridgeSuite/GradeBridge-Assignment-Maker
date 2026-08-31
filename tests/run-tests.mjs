@@ -147,7 +147,7 @@ const exportPdfSvc = await loadModule(join(REPO, 'services', 'exportService.ts')
 
 const { validateCoursePublicKey, normalizeCoursePublicKey, looksLikeCoursePublicKey, encryptJson, decryptJson } = crypto_;
 const { buildAssignmentSpec, assignmentToMd, generateGradingRubric, convertSubmissionType,
-        generateHTML, generateLaTeX, generateGraderHTML } = exportSvc;
+        generateHTML, generateLaTeX, generateGraderHTML, STUDENT_SPEC_FIELDS } = exportSvc;
 const { parseMdToAssignment } = mdParser;
 const { typeAllowedInMode, defaultTypeForMode, convertSubsectionToMode, strandedSubsectionLabels } = inputModeSvc;
 const { splitMath, toHtml, toLatexBody, toPlainUnicode, toPdfText, hasMath } = mathRender;
@@ -1435,7 +1435,7 @@ ${r.problem_statement}`);
           id: 's2', name: 'Field sketch', description: 'Sketch the field pattern.',
           points: 40, submissionType: 'Handwritten', handwrittenGradingMode: 'human',
           answerLines: 10, isDrawing: true,
-          graderNote: 'Arrows normal to the walls.',
+          graderNote: 'Arrows normal to the walls, and the answer is 1.2 V.',
         },
       ],
     }],
@@ -1480,11 +1480,87 @@ ${r.problem_statement}`);
         'ai_grading_config is back in an exported artifact');
     });
 
-    check('export contract: every rubric item declares an answer_modality in the documented set', () => {
+    // GUARD 1 — the one that matters. A real export, decrypted the way a
+    // student's browser decrypts it, must contain no grading material at all.
+    // This is the check that would have caught 17 of 17 ENG17 grading prompts,
+    // REFERENCE lines and worked answers included, sitting in the student's copy.
+    check('student spec: a decrypted export carries no prompt, no grader note and no config', () => {
+      const spec = JSON.parse(specJson);
+      const banned = ['aiGradingPrompt', 'graderNote', 'aiGradingConfig'];
+      const keysIn = (node, path = '$') => {
+        if (Array.isArray(node)) return node.flatMap((v, i) => keysIn(v, `${path}[${i}]`));
+        if (node && typeof node === 'object') {
+          return Object.entries(node).flatMap(([k, v]) => [
+            ...(banned.includes(k) ? [`${path}.${k}`] : []), ...keysIn(v, `${path}.${k}`),
+          ]);
+        }
+        return [];
+      };
+      assertEqual(keysIn(spec), [], 'the student spec carries grading material');
+      // Not just the key — the text. The fixture's prompt and grader note both
+      // contain sentences a student must not see; assert neither reached them.
+      assert(!specJson.includes('Required elements'), 'a grading prompt\'s text is in the student spec');
+      assert(!specJson.includes('Arrows normal to the walls'), "a grader note's text is in the student spec");
+      assert(!specJson.includes('1.2 V'), 'an answer key value is in the student spec');
+    });
+
+    // GUARD 2 — the field set IS the whitelist, at every level. Adding a field
+    // to `Assignment` now fails this until someone decides deliberately, which
+    // is the whole reason the spec is built forwards rather than by subtraction.
+    check('student spec: the field set is exactly the whitelist, at every level', () => {
+      const spec = JSON.parse(specJson);
+      const extra = (obj, allowed, where) =>
+        Object.keys(obj).filter(k => !allowed.includes(k)).map(k => `${where}.${k}`);
+
+      assertEqual(extra(spec, STUDENT_SPEC_FIELDS.assignment, 'assignment'), [],
+        'the spec carries a field outside the whitelist');
+      for (const [i, prob] of spec.problems.entries()) {
+        assertEqual(extra(prob, STUDENT_SPEC_FIELDS.problem, `problems[${i}]`), [],
+          'a problem carries a field outside the whitelist');
+        for (const [j, sub] of prob.subsections.entries()) {
+          assertEqual(extra(sub, STUDENT_SPEC_FIELDS.subsection, `problems[${i}].subsections[${j}]`), [],
+            'a sub-part carries a field outside the whitelist');
+        }
+      }
+      // The other half: everything the student app needs is actually there.
+      for (const k of ['id', 'courseCode', 'title', 'preamble', 'problems', 'createdAt', 'updatedAt']) {
+        assert(k in spec, `the spec is missing ${k}, which the student app reads`);
+      }
+      for (const sub of spec.problems.flatMap(p => p.subsections)) {
+        for (const k of ['id', 'name', 'description', 'points', 'submissionType']) {
+          assert(k in sub, `a sub-part is missing ${k}, which the student app reads`);
+        }
+      }
+    });
+
+    // The whitelist is only as good as its agreement with the app it is a
+    // whitelist FOR, and that app is a separate repo. Compare the two directly.
+    const studentTypes = resolve(REPO, '..', 'GradeBridge-Student-Submission', 'types.ts');
+    const checkOrSkip = existsSync(studentTypes) ? check
+      : (name) => skip(name, 'GradeBridge-Student-Submission is not checked out alongside');
+    checkOrSkip('student spec: the whitelist matches what the Student Submission app declares', () => {
+      const src = readFileSync(studentTypes, 'utf8');
+      const fieldsOf = (iface) => {
+        const body = src.match(new RegExp(`export interface ${iface} \\{([\\s\\S]*?)\\n\\}`))[1];
+        return [...body.matchAll(/^\s*(\w+)\??:/gm)].map(m => m[1]);
+      };
+      // Every field the student app declares must be one we are allowed to send
+      // (or one it never reads — dueDate/dueTime are declared there and read
+      // nowhere, and the Maker strips them on load).
+      const declared = fieldsOf('Assignment').filter(f => !['dueDate', 'dueTime'].includes(f));
+      const missing = declared.filter(f => !STUDENT_SPEC_FIELDS.assignment.includes(f));
+      assertEqual(missing, [], 'the student app declares an assignment field the whitelist does not send');
+      const subMissing = fieldsOf('Subsection').filter(f => !STUDENT_SPEC_FIELDS.subsection.includes(f));
+      assertEqual(subMissing, [], 'the student app declares a sub-part field the whitelist does not send');
+    });
+
+    check('export contract: every handwritten rubric item declares an answer_modality', () => {
       const { rubrics } = JSON.parse(rubricJson);
       const items = Object.entries(rubrics);
       assert(items.length > 0, 'no rubric items');
       for (const [key, item] of items) {
+        // Every part of a handwritten assignment declares one: `sketch` says
+        // figure and everything else is writing.
         assert('answer_modality' in item, `${key} has no answer_modality`);
         assert(MODALITIES.includes(item.answer_modality),
           `${key} declares answer_modality ${JSON.stringify(item.answer_modality)}`);
@@ -1523,11 +1599,36 @@ ${r.problem_statement}`);
     });
   }
 
-  check('export contract: an electronic rubric declares a modality too', () => {
-    const { rubrics } = generateGradingRubric(makeAssignment());
+  // `answer_modality` is OPTIONAL and is written only where the app actually
+  // knows. An `[image]` part is answered with a picture but declares nothing —
+  // `isDrawing` is handwritten-only — and `"text"` there would be a false
+  // statement in a field whose only purpose is routing. A wrong value is worse
+  // than a missing one precisely because it does not prompt anyone to ask.
+  check('export contract: a written answer declares "text"; a picture declares nothing', () => {
+    const mixed = makeAssignment({
+      problems: [{
+        id: 'p1', name: 'Mixed', description: '',
+        subsections: [
+          { id: 's1', name: 'Written', description: 'Explain.', points: 25, submissionType: 'Text' },
+          { id: 's2', name: 'AI written', description: 'Explain.', points: 25, submissionType: 'AI Graded: Short' },
+          { id: 's3', name: 'Photo', description: 'Photograph the board.', points: 25, submissionType: 'Image', maxImages: 1 },
+          { id: 's4', name: 'Caption + photo', description: 'Caption it.', points: 25, submissionType: 'Text and Image', maxImages: 1 },
+        ],
+      }],
+    });
+    const { rubrics } = generateGradingRubric(mixed);
+    assertEqual(rubrics.p0s0.answer_modality, 'text', 'a text part did not declare text');
+    assertEqual(rubrics.p0s1.answer_modality, 'text', 'an AI-graded text part did not declare text');
+    assert(!('answer_modality' in rubrics.p0s2),
+      `an [image] part declared ${JSON.stringify(rubrics.p0s2.answer_modality)} — it knows no modality`);
+    assert(!('answer_modality' in rubrics.p0s3),
+      `a [text+image] part declared ${JSON.stringify(rubrics.p0s3.answer_modality)} — it knows no modality`);
+    // Everything that IS written stays inside the documented set.
     for (const [key, item] of Object.entries(rubrics)) {
-      assert(MODALITIES.includes(item.answer_modality),
-        `${key} declares answer_modality ${JSON.stringify(item.answer_modality)}`);
+      if ('answer_modality' in item) {
+        assert(MODALITIES.includes(item.answer_modality),
+          `${key} declares answer_modality ${JSON.stringify(item.answer_modality)}`);
+      }
     }
   });
 
