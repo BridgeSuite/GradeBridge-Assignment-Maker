@@ -192,6 +192,26 @@ author. A text region is ruled at `WRITING_LINE_MM` and a sketch region is left
 blank. The prompt row carries no injected "write your answer below this line" —
 the PDF's own text operators are searched for all three retired sentences.
 
+**A region is never shorter than its authored line count** (2026-08-31). The
+regression fixture that did not exist, which is why a three-line reduction on
+page 1 of ENG17 HW1 survived two rounds of review: every older fixture has an
+empty problem stem, and the stem is what triggers the bug. The suite now drives a
+problem whose shared setup is long enough that a 14-line answer cannot also fit
+beneath it, and asserts the part still gets its 14 lines — by the setup being
+printed on a page of its own, with the part following under a `(continued)`
+heading. A shorter stem, where a clean page holds both, must **not** strand the
+setup: the givens belong directly above the question whenever they can be, and a
+stranded setup costs a whole sheet. A part that fits nowhere still takes its page
+rather than burning a blank one first.
+
+The guard itself is a numbered self-test check, so it **refuses** rather than
+warns, and that is asserted through the real generator. Mutation-tested: putting
+`Math.min(wanted, fits)` back fails four checks, one of them by
+`generateTemplate` throwing and naming the part and the shortfall. A second check
+holds the dichotomy that stops the reduction returning by another route — every
+region is either exactly its authored height or grown to the bottom cap, and
+there is no third outcome.
+
 **No split answers, and no unclaimed paper** (2026-08-18). A part is placed
 exactly once: no `part_id` owns two regions, in any shape of assignment, and a
 part whose authored lines outgrow an empty page takes the page rather than

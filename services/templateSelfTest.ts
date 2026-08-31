@@ -24,14 +24,15 @@
 import { Assignment } from '../types';
 import {
   CORNER_KEEPOUTS_MM, IDENTITY_BAND_MM, QR_KEEPOUT_MM, QR_PAYLOAD_MAX_CHARS,
-  RectMm, fractionRectToMm, rectsOverlap, safeAreaViolations,
+  REGION_PAD_MM, RectMm, fractionRectToMm, rectsOverlap, safeAreaViolations,
 } from './pageFormat';
 import {
   PAYLOAD_RE, computeLayoutId, parsePayload, payloadViolations,
 } from './qrPayload';
 import {
-  COLUMN_X0_MM, COLUMN_X1_MM, LayoutRow, MIN_BOX_MM, TemplateLayout,
-  csvUnsafeFields, enumerateParts,
+  BORDER_MM, COLUMN_X0_MM, COLUMN_X1_MM, LayoutRow, MIN_ANSWER_LINES, MIN_BOX_MM,
+  REGION_BOTTOM_MM, TemplateLayout, WRITING_LINE_MM,
+  answerBoxMm, csvUnsafeFields, enumerateParts,
 } from './templateLayout';
 import { splitFigures } from './figureBlocks';
 import { encodeQr } from './qrEncoder';
@@ -260,6 +261,82 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
     layout.regions
       .filter(r => r.boxBottomMm - r.boxTopMm < MIN_BOX_MM - 0.01)
       .map(r => `${r.regionId} is ${(r.boxBottomMm - r.boxTopMm).toFixed(1)} mm tall`));
+
+  // THE authored-space check. A region's height is never less than its authored
+  // line count requires: growing is allowed, shrinking is not.
+  //
+  // `ASSIGNMENT_MD_SPEC.md` §10 promises "at least N writing lines are ruled"
+  // and "when a page cannot hold a part's question plus its writing lines, the
+  // part moves to a new page". Both were being violated silently: the last
+  // region on a page was assigned the page's remaining run rather than being
+  // grown into it, so on ENG17 HW1 part 1(a) was cut from 8 authored lines to 5
+  // — on page 1 of the first homework of the year, through two rounds of review,
+  // because nothing asserted the one property the whole authored-space feature
+  // exists to provide. A student got less room than the author asked for, on the
+  // page they were told to work on, and the author could not see it without
+  // measuring the PDF.
+  //
+  // This refuses rather than warns, like every other numbered check: a sheet
+  // that gives a student less room than the assignment says is not a sheet worth
+  // printing.
+  const mm4 = (n: number) => Math.round(n * 1e4) / 1e4;
+  add(0, 'every region is at least as tall as its authored line count',
+    layout.regions
+      .map(r => {
+        // `answerLines` is what was PLACED, which the page-fill pass may have
+        // grown. What the author asked for is on the part, and that is the floor.
+        const part = layout.parts.find(pt => pt.regionId === r.regionId);
+        const askedLines = Math.max(part ? part.answerLines : r.answerLines, MIN_ANSWER_LINES);
+        const asked = answerBoxMm(askedLines);
+        const got = mm4(r.nominalMm.y1 - r.nominalMm.y0);
+        return got < asked - 0.01
+          ? `${r.regionId} on page ${r.pageK} is ${got.toFixed(1)} mm; ` +
+            `${askedLines} authored lines need ${asked.toFixed(1)} mm ` +
+            `(short by ${(asked - got).toFixed(1)} mm, ` +
+            `${Math.round((asked - got) / WRITING_LINE_MM)} ` +
+            `${Math.round((asked - got) / WRITING_LINE_MM) === 1 ? 'line' : 'lines'})`
+          : null;
+      })
+      .filter(Boolean) as string[]);
+
+  // The reduction must not come back by another route. Every region is in one of
+  // exactly two states, and there is no third: the last region on a page has
+  // been grown to the bottom cap, and every other region is exactly its authored
+  // height. A region that is neither is a region something has resized behind
+  // the layout's back.
+  {
+    const lastOnPage = new Map<number, (typeof layout.regions)[number]>();
+    for (const r of layout.regions) {
+      const held = lastOnPage.get(r.pageK);
+      if (!held || r.nominalMm.y0 > held.nominalMm.y0) lastOnPage.set(r.pageK, r);
+    }
+    const grown = new Set([...lastOnPage.values()]);
+    add(0, 'a region is either exactly its authored height or grown to the bottom cap',
+      layout.regions
+        .map(r => {
+          const part = layout.parts.find(pt => pt.regionId === r.regionId);
+          const askedLines = Math.max(part ? part.answerLines : r.answerLines, MIN_ANSWER_LINES);
+          const asked = answerBoxMm(askedLines);
+          const got = mm4(r.nominalMm.y1 - r.nominalMm.y0);
+          if (!grown.has(r)) {
+            return Math.abs(got - asked) > 0.01
+              ? `${r.regionId} is not the last region on page ${r.pageK} yet is ${got.toFixed(1)} mm ` +
+                `rather than its authored ${asked.toFixed(1)} mm`
+              : null;
+          }
+          // Grown: it either reached the cap, or it was already at or past the
+          // cap's line count and kept its authored height.
+          const cap = Math.floor(
+            (REGION_BOTTOM_MM - BORDER_MM - REGION_PAD_MM - r.nominalMm.y0) / WRITING_LINE_MM);
+          const atCap = Math.abs(got - answerBoxMm(cap)) <= 0.01;
+          const atAuthored = Math.abs(got - asked) <= 0.01;
+          return atCap || atAuthored
+            ? null
+            : `${r.regionId} on page ${r.pageK} is ${got.toFixed(1)} mm — neither its authored ` +
+              `${asked.toFixed(1)} mm nor the ${answerBoxMm(cap).toFixed(1)} mm the page bottom allows`;
+        })
+        .filter(Boolean) as string[]);
+  }
 
   // Question text is never scaled, so a block the page cannot hold is not a
   // warning about slightly small print any more — it is a template that would

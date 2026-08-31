@@ -195,7 +195,12 @@ A third key configures the **printed QR template** (§10) and is handwritten-onl
 
 Omit `lines=N` and the part gets `DEFAULT_ANSWER_LINES` (6). The generator reserves exactly the
 requested lines, prints them as ruled writing lines inside a bordered box (an empty box for a `sketch`), and never shrinks the question
-text to make room: if a part's question and writing lines do not fit the rest of a page, the part starts
+text to make room. **`lines=N` is a floor, and it is enforced**: a numbered self-test check refuses to
+emit a template carrying any region shorter than its authored count, naming the part and the shortfall
+in millimetres and lines. Until 2026-08-31 it was not enforced, and it was not being honoured — see
+§10 rule 3.
+
+The generator's behaviour is otherwise unchanged: if a part's question and writing lines do not fit the rest of a page, the part starts
 a new page, and a part whose answer exceeds a whole page simply takes the page. An answer is never
 split across two pages. Where a page has room left under the last part, that part's box and its ruled lines run on
 to the bottom margin, so the extra paper belongs to a region that is actually cropped and graded. A part
@@ -328,9 +333,12 @@ Pack, then break. Nothing is derived from points, and nothing is squeezed to avo
 
 1. **Every problem starts a new page**, carrying its heading and shared setup text.
 2. Its parts then **pack down the page**: a part's prompt, its fixed-size question text, and its box of N ruled lines. When the **next** part's prompt, text and box do not fit in what is left of the page — or the box that would be left for it is under 28 mm — that part **breaks to a new page**. However many fit at their authored sizes is however many the page carries.
-3. If a single part's prompt, text and writing area **exceed a whole page**, the part takes the whole page. **An answer is never split across pages** — the next page is no bigger, so a break cannot help, and what splitting produced instead was a 15 mm orphan: one writing line under a repeated heading, which is not somewhere anyone finishes an answer.
-4. **The last box on each page runs to the bottom margin** (`y 257.0`, five millimetres above the format's own limit so the box closes clear of the bottom registration corners). Earlier parts on the page keep exactly their authored lines; the final one absorbs the slack. Blank paper below a region is paper a student may write on that is never cropped and never graded, so the rectangle is extended to claim it. A sketch region grows the same way and stays unruled.
-5. Never squeeze to avoid a break. A break is the correct outcome — paper is cheap, unreadable text is not.
+3. **A region is never shorter than its authored line count.** Growing is allowed; shrinking is not. When a page cannot give a part its N lines, the part moves to a page that can, and there are exactly two things that take room away which another page would not: **page 1's furniture** (title, print instruction, preamble) and **the problem's shared setup**, which is printed once. So a part escapes at most twice, and the second escape is the unusual one — the shared setup is printed on **a page of its own** and the part follows on the next page under a `(continued)` heading. That is the only way a part authored more lines than fit beneath its own stem can still be given them, and giving them is not optional.
+
+   A break only happens when the better page can actually deliver the authored count. Breaking to gain a line or two without reaching it would trade a blank sheet for nothing, so in that case the part simply takes the page it is on.
+4. If a single part's prompt, text and writing area **exceed the roomiest page there is**, the part takes the whole page. **An answer is never split across pages** — the next page is no bigger, so a break cannot help, and what splitting produced instead was a 15 mm orphan: one writing line under a repeated heading, which is not somewhere anyone finishes an answer.
+5. **The last box on each page runs to the bottom margin** (`y 257.0`, five millimetres above the format's own limit so the box closes clear of the bottom registration corners). Earlier parts on the page keep exactly their authored lines; the final one absorbs the slack. Blank paper below a region is paper a student may write on that is never cropped and never graded, so the rectangle is extended to claim it. A sketch region grows the same way and stays unruled.
+6. Never squeeze to avoid a break, and never squeeze instead of one. A break is the correct outcome — paper is cheap, and a student given less room than the assignment says is not.
 
 **Every `part_id` gets exactly one region.** The map still *permits* a part to own more than one — `region_id` is the unique key and `part_id` is a display string the spec lets repeat — and a consumer should still **group crops by `part_id` and grade the part once**, so that nothing breaks if the shape ever comes back. As of 2026-08-18 the generator does not produce it.
 

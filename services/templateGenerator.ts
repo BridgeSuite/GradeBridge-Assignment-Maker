@@ -44,6 +44,7 @@ import {
   PAGE1_INSTRUCTION_LINES, PAGE1_INSTRUCTION_TOP_MM, PAGE1_TITLE_H_MM, PROBLEM_HEADING_LINE_MM,
   PROMPT_ROW_MM, PlacedRegion, TemplateLayout, WRITING_LINE_MM, buildLayout, descBlockMm,
   toLayoutCsv, toLayoutRows,
+  ProblemBlock,
 } from './templateLayout';
 import { splitFigures, trimAroundFigures } from './figureBlocks';
 import { SelfTestReport, runInkChecks, runSelfTest } from './templateSelfTest';
@@ -392,21 +393,33 @@ const drawProblemHeading = (
  * outside the box (`EEC100_Final_Format_Spec` §2), and the box's own border is
  * drawn outside the declared rectangle rather than on it.
  */
+/**
+ * A problem's heading and its shared setup. Drawn above the problem's first part
+ * — and, when that part could not fit beneath the setup and its authored answer
+ * space had to be honoured, on a page of its own with the part following under a
+ * `(continued)` heading (`layout.standaloneBlocks`).
+ *
+ * Without this block the sheet is not a self-contained assignment: "1(a)" means
+ * nothing on its own when the givens are stated once at the top of the problem.
+ */
+const drawProblemBlock = async (
+  doc: jsPDF, b: ProblemBlock, pageK: number, label: string, ink: InkBox[]
+) => {
+  drawProblemHeading(doc, b.heading, b.boxMm.y0, b.headingMm, ink, pageK, label);
+  if (b.text) {
+    // The stem is where figures live, so this is the call that must never put
+    // prose and a drawing on one canvas.
+    await drawAuthoredBlock(doc, b.text,
+      { x0: COLUMN_X0_MM, y0: round4(b.boxMm.y0 + b.headingMm), x1: COLUMN_X1_MM, y1: b.boxMm.y1 },
+      { fontPt: DESC_FONT_PT }, ink, pageK, `problem text ${label}`);
+  }
+};
+
 const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
   // The problem's heading and shared setup, above its first part. Without this
   // the sheet is not a self-contained assignment — "1(a)" means nothing on its
   // own when the givens are stated once at the top of the problem.
-  if (r.problemBlock) {
-    const b = r.problemBlock;
-    drawProblemHeading(doc, b.heading, b.boxMm.y0, b.headingMm, ink, r.pageK, r.partId);
-    if (b.text) {
-      // The stem is where figures live, so this is the call that must never put
-      // prose and a drawing on one canvas.
-      await drawAuthoredBlock(doc, b.text,
-        { x0: COLUMN_X0_MM, y0: round4(b.boxMm.y0 + b.headingMm), x1: COLUMN_X1_MM, y1: b.boxMm.y1 },
-        { fontPt: DESC_FONT_PT }, ink, r.pageK, `problem text ${r.partId}`);
-    }
-  }
+  if (r.problemBlock) await drawProblemBlock(doc, r.problemBlock, r.pageK, r.partId, ink);
 
   // Points first, so the title knows how much room is left.
   const points = `[${r.maxPoints} pts]`;
@@ -570,6 +583,10 @@ export const generateTemplate = async (assignment: Assignment): Promise<Generate
     drawQr(doc, payloads[k - 1]);
     drawHeaderLine(doc, assignmentId, k, layout.pageCount, ink);
     if (k === 1) await drawPage1Furniture(doc, assignment, layout, ink);
+    // A setup printed on a page of its own, ahead of the part it belongs to.
+    for (const b of layout.standaloneBlocks.filter(b => b.pageK === k)) {
+      await drawProblemBlock(doc, b.block, k, b.block.heading, ink);
+    }
     for (const r of layout.regions.filter(r => r.pageK === k)) await drawRegionPrompt(doc, r, ink);
   }
 

@@ -387,6 +387,15 @@ export interface TemplateLayout {
    * text down. Not reachable from ordinary prose; worth telling the author.
    */
   clamped: { partId: string; requestedMm: number; usedMm: number }[];
+  /**
+   * Problem setup printed on a page with no region on it. Happens only when a
+   * problem's first part is authored more answer space than fits beneath its own
+   * shared setup: the setup is printed here and the part takes the next page
+   * under a `(continued)` heading, because a region is never shrunk below its
+   * authored line count. Consumers that draw the sheet must draw these; nothing
+   * else refers to them, and they are not regions — nothing is cropped from them.
+   */
+  standaloneBlocks: { pageK: number; block: ProblemBlock }[];
 }
 
 /** One line of the problem heading above a problem's first part. */
@@ -497,6 +506,10 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
   const parts = enumerateParts(assignment);
   const regions: PlacedRegion[] = [];
   const clamped: TemplateLayout['clamped'] = [];
+  // A problem's shared setup printed on a page that carries no region of its
+  // own, because its first part could not fit beneath it and its authored answer
+  // space is not negotiable. Rare and deliberate — see case 2 below.
+  const standaloneBlocks: TemplateLayout['standaloneBlocks'] = [];
 
   // Page 1's furniture stack: title, print instruction, then the preamble. The
   // preamble is *rendered* at the narrower furniture width (it must stay clear
@@ -560,12 +573,78 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
       // Never smaller than the minimum box, whatever the author asked for.
       const wanted = Math.max(part.answerLines, MIN_ANSWER_LINES);
 
-      // Not everything fits and this page already has something on it: break
-      // rather than shrink, and try again at the top of a clean page. Nothing is
-      // clamped on this path — a page break is the cheap, correct answer, and
-      // reaching for the clamp first is how ordinary prose used to get trimmed
-      // for no reason but its position on the page.
-      if (fits < wanted && !opens) { newPage(); continue; }
+      // ---- What a better page could offer this part -----------------------
+      //
+      // A region is never shrunk below its authored line count. When this page
+      // cannot hold `wanted`, the question is not "how much can I give" but
+      // "is there a page that can", and there are exactly two things taking room
+      // away that a different page would not:
+      //
+      //   1. Page 1's furniture — the title, the print instruction and the
+      //      preamble sit above the first part, so page 1's run is shorter than
+      //      every other page's.
+      //   2. The problem's shared setup. It is printed once, above the problem's
+      //      first part, so a part that follows it on a `(continued)` page does
+      //      not pay for it again.
+      //
+      // Each is escapable once, which is also why this terminates: a part breaks
+      // at most twice before it is standing on the roomiest page that exists.
+      const cleanFits = (headingMm: number, stemMm: number) => Math.floor(
+        (REGION_BOTTOM_MM - FIRST_PROMPT_TOP_MM
+          - (headingMm + PROBLEM_BLOCK_GAP_MM + PROMPT_ROW_MM + RULE_GAP_MM
+             + BORDER_MM * 2 + REGION_PAD_MM * 2)
+          - stemMm - descMm + 1e-6) / WRITING_LINE_MM
+      );
+      // Keeping the whole problem block with the part, on a page of its own.
+      const fitsOnCleanPage = cleanFits(headingMm, blockTextMm);
+      // Leaving the shared setup behind and carrying on under a `(continued)`
+      // heading — the roomiest page this part can ever stand on.
+      const fitsWithoutStem = cleanFits(problemHeadingMm(`${part.problemHeading} (continued)`), 0);
+
+      if (fits < wanted) {
+        // This page already has something on it: break rather than shrink, and
+        // try again at the top of a clean page. Nothing is clamped on this path
+        // — a page break is the cheap, correct answer, and reaching for the
+        // clamp first is how ordinary prose used to get trimmed for no reason
+        // but its position on the page.
+        if (!opens) { newPage(); continue; }
+
+        // Case 1: a clean page is enough. On page 1 the thief is the furniture;
+        // the whole problem block moves with the part, so the setup still sits
+        // directly above the question.
+        //
+        // The test is `>= wanted`, not "more than this page offers". A break
+        // that improves the fit without achieving the authored count trades a
+        // blank page for a line or two and still ends in rule 3 — so it is not
+        // worth a sheet of paper.
+        if (fitsOnCleanPage >= wanted) { newPage(); continue; }
+
+        // Case 2: the shared setup itself is what does not leave room. Print it
+        // here, on its own, and take the part to the next page under a
+        // `(continued)` heading. This is the only way a part authored more lines
+        // than fit beneath its own stem can still be given them, and giving them
+        // is not optional — see the rule at the top of this function.
+        if (blockTextMm > 0 && fitsWithoutStem >= wanted) {
+          standaloneBlocks.push({
+            pageK,
+            block: {
+              heading, text: part.problemDescription, continued: false, headingMm,
+              boxMm: {
+                x0: COLUMN_X0_MM, y0: round4(cursor),
+                x1: COLUMN_X1_MM, y1: round4(cursor + headingMm + blockTextMm),
+              },
+            },
+          });
+          seenProblem.add(part.problemIndex);
+          newPage();
+          continue;
+        }
+
+        // Neither escape helps: the part's own prompt and question text plus its
+        // authored answer exceed the roomiest page there is. It takes the whole
+        // page — rule 3, unchanged. `fillPagesToBottom` then gives it every
+        // millimetre the page has, which is the most any page can offer.
+      }
 
       // A page of its own and *still* no room for the smallest legal box: the
       // question text is longer than a page. Last resort — trim the reservation,
@@ -646,7 +725,7 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
   fillPagesToBottom(regions);
 
   return {
-    parts, regions,
+    parts, regions, standaloneBlocks,
     pageCount: Math.max(1, pageK),
     preambleBoxMm,
     page1TopMm: round4(page1Top),

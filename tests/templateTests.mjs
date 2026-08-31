@@ -558,6 +558,93 @@ check('every problem starts a new page; no page mixes two problems', () => {
   assertEqual(l.regions.map(r => r.partId), ['1(a)', '1(b)', '1(c)', '2(a)', '2(b)'], 'a part was lost');
 });
 
+// ---------- a region is never shorter than its authored line count (2026-08-31) ----------
+// The regression fixture that did not exist, which is why a three-line reduction
+// on page 1 of the first homework of the year survived two rounds of review. The
+// shape that reproduces it: a problem whose shared setup is long enough that the
+// part beneath it cannot also have the lines its author asked for. Nothing in
+// the older fixtures has a stem, so nothing hit it.
+{
+  const SENTENCE = 'The bench supply is set to 12 V and the divider is built from two ' +
+    'resistors in series. Measure at the node between them. ';
+  // Long enough that a 14-line answer cannot also fit beneath it on any page:
+  // the setup has to be left behind. Sized empirically — at 10 repeats a clean
+  // page still holds both, which is the other branch and is tested below.
+  const STEM = SENTENCE.repeat(14);
+  const SHORTER_STEM = SENTENCE.repeat(10);
+
+  const withStem = (subs, stem = STEM) => ({
+    id: 'rh1', courseCode: 'ENG17', title: 'HW 1',
+    inputMode: 'handwritten', preamble: 'Show all working on paper.',
+    problems: [{ id: 'p0', name: 'Divider', description: stem, subsections: subs }],
+    createdAt: 1700000000000, updatedAt: 1700000000000,
+  });
+
+  const authoredOf = (l, regionId) =>
+    l.parts.find(p => p.regionId === regionId).answerLines;
+  const heightOf = r => round(r.nominalMm.y1 - r.nominalMm.y0);
+
+  check('a part authored more lines than fit under its stem still gets them', () => {
+    // 14 lines beneath a stem this long does not fit a page; before the fix the
+    // part was silently cut to what was left, with no break and no warning.
+    const l = lay.buildLayout(withStem([part('Node equations', 100, { answerLines: 14 })]));
+    const r = l.regions[0];
+    assertEqual(l.regions.length, 1, 'the part was split');
+    assert(heightOf(r) >= round(14 * lay.WRITING_LINE_MM) - 0.01,
+      `the region is ${heightOf(r)} mm; 14 authored lines need ${14 * lay.WRITING_LINE_MM} mm`);
+    // It got them by leaving the setup on a page of its own.
+    assertEqual(l.standaloneBlocks.length, 1, 'the shared setup was not printed on its own page');
+    assert(l.standaloneBlocks[0].pageK < r.pageK, 'the setup is not before the part it belongs to');
+    assert(l.standaloneBlocks[0].block.text.length > 0, 'the standalone block carries no setup text');
+  });
+
+  check('every region in a stem-heavy assignment is at least its authored height', () => {
+    const l = lay.buildLayout(withStem([
+      part('A', 25, { answerLines: 14 }),
+      part('B', 25, { answerLines: 8 }),
+      part('C', 25, { answerLines: 12 }),
+      part('D', 25, { answerLines: 6 }),
+    ]));
+    for (const r of l.regions) {
+      const asked = round(authoredOf(l, r.regionId) * lay.WRITING_LINE_MM);
+      assert(heightOf(r) >= asked - 0.01,
+        `${r.regionId} is ${heightOf(r)} mm, short of its authored ${asked} mm`);
+    }
+  });
+
+  check('the self-test refuses a template with a region below its authored height', async () => {
+    // The guard is a numbered check, so it refuses rather than warns. Proven by
+    // driving the layout through the real generator.
+    const t = await gen.generateTemplate(withStem([part('Node equations', 100, { answerLines: 14 })]));
+    assertEqual(t.selfTest.failures, [], 'the fixed layout does not pass its own self-test');
+    const named = t.selfTest.checks.find(c => /at least as tall as its authored line count/.test(c.name));
+    assert(named, 'the authored-height check is not in the self-test report at all');
+    assert(named.passed, `the authored-height check failed: ${named.detail}`);
+  });
+
+  check('a part that cannot fit the roomiest page takes the page rather than a blank one', () => {
+    // The escape only fires when the better page can actually deliver the
+    // authored count. 40 lines fit nowhere, so breaking would trade a blank
+    // sheet for a line or two and still end in "take the page" — one page.
+    const l = lay.buildLayout(withStem([part('Enormous', 100, { answerLines: 40 })], ''));
+    assertEqual(l.pageCount, 1, 'a part that outgrows every page burned an extra page first');
+    assertEqual(l.standaloneBlocks.length, 0, 'a setup page was emitted for an assignment with no setup');
+  });
+
+  check('the setup stays with its part when a clean page is enough', () => {
+    // Page 1 carries the furniture, so a part can fail there and fit on page 2
+    // WITH its setup. That must not leave the setup behind — the givens belong
+    // directly above the question whenever they can be, and a stranded setup
+    // costs a whole sheet of paper.
+    const l = lay.buildLayout(withStem([part('Node equations', 100, { answerLines: 14 })], SHORTER_STEM));
+    assertEqual(l.standaloneBlocks.length, 0,
+      'the setup was stranded on its own page when it could have travelled with the part');
+    assert(l.regions[0].problemBlock, 'the part lost its problem block entirely');
+    assert(heightOf(l.regions[0]) >= round(14 * lay.WRITING_LINE_MM) - 0.01,
+      'the part did not get its authored lines');
+  });
+}
+
 check('an answer is never split across pages — a part owns exactly one region', () => {
   // 40 authored lines is more than a page holds. It used to take what fitted and
   // spill the rest, which produced a 15 mm orphan on the next page: one writing
