@@ -258,19 +258,19 @@ Determine the cutoff frequency of the TE10 mode.
 
 ## 10. Handwritten templates (QR page format)
 
-For a handwritten assignment, **the page-format sheet is the assignment**. Export ZIP puts it in as `assignment.pdf` — there is no separate template to go and find, and no second PDF to pick between:
+For a handwritten assignment, **the page-format sheet is the assignment**. Export ZIP puts it in as `student/assignment.pdf` — there is no separate template to go and find, and no second PDF to pick between:
 
 | File in the ZIP | Handwritten | Electronic |
 |---|---|---|
-| `assignment.pdf` | **The page-format sheet**: four corner marks, the QR, the question text and one ruled answer area per part, on every page. Print this. | The usual assignment paper. |
-| `layout_{TemplateID}.csv` | The sidecar map the Submission app crops by. Its content hash is written into every page's QR. | — |
-| `template.pdf` | — *(not exported: the sheet above already is the answer surface, and a second boxed one only invites printing the wrong PDF)* | The boxed answer-region sheet, for the Gradescope outline. |
+| `student/assignment.pdf` | **The page-format sheet**: four corner marks, the QR, the question text and one ruled answer area per part, on every page. Print this. | The usual assignment paper. |
+| `student/layout_{TemplateID}.csv` | The sidecar map the Submission app crops by. Its content hash is written into every page's QR. | — |
+| `instructor/template.pdf` | — *(not exported: the sheet above already is the answer surface, and a second boxed one only invites printing the wrong PDF)* | The boxed answer-region sheet, for setting up the Gradescope outline — an instructor task, so it is not a student file. |
 
-`assignment_spec.json`, `assignment.html`, `assignment.tex`, the grading rubric and the grader document are unchanged in both modes.
+The spec, the two readable documents, the grading rubric, the grader document, the authoring backup and the `.md` are in both modes — see §13 for the folder split and what may be handed out.
 
 The editor's **QR Template** button emits the same sheet plus its map as a standalone ZIP, for regenerating after a layout edit without rebuilding the whole export.
 
-**The PDF and the map must travel together.** The PDF is useless without the map its QR hashes to, and the Submission app refuses to crop when the hash does not match — which is the point: a stale map would otherwise register perfectly and cut the wrong rectangles with no error anywhere.
+**The PDF and the map must travel together** — which is why both are in `student/`. The PDF is useless without the map its QR hashes to, and the Submission app refuses to crop when the hash does not match — which is the point: a stale map would otherwise register perfectly and cut the wrong rectangles with no error anywhere.
 
 The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Page/GradeBridge_Page_Format_v1.md`, transcribed into `services/pageFormat.ts`, and enforced by the spec 8.7 self-test that runs on every generation — a template that fails any check is not emitted at all.
 
@@ -424,8 +424,8 @@ A figure is separated from the prose around it by one blank line, which is the f
 
 ## 12. Who reads each exported artifact
 
-**The Assignment Maker describes the work; the grading system decides how to grade it; and the student
-spec carries only what the student is allowed to see.**
+**The Assignment Maker describes the work; the grading system decides how to grade it; the student spec
+carries only what the student is allowed to see; and exactly one file restores everything.**
 
 Both halves of that sentence are here because both were broken on the same day, and both were found by
 reading an exported artifact that never said who reads it.
@@ -457,11 +457,13 @@ the artifacts never said who reads them. So, per artifact:
 
 | Artifact | Read by | Authoritative for | Never carries |
 |---|---|---|---|
-| `assignment_spec.json` | the Student Submission app | what the student is asked, and how they are allowed to answer it | **grading prompts, grader notes, answer keys, reference solutions, grading-resource settings** — anything a student must not see |
+| `student/assignment_spec.json` | the Student Submission app | what the student is asked, and how they are allowed to answer it | **grading prompts, grader notes, answer keys, reference solutions, grading-resource settings** — anything a student must not see |
+| `instructor/{stem}_authoring_backup.json` | this app, on Import JSON | **restoring an assignment completely** — it is the only artifact that does | *(no restriction: it is the whole assignment, and it is why the ZIP must never be given to students)* |
 | `layout_{TemplateID}.csv` | the page consumer that crops (§10) | **where** each region is on the page — nothing else | anything a grader needs in order to grade |
 | `{stem}_grading_rubric.json` | the grading system | what each item asks, what it is worth, what a grader is told, and the answer's **modality** | **model names, temperature, token budgets, or any other grading-system resource decision** |
 | `{stem}_grader_document.html` | a human TA, on screen or on paper | the answer key and the rubric in readable form | anything machine-parsed — nothing may depend on its markup |
 | `assignment.pdf` | the student, on paper | the whole assignment | identity fields — no name, ID or date blank (§10) |
+| `instructor/{stem}.md` | this app, on Import Markdown; and a human editing it | the authored source — the format an author actually writes | *(it carries the grading prompts, so it is instructor-only)* |
 | `assignment.html`, `assignment.tex` | a human, for reading and hand-editing | the assignment as a document | anything the other artifacts are authoritative for |
 
 The grading system is **told the type of question and given the supporting materials, and allocates its
@@ -544,3 +546,76 @@ open**: those parts omit the field rather than misdeclare it (above), and giving
 would need the same authoring decision `hybrid` needs. Neither gap blocks anything — no consumer routes
 on modality for an electronic assignment, and there is no layout map for one to disagree with.
 
+---
+
+## 13. The export ZIP: what restores your work, and what must never leave your hands
+
+**The export ZIP is for the instructor. It MUST NOT be given to students.** Four of its files contain
+the answer key. It is laid out so that saying so is unnecessary:
+
+```
+00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt   generated at export time, names every file
+student/                                    the ONLY files a student may receive
+  assignment.pdf                            the sheet they print and write on
+  assignment_spec.json                      loaded by the Student Submission app
+  layout_{TemplateID}.csv                   handwritten only; must travel with the PDF
+instructor/
+  {stem}_authoring_backup.json              THE BACKUP — restores everything
+  {stem}.md                                 the authored source
+  {stem}_grading_rubric.json                for the autograder
+  {stem}_grader_document.html               for you and your TAs
+  assignment.html, assignment.tex           readable/hand-editable copies
+  template.pdf                              electronic only; for the Gradescope outline
+```
+
+The folders exist because the prose alone was not enough: having removed the answer key from
+`assignment_spec.json`, the largest remaining disclosure path is an instructor handing out the whole
+ZIP, and "give students the student folder" is a thing a person can actually do correctly. The notice
+is **generated from the entry list**, never hand-maintained — a notice that drifts out of step with
+the folder is worse than none, because it will be believed. A test asserts every file it names is
+present, that it names all four answer-bearing files, and that it never tells anyone to hand out one
+of them.
+
+Filenames are unchanged, which is what the briefs and the Gradescope setup instructions actually name.
+Nothing in the suite unzips this archive programmatically, so the folders break no consumer.
+
+### Which file restores your work
+
+**`instructor/{stem}_authoring_backup.json`, and only that one.** It holds the entire authoring object,
+unencrypted, and Import JSON restores it exactly. The others each lose something, and until 2026-08-31
+they lost it *silently* — the import succeeded, nothing warned, and the assignment opened looking
+complete:
+
+| Route | Restores | Loses |
+|---|---|---|
+| `{stem}_authoring_backup.json` → Import JSON | **everything** | — |
+| `{stem}.md` → Import Markdown | prompts byte-for-byte, `answerLines`, `handwrittenGradingMode`, `inputMode`, `pageFormatId`, `aiFeedback` | `targetPoints`, `coursePublicKey`, `config` |
+| `assignment_spec.json` → Import JSON | what a student needs | `aiGradingPrompt`, `graderNote`, `answerLines`, `handwrittenGradingMode`, `targetPoints` |
+
+Two of those losses are worse than they look:
+
+- **`answerLines`.** Every part reverts to the six-line default, so the sheet repaginates and
+  `layout_id` moves. You do not get your assignment back; you get a different one that looks like
+  yours.
+- **`targetPoints`, and the damage is delayed by one cycle.** The `.md` carries already-scaled point
+  values, so the reimport reads 200 and everything looks right. The *target* is gone, so the NEXT
+  export normalises to the default 100 and halves every point. The instructor sees a correct
+  assignment, exports it, and gets a different one.
+
+**Import now names what a file does not carry**, at the one moment the instructor can act on it. It
+reports absence rather than inferring it from the file's kind, so an assignment that genuinely has no
+grading prompts is not warned about prompts it never had — a warning nobody believes is silent loss
+with extra steps.
+
+### Why completeness is one file's job
+
+Each artifact gets one job, so the guarantees stop fighting each other: the spec is **minimal**, the
+`.md` is **human-writable**, the backup is **complete**. Completeness is now one property of one file
+with one test — a round trip over a fixture that carries every field the type declares, checked
+against `types.ts` itself so it fails when a field is added and not carried. Before, completeness was
+something that had to be re-verified on two other routes every time anyone touched `Assignment`, which
+is a guarantee that decays quietly.
+
+The backup is **unencrypted**, deliberately and consistently: the grader document and the grading
+rubric sit beside it in the clear and are already full of answers. Encrypting a backup only makes it
+harder to recover from — and recovery is the entire point of the file.

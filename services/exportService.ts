@@ -4,6 +4,7 @@ import { encryptJson, normalizeCoursePublicKey, validateCoursePublicKey } from '
 import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
 import { stemForGrader } from './figureText';
 import { generateTemplate } from './templateGenerator';
+import { buildAuthoringBackup } from './authoringBackup';
 import { apportionPoints } from './pointsService';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
@@ -989,9 +990,100 @@ export const buildAssignmentSpec = async (assignment: Assignment): Promise<Assig
   return spec as unknown as Assignment;
 };
 
+// =====================================================
+// THE EXPORT ZIP
+// =====================================================
+// Two folders and a notice at the root:
+//
+//   00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt
+//   student/      the only files a student may receive
+//   instructor/   everything else — three of which contain the answer key
+//
+// The structure exists so that "give students the student folder" is
+// unambiguous. Having just removed the answer key from `assignment_spec.json`,
+// the largest remaining disclosure path is an instructor handing out the whole
+// ZIP, and prose in a README does not help the person who has just dragged a
+// folder into Canvas. The folders say what the prose says.
+//
+// Nothing in the suite unzips this archive programmatically — it is an
+// instructor's download that they unpack and distribute pieces from — so the
+// folders break no consumer. Filenames are unchanged, which is what the briefs
+// and the Gradescope setup instructions actually name.
+
+export const STUDENT_DIR = 'student/';
+export const INSTRUCTOR_DIR = 'instructor/';
+export const DISTRIBUTION_NOTICE_NAME = '00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt';
+
 /**
- * Everything that goes in the export ZIP, as filename → content. Split out from
- * the download so the contents can be asserted without a browser.
+ * The notice is GENERATED from the entry list, never hand-maintained: a notice
+ * that drifts out of step with the folder is worse than none, because it will
+ * be believed. Anything added to `instructor/` that holds answers must be added
+ * to `ANSWER_BEARING` in the same edit, and a test asserts every name here is
+ * really in the ZIP.
+ */
+const ANSWER_BEARING: Array<[suffix: string, what: string]> = [
+  ['_grader_document.html',   'the answer key and rubrics, for you and your TAs'],
+  ['_grading_rubric.json',    'the same rubrics, for the autograder'],
+  ['_authoring_backup.json',  'the complete assignment, rubrics included'],
+  ['.md',                     'the authored source, rubrics included'],
+];
+
+const buildDistributionNotice = (names: string[]): string => {
+  const base = (n: string) => n.slice(n.lastIndexOf('/') + 1);
+  const instructor = names.filter(n => n.startsWith(INSTRUCTOR_DIR));
+
+  // The student list is ordered by what the instructor does with it, not by
+  // insertion order: print the sheet, hand over the spec, keep the map with the
+  // PDF. Anything unrecognised is still listed — a student file silently
+  // missing from this list is the failure the notice exists to prevent.
+  const STUDENT_ORDER = ['assignment.pdf', 'assignment_spec.json'];
+  const studentWhat = (b: string) =>
+      b === 'assignment.pdf' ? 'the sheet they print and write on'
+    : b === 'assignment_spec.json' ? 'loaded by the Student Submission app'
+    : b.startsWith('layout_') ? 'the map the app crops by; it must travel with the PDF'
+    : '';
+  const rank = (b: string) => {
+    const i = STUDENT_ORDER.indexOf(b);
+    return i === -1 ? STUDENT_ORDER.length : i;
+  };
+  const studentRows = names
+    .filter(n => n.startsWith(STUDENT_DIR)).map(base)
+    .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+    .map(b => [b, studentWhat(b)] as const);
+
+  const answerRows = ANSWER_BEARING
+    .map(([suffix, what]) => {
+      const hit = instructor.find(n => base(n).endsWith(suffix));
+      return hit ? ([base(hit), what] as const) : null;
+    })
+    .filter(Boolean) as ReadonlyArray<readonly [string, string]>;
+
+  // One column width for the whole notice, taken from the longest name actually
+  // in it, so a long course stem does not run the names into the descriptions.
+  const width = Math.max(...[...answerRows, ...studentRows].map(([n]) => n.length)) + 2;
+  const row = ([n, what]: readonly [string, string]) => ('  ' + n.padEnd(width) + what).trimEnd();
+
+  const count = studentRows.length === 1 ? '1 file' : studentRows.length + ' files';
+
+  return [
+    'INSTRUCTOR ONLY. DO NOT GIVE THIS FOLDER TO STUDENTS.',
+    '',
+    'This export contains the answer key.',
+    '',
+    'Files here that contain answers (in ' + INSTRUCTOR_DIR + '):',
+    ...answerRows.map(row),
+    '',
+    'Give students only these ' + count + ', from ' + STUDENT_DIR + ':',
+    ...studentRows.map(row),
+    '',
+    'Keep everything else. It is your backup and your grading material.',
+    '',
+  ].join('\n');
+};
+
+/**
+ * Everything that goes in the export ZIP, as path → content. Split out from the
+ * download so the contents can be asserted without a browser.
  *
  * **`assignment.pdf` is the one PDF.** For a handwritten assignment it *is* the
  * page-format sheet — the QR, the marks, the question text and the ruled writing
@@ -1005,17 +1097,28 @@ export const buildExportEntries = async (
   const handwritten = assignment.inputMode === 'handwritten';
 
   const entries: Record<string, Blob | string> = {
-    // Spec JSON — encoded with AES-256-GCM so students cannot read or edit it.
-    // The Student Submission app decodes it transparently on load; Import JSON
-    // here handles encoded files too.
-    'assignment_spec.json': await encryptJson(await buildAssignmentSpec(assignment)),
-    'assignment.html': await generateHTML(assignment),
+    // ---- student/ : the only files a student may receive --------------------
+    // Spec JSON — encoded with AES-256-GCM so students cannot casually read or
+    // edit it, and built from a whitelist so it carries no grading material at
+    // all. The Student Submission app decodes it on load; Import JSON here
+    // handles encoded files too.
+    [`${STUDENT_DIR}assignment_spec.json`]: await encryptJson(await buildAssignmentSpec(assignment)),
+
+    // ---- instructor/ : backup, grading material, readable documents ---------
+    // THE BACKUP. The one file whose job is completeness — see
+    // services/authoringBackup.ts for why it exists and why it is unencrypted.
+    [`${INSTRUCTOR_DIR}${stem}_authoring_backup.json`]: buildAuthoringBackup(assignment),
+    // The authored source. It was only ever a separate download before, which
+    // meant the backup the app recommends did not contain the more complete of
+    // the two restore routes.
+    [`${INSTRUCTOR_DIR}${stem}.md`]: assignmentToMd(assignment),
+    [`${INSTRUCTOR_DIR}assignment.html`]: await generateHTML(assignment),
     // Editable LaTeX source, for an instructor who wants to hand-tune the paper.
-    'assignment.tex': generateLaTeX(assignment),
+    [`${INSTRUCTOR_DIR}assignment.tex`]: generateLaTeX(assignment),
     // Private — for the autograder only.
-    [`${stem}_grading_rubric.json`]: JSON.stringify(generateGradingRubric(assignment), null, 2),
+    [`${INSTRUCTOR_DIR}${stem}_grading_rubric.json`]: JSON.stringify(generateGradingRubric(assignment), null, 2),
     // Private — instructor/TA reference with rubrics and answer keys.
-    [`${stem}_grader_document.html`]: await generateGraderHTML(assignment),
+    [`${INSTRUCTOR_DIR}${stem}_grader_document.html`]: await generateGraderHTML(assignment),
   };
 
   if (handwritten) {
@@ -1023,18 +1126,22 @@ export const buildExportEntries = async (
     // 8.7 self-test and throws rather than emitting a non-compliant template, so
     // a failure stops the whole export — which is the intent.
     const template = await generateTemplate(assignment);
-    entries['assignment.pdf'] = template.pdf;
+    entries[`${STUDENT_DIR}assignment.pdf`] = template.pdf;
     // The sidecar the Submission app crops by. Its filename carries the template
-    // id because that is what the printed QR points at; do not rename it.
-    entries[template.csvFilename] = template.csv;
+    // id because that is what the printed QR points at; do not rename it. It
+    // sits beside the PDF because the two must travel together — the app refuses
+    // to crop when the QR's hash does not match the map.
+    entries[`${STUDENT_DIR}${template.csvFilename}`] = template.csv;
   } else {
-    entries['assignment.pdf'] = await createPDF(assignment, 'student');
-    // The boxed answer-region sheet, for setting up the Gradescope outline.
-    // Handwritten has no use for it — the page-format sheet already is the
-    // answer surface, and a second boxed one only invites printing the wrong PDF.
-    entries['template.pdf'] = await createPDF(assignment, 'template');
+    entries[`${STUDENT_DIR}assignment.pdf`] = await createPDF(assignment, 'student');
+    // The boxed answer-region sheet, for setting up the Gradescope outline —
+    // which is an instructor task, so it is not in student/. Handwritten has no
+    // use for it: the page-format sheet already is the answer surface, and a
+    // second boxed one only invites printing the wrong PDF.
+    entries[`${INSTRUCTOR_DIR}template.pdf`] = await createPDF(assignment, 'template');
   }
 
+  entries[DISTRIBUTION_NOTICE_NAME] = buildDistributionNotice(Object.keys(entries));
   return entries;
 };
 

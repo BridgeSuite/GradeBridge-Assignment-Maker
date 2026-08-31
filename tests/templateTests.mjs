@@ -1201,46 +1201,58 @@ check('item 4: authored text with Greek and math is not silently garbled', async
     })),
   });
 
+  // Paths gained a student/ | instructor/ split on 2026-08-31 so that "give
+  // students the student folder" is unambiguous. Filenames did not change.
+  const base = n => n.slice(n.lastIndexOf('/') + 1);
+  const named = (entries, name) => Object.keys(entries).find(n => base(n) === name);
+
   check('handwritten: assignment.pdf IS the QR template, and there is no second PDF', async () => {
     const pdfs = Object.keys(hwEntries).filter(n => n.endsWith('.pdf'));
-    assertEqual(pdfs, ['assignment.pdf'], 'a handwritten export should contain exactly one PDF');
+    assertEqual(pdfs, ['student/assignment.pdf'], 'a handwritten export should contain exactly one PDF');
     // Same bytes as the standalone generator produces — not a lookalike.
     const direct = await gen.generateTemplate(appendixB);
-    const a = Buffer.from(await hwEntries['assignment.pdf'].arrayBuffer());
+    const a = Buffer.from(await hwEntries['student/assignment.pdf'].arrayBuffer());
     const b = Buffer.from(await direct.pdf.arrayBuffer());
     assertEqual(a.length, b.length, 'assignment.pdf is not the template PDF');
     assert(a.subarray(0, 2000).equals(b.subarray(0, 2000)), 'assignment.pdf differs from the template PDF');
   });
 
   check('handwritten: no template.pdf — it serves no purpose on a page-format sheet', () =>
-    assert(!('template.pdf' in hwEntries), 'the boxed answer-region sheet is still being exported'));
+    assert(!named(hwEntries, 'template.pdf'), 'the boxed answer-region sheet is still being exported'));
 
-  check('handwritten: the sidecar travels with it, under the name the QR points at', () => {
+  check('handwritten: the sidecar travels with the PDF, under the name the QR points at', () => {
     const csv = Object.keys(hwEntries).filter(n => n.endsWith('.csv'));
-    assertEqual(csv, [`layout_${t.assignmentId}.csv`], 'the layout map is missing or misnamed');
+    assertEqual(csv, [`student/layout_${t.assignmentId}.csv`],
+      'the layout map is missing, misnamed, or not beside the PDF it must travel with');
   });
 
   check('handwritten: the QR template PDF really does carry a QR and four marks', async () => {
-    const bytes = Buffer.from(await hwEntries['assignment.pdf'].arrayBuffer()).toString('latin1');
+    const bytes = Buffer.from(await hwEntries['student/assignment.pdf'].arrayBuffer()).toString('latin1');
     const rects = [...bytes.matchAll(/([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+) re/g)];
     assert(rects.length > 100, 'assignment.pdf has too few drawing ops to contain a QR');
     assert(!/Gradescope Answer Region/.test(bytes), 'the old boxed answer region leaked into it');
   });
 
-  check('electronic exports are untouched: assignment.pdf, template.pdf, no layout map', () => {
+  check('electronic: assignment.pdf for the student, template.pdf for the instructor, no layout map', () => {
     assertEqual(Object.keys(elEntries).filter(n => n.endsWith('.pdf')).sort(),
-      ['assignment.pdf', 'template.pdf'], 'the electronic PDF pair changed');
+      ['instructor/template.pdf', 'student/assignment.pdf'], 'the electronic PDF pair changed');
     assertEqual(Object.keys(elEntries).filter(n => n.endsWith('.csv')), [],
       'an electronic export gained a layout map');
+    // template.pdf sets up the Gradescope outline, which is an instructor task.
+    assert(!Object.keys(elEntries).includes('student/template.pdf'),
+      'the Gradescope outline sheet is in the student folder');
   });
 
   check('both modes still carry the spec, the html, the tex, the rubric and the grader doc', () => {
     for (const [label, entries] of [['handwritten', hwEntries], ['electronic', elEntries]]) {
       for (const name of ['assignment_spec.json', 'assignment.html', 'assignment.tex']) {
-        assert(name in entries, `${label}: ${name} is missing`);
+        assert(named(entries, name), `${label}: ${name} is missing`);
       }
       assert(Object.keys(entries).some(n => n.endsWith('_grading_rubric.json')), `${label}: no rubric`);
       assert(Object.keys(entries).some(n => n.endsWith('_grader_document.html')), `${label}: no grader doc`);
+      assert(Object.keys(entries).some(n => n.endsWith('_authoring_backup.json')), `${label}: no authoring backup`);
+      assert(Object.keys(entries).some(n => n.endsWith('.md')), `${label}: no .md`);
+      assert(named(entries, '00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt'), `${label}: no distribution notice`);
     }
   });
 }

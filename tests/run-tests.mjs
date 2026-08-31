@@ -139,6 +139,7 @@ const pointsSvc = await loadModule(join(REPO, 'services', 'pointsService.ts'), '
 const figures = await loadModule(join(REPO, 'services', 'figureBlocks.ts'), 'figureBlocks.mjs');
 const layoutSvc = await loadModule(join(REPO, 'services', 'templateLayout.ts'), 'templateLayout.mjs');
 const retiredSvc = await loadModule(join(REPO, 'services', 'retiredTypes.ts'), 'retiredTypes.mjs');
+const backupSvc = await loadModule(join(REPO, 'services', 'authoringBackup.ts'), 'authoringBackup.mjs');
 
 // Same module, but with a real jsPDF so the PDF can actually be inspected.
 const exportPdfSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportServicePdf.mjs', {
@@ -156,6 +157,7 @@ const { splitFigures, figureSegsToSource, hasFigure, trimAroundFigures, figureLa
         figurePlaceholder, sanitizeSvg, namespaceSvgIds, prepareSvgForInline } = figures;
 const { estimateDescLines } = layoutSvc;
 const { degradeRetiredTypes } = retiredSvc;
+const { buildAuthoringBackup, isAuthoringBackup, readAuthoringBackup, describeImportGaps } = backupSvc;
 
 // ---------- helpers ----------
 const spkiPem = (der) =>
@@ -1453,18 +1455,19 @@ ${r.problem_statement}`);
     skip('export contract: answer_modality present and agrees with is_drawing',
       'no export entries');
   } else {
-    const csvName = Object.keys(entries).find(n => /^layout_.*\.csv$/.test(n));
+    const csvName = Object.keys(entries).find(n => /\/layout_.*\.csv$/.test(n));
     const rubricName = Object.keys(entries).find(n => n.endsWith('_grading_rubric.json'));
+    const specName = Object.keys(entries).find(n => n.endsWith('assignment_spec.json'));
 
     check('export contract: the ZIP holds a rubric, an encrypted spec and a layout map', () => {
       assert(rubricName, `no grading rubric in: ${Object.keys(entries).join(', ')}`);
       assert(csvName, `no layout map in: ${Object.keys(entries).join(', ')}`);
-      assert(typeof entries['assignment_spec.json'] === 'string', 'no spec JSON');
+      assert(typeof entries[specName] === 'string', 'no spec JSON');
     });
 
     const rubricJson = entries[rubricName];
     const layoutCsv = entries[csvName];
-    const specJson = JSON.stringify(await decryptJson(entries['assignment_spec.json']));
+    const specJson = JSON.stringify(await decryptJson(entries[specName]));
 
     check('export contract: no exported artifact carries a model, temperature or token budget', () => {
       for (const [label, text] of [['grading rubric', rubricJson], ['assignment spec', specJson]]) {
@@ -1544,11 +1547,12 @@ ${r.problem_statement}`);
         const body = src.match(new RegExp(`export interface ${iface} \\{([\\s\\S]*?)\\n\\}`))[1];
         return [...body.matchAll(/^\s*(\w+)\??:/gm)].map(m => m[1]);
       };
-      // Every field the student app declares must be one we are allowed to send
-      // (or one it never reads — dueDate/dueTime are declared there and read
-      // nowhere, and the Maker strips them on load).
-      const declared = fieldsOf('Assignment').filter(f => !['dueDate', 'dueTime'].includes(f));
-      const missing = declared.filter(f => !STUDENT_SPEC_FIELDS.assignment.includes(f));
+      // Every field the student app declares must be one we are allowed to send.
+      // There is no exemption list any more: `dueDate` / `dueTime` were the only
+      // entries and were deleted from both repos on 2026-08-31, being required
+      // fields that were never present. If this needs an exemption again, the
+      // question to ask first is whether the field should exist at all.
+      const missing = fieldsOf('Assignment').filter(f => !STUDENT_SPEC_FIELDS.assignment.includes(f));
       assertEqual(missing, [], 'the student app declares an assignment field the whitelist does not send');
       const subMissing = fieldsOf('Subsection').filter(f => !STUDENT_SPEC_FIELDS.subsection.includes(f));
       assertEqual(subMissing, [], 'the student app declares a sub-part field the whitelist does not send');
@@ -1654,6 +1658,264 @@ ${r.problem_statement}`);
     assert(!('aiGradingConfig' in spec), 'the stale grader config rode back out in the spec');
     assert(!/ai_grading_config|claude-/.test(rubric), 'the stale grader config reached the rubric');
   });
+}
+
+// =====================================================
+// 10. The authoring backup — the one file that restores everything
+// =====================================================
+// The privacy notice tells instructors the export ZIP is their backup, and
+// until 2026-08-31 nothing in it restored an assignment completely:
+// `assignment_spec.json` correctly drops the grading material and `answerLines`
+// (losing which repaginates the sheet and moves `layout_id`), `Export .md`
+// drops `targetPoints`, `coursePublicKey` and `config`, and the ZIP did not
+// contain the `.md` at all. Completeness is now one property of one file, and
+// this is its one test.
+{
+  // A fixture carrying EVERY field the type allows. This is the point of the
+  // round trip: it must fail when a field is added to `Assignment` and not
+  // carried, so the guarantee cannot rot into "complete as of whenever".
+  //
+  // It is deliberately a SUPERSET rather than a valid authoring combination — a
+  // handwritten part does not really carry `maxImages` or `imageGradingMode`.
+  // The backup is a container and must round-trip whatever it is handed; the
+  // check below compares the fixture against `types.ts` so a new field cannot
+  // slip past by being one nobody thought to put in it.
+  const everything = {
+    id: 'restore-1',
+    courseCode: 'ENG17',
+    title: 'HW 1',
+    inputMode: 'handwritten',
+    pageFormatId: 'ENG17HW1',
+    aiFeedback: true,
+    preamble: 'Show all working on paper.',
+    targetPoints: 200,
+    // A real key when the fixture is available, so the spec-building checks
+    // below exercise the validating path rather than a placeholder.
+    coursePublicKey: fixture ? fixture.public_key_spki_pem : '-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----\n',
+    problems: [{
+      id: 'p1', name: 'Divider', description: 'A stem with a $V_s$ in it.',
+      subsections: [
+        {
+          id: 's1', name: 'Node equations', description: 'Write them.',
+          points: 120, submissionType: 'Handwritten', handwrittenGradingMode: 'ai',
+          answerLines: 14, isDrawing: false, maxImages: 2, imageGradingMode: 'human',
+          config: 'extra-data-here',
+          aiGradingPrompt: 'Required elements: (1) one equation per node. REFERENCE: the answer is 1.2 V.',
+          graderNote: 'Look for KCL at both nodes.',
+          minWords: 100,
+        },
+        {
+          id: 's2', name: 'Field sketch', description: 'Sketch it.',
+          points: 80, submissionType: 'Handwritten', handwrittenGradingMode: 'human',
+          answerLines: 20, isDrawing: true,
+          graderNote: 'Arrows normal to the walls.',
+        },
+      ],
+    }],
+    createdAt: 1700000000000,
+    updatedAt: 1700000000123,
+  };
+
+  check('authoring backup: the round trip is deep-equal, every field carried', () => {
+    const restored = readAuthoringBackup(JSON.parse(buildAuthoringBackup(everything)));
+    assertEqual(restored, everything, 'the authoring backup lost or altered something');
+  });
+
+  // The guarantee has to be checked against the TYPE, not against the fixture,
+  // or it decays the moment someone adds a field the fixture forgot.
+  check('authoring backup: the fixture covers every field `Assignment` declares', () => {
+    const src = readFileSync(resolve(REPO, 'types.ts'), 'utf8');
+    const fieldsOf = (iface) => {
+      const body = src.match(new RegExp(`export interface ${iface} \\{([\\s\\S]*?)\\n\\}`))[1];
+      return [...body.matchAll(/^\s{2}(\w+)\??:/gm)].map(m => m[1]);
+    };
+    const missing = fieldsOf('Assignment').filter(f => !(f in everything));
+    assertEqual(missing, [],
+      'the fixture does not exercise every Assignment field — the round trip cannot prove completeness');
+    const subFields = fieldsOf('Subsection');
+    const covered = everything.problems.flatMap(p => p.subsections).flatMap(Object.keys);
+    assertEqual(subFields.filter(f => !covered.includes(f)), [],
+      'the fixture does not exercise every Subsection field');
+  });
+
+  check('authoring backup: a field added to the assignment and not carried is caught', () => {
+    // The failure mode the round trip exists to catch, driven deliberately.
+    const withNewField = { ...everything, someFieldAddedLater: 'value' };
+    const stripped = JSON.parse(buildAuthoringBackup(withNewField));
+    delete stripped.assignment.someFieldAddedLater;
+    let caught = false;
+    try { assertEqual(readAuthoringBackup(stripped), withNewField, 'x'); } catch { caught = true; }
+    assert(caught, 'a dropped field passed the deep-equality check');
+  });
+
+  check('authoring backup: it is self-describing, and a student spec is not mistaken for one', async () => {
+    const backup = JSON.parse(buildAuthoringBackup(everything));
+    assert(isAuthoringBackup(backup), 'a backup is not recognised as one');
+    const spec = await buildAssignmentSpec(makeAssignment());
+    assert(!isAuthoringBackup(spec), 'a student spec was recognised as a backup');
+    assert(!isAuthoringBackup({}), 'an empty object was recognised as a backup');
+    let threw = null;
+    try { readAuthoringBackup(spec); } catch (err) { threw = err; }
+    assert(threw, 'reading a non-backup as a backup did not throw');
+  });
+
+  check('authoring backup: a newer format version is refused, not silently half-read', () => {
+    const future = { ...JSON.parse(buildAuthoringBackup(everything)), format_version: 99 };
+    let threw = null;
+    try { readAuthoringBackup(future); } catch (err) { threw = err; }
+    assert(threw && /newer version/.test(threw.message), `expected a version refusal, got ${threw && threw.message}`);
+  });
+
+  // Acceptance 3: the delayed damage. The .md carries already-scaled points, so
+  // a targetPoints-losing route looks right on reimport and halves everything on
+  // the NEXT export. The backup must not have that shape.
+  check('authoring backup: targetPoints survives, so the next export does not halve the points', () => {
+    const restored = readAuthoringBackup(JSON.parse(buildAuthoringBackup(everything)));
+    assertEqual(restored.targetPoints, 200, 'targetPoints was lost — the next export would normalise to 100');
+    assertEqual(restored.coursePublicKey, everything.coursePublicKey, 'the course key was lost — gb2 would revert to gb1');
+    const total = restored.problems.flatMap(p => p.subsections).reduce((n, s) => n + s.points, 0);
+    assertEqual(total, 200, 'the points did not come back at the target total');
+  });
+
+  // What Import JSON says when it is handed the lossy file. Run against a REAL
+  // student spec, so the message is checked against what the whitelist actually
+  // drops rather than against a guess about it.
+  const gapCheck = fixture ? check
+    : (name) => skip(name, 'needs the gb2 fixture key to build a spec');
+  gapCheck('authoring backup: a student spec import names what it is about to lose', async () => {
+    const spec = await buildAssignmentSpec(everything);
+    const joined = describeImportGaps(spec).join(' | ');
+    assert(joined.length > 0, 'importing a student spec reported no loss at all');
+    for (const expected of ['grading prompts', 'grader notes', 'answer-space', 'point target']) {
+      assert(joined.includes(expected), `the warning does not mention ${expected}: ${joined}`);
+    }
+    // coursePublicKey IS in the student whitelist, so it is NOT lost — and the
+    // message must not claim it is. A warning that overstates gets ignored.
+    assert(!joined.includes('course public key'),
+      `the warning claims the course key is lost, but the spec carries it: ${joined}`);
+  });
+
+  check('authoring backup: a complete file is not warned about, and absence is not invented', () => {
+    assertEqual(describeImportGaps(everything), [], 'a complete assignment was warned about');
+    // An assignment that genuinely never had prompts is not told it lost them...
+    const plain = { ...makeAssignment(), targetPoints: 100, coursePublicKey: 'x' };
+    const gaps = describeImportGaps(plain).join(' | ');
+    assert(!gaps.includes('point target'), 'a present targetPoints was reported as missing');
+    assert(!gaps.includes('course public key'), 'a present coursePublicKey was reported as missing');
+  });
+}
+
+// =====================================================
+// 11. The ZIP is split, and the notice inside it is generated
+// =====================================================
+{
+  let entries = null;
+  try { entries = await exportPdfSvc.buildExportEntries(makeAssignment({ targetPoints: 100 })); }
+  catch { /* reported below */ }
+
+  if (!entries) {
+    skip('export ZIP: student/ and instructor/ split', 'buildExportEntries threw');
+  } else {
+    const names = Object.keys(entries);
+    const NOTICE = '00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt';
+
+    check('export ZIP: every entry is in student/ or instructor/, except the notice', () => {
+      const stray = names.filter(n => n !== NOTICE && !n.startsWith('student/') && !n.startsWith('instructor/'));
+      assertEqual(stray, [], 'an entry sits outside both folders');
+      assert(names.includes(NOTICE), `the notice is missing from: ${names.join(', ')}`);
+    });
+
+    check('export ZIP: student/ holds only what a student may receive', () => {
+      const student = names.filter(n => n.startsWith('student/')).map(n => n.slice('student/'.length));
+      // An electronic assignment: the PDF and the spec, nothing else.
+      assertEqual(student.sort(), ['assignment.pdf', 'assignment_spec.json'],
+        'the student folder holds something it should not');
+    });
+
+    check('export ZIP: the backup and the .md are both in instructor/', () => {
+      assert(names.some(n => n.startsWith('instructor/') && n.endsWith('_authoring_backup.json')),
+        `no authoring backup in: ${names.join(', ')}`);
+      assert(names.some(n => n.startsWith('instructor/') && n.endsWith('.md')),
+        `no .md in: ${names.join(', ')}`);
+      // Guard 3: the backup must never be the file the Submission app loads.
+      assert(!names.some(n => n.startsWith('student/') && n.includes('authoring_backup')),
+        'the authoring backup is in the student folder');
+      const spec = names.find(n => n.endsWith('assignment_spec.json'));
+      assert(!spec.includes('authoring_backup'), 'the spec and the backup are the same file');
+    });
+
+    check('export ZIP: the backup in the ZIP really is the whole assignment', () => {
+      const a = makeAssignment({ targetPoints: 100 });
+      const name = names.find(n => n.endsWith('_authoring_backup.json'));
+      assertEqual(readAuthoringBackup(JSON.parse(entries[name])), a,
+        'the ZIP\'s backup is not deep-equal to the assignment exported');
+    });
+
+    // Guard 5. A notice that drifts out of step with the folder is worse than
+    // none, because it will be believed.
+    check('export ZIP: the notice names only files that are actually there', () => {
+      const notice = entries[NOTICE];
+      assert(/MUST NOT|DO NOT GIVE/.test(notice), 'the notice does not say the ZIP must not be given to students');
+      const base = n => n.slice(n.lastIndexOf('/') + 1);
+      const present = new Set(names.map(base));
+      // Every filename-looking token the notice mentions must exist in the ZIP.
+      const mentioned = [...notice.matchAll(/^\s{2}(\S+)\s/gm)].map(m => m[1]);
+      assert(mentioned.length >= 5, `the notice names too few files: ${JSON.stringify(mentioned)}`);
+      const phantom = mentioned.filter(m => !present.has(m));
+      assertEqual(phantom, [], 'the notice names a file that is not in the ZIP');
+    });
+
+    check('export ZIP: the notice names every answer-bearing file, and no student file', () => {
+      const notice = entries[NOTICE];
+      // Every instructor file is either named as answer-bearing or is on this
+      // list of ones known to carry none. Adding a file to instructor/ therefore
+      // FORCES a decision: name it in the notice, or say here why it is safe.
+      // Checking only the four known suffixes would be tautological — it would
+      // pass for a fifth answer-bearing file nobody remembered to declare, which
+      // is exactly how a generated notice drifts back into being a lie.
+      const CARRIES_NO_ANSWERS = ['assignment.html', 'assignment.tex', 'template.pdf'];
+      const instructorFiles = names
+        .filter(n => n.startsWith('instructor/'))
+        .map(n => n.slice(n.lastIndexOf('/') + 1));
+      const undeclared = instructorFiles.filter(f => !notice.includes(f) && !CARRIES_NO_ANSWERS.includes(f));
+      assertEqual(undeclared, [],
+        'an instructor file is neither named in the notice nor declared answer-free');
+      const answerFiles = instructorFiles.filter(f => notice.includes(f));
+      assert(answerFiles.length === 4,
+        `expected 4 answer-bearing files named in the notice, found ${JSON.stringify(answerFiles)}`);
+      // The "give students" list must be exactly the student folder.
+      const give = notice.slice(notice.indexOf('Give students'));
+      for (const f of names.filter(n => n.startsWith('student/')).map(n => n.slice('student/'.length))) {
+        assert(give.includes(f), `the notice does not tell the instructor to hand out ${f}`);
+      }
+      for (const f of answerFiles) {
+        assert(!give.includes(f), `the notice tells the instructor to hand out ${f}, which contains answers`);
+      }
+    });
+  }
+
+  // Handwritten: the layout map travels with the PDF, in student/.
+  let hw = null;
+  try {
+    hw = await exportPdfSvc.buildExportEntries({
+      ...makeAssignment(), inputMode: 'handwritten',
+      problems: [{ id: 'p1', name: 'P', description: '', subsections: [
+        { id: 's1', name: 'A', description: 'Do it.', points: 100, submissionType: 'Handwritten', handwrittenGradingMode: 'ai' },
+      ] }],
+    });
+  } catch { /* reported below */ }
+
+  if (!hw) {
+    skip('export ZIP: the layout map travels with the PDF', 'buildExportEntries threw');
+  } else {
+    check('export ZIP: the layout map travels with the PDF, both in student/', () => {
+      const student = Object.keys(hw).filter(n => n.startsWith('student/'));
+      assert(student.some(n => n.endsWith('assignment.pdf')), 'no PDF in student/');
+      assert(student.some(n => /\/layout_.*\.csv$/.test(n)), 'the layout map is not beside the PDF');
+      assert(!Object.keys(hw).some(n => n.startsWith('instructor/') && n.endsWith('.csv')),
+        'the layout map is in the instructor folder, away from the PDF it must travel with');
+    });
+  }
 }
 
 // ---------- report ----------

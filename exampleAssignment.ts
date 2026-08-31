@@ -8,16 +8,10 @@ import { v4 as uuidv4 } from 'uuid';
 export const createExampleAssignment = (): Assignment => {
   const now = Date.now();
 
-  // Set due date to 14 days from now
-  const dueDate = new Date();
-  dueDate.setDate(dueDate.getDate() + 14);
-
   return {
     id: uuidv4(),
     courseCode: 'ENG6',
     title: 'Mini-Project 2: Motion Analysis and Plotting Lab Report (Example)',
-    dueDate: dueDate.toISOString().split('T')[0],
-    dueTime: '23:59',
     preamble: `This is an EXAMPLE ASSIGNMENT to help you explore the Assignment Maker features.
 
 You may submit as many times as you wish up until the deadline. However, late submissions are not accepted.

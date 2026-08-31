@@ -68,8 +68,12 @@ export interface Assignment {
    * it into the exported spec.
    */
   aiFeedback?: boolean;
-  dueDate?: string; // ISO Date string — optional, managed in Canvas
-  dueTime?: string; // HH:MM — optional, managed in Canvas
+  // No dueDate / dueTime, deliberately (removed 2026-08-31). Due dates are set
+  // in Canvas and do not travel through this pipeline: `parseMdToAssignment`
+  // never set them, the Editor stripped them on load, and
+  // `ASSIGNMENT_MD_SPEC.md` §2 already documented `**Due:**` as ignored on
+  // import. A field that is never present is a type that lies to the next
+  // person who trusts it.
   preamble: string;
   problems: Problem[];
   /**

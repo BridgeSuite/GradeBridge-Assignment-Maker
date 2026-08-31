@@ -20,6 +20,7 @@ import {
 } from '../services/inputModeService';
 import { DEFAULT_ANSWER_LINES, answerLinesFor } from '../services/templateLayout';
 import { derivePageFormatId } from '../services/qrPayload';
+import { describeImportGaps, isAuthoringBackup, readAuthoringBackup } from '../services/authoringBackup';
 import { apportionPoints } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, PenLine, Keyboard, QrCode } from 'lucide-react';
@@ -137,10 +138,12 @@ const Editor: React.FC = () => {
       const loaded = storageService.get(id);
       if (loaded) {
         // Ensure new fields exist on loaded data; strip deprecated fields
-        // `aiGradingConfig` joins the deprecated fields dropped here: it was a
-        // grader configuration nothing read, removed 2026-08-31. An assignment
-        // saved before then still carries one; drop it silently — it is not the
-        // author's mistake and there is nothing for them to do about it.
+        // Fields dropped on load because they are no longer part of
+        // `Assignment`: `dueDate` / `dueTime` (set in Canvas, never travelled
+        // through this pipeline) and `aiGradingConfig` (a grader configuration
+        // nothing read). An assignment saved before 2026-08-31 still carries
+        // them; drop them silently — it is not the author's mistake and there is
+        // nothing for them to do about it.
         const { dueDate: _d, dueTime: _t, aiGradingConfig: _ai, ...loadedWithoutDate } = loaded as any;
         const sanitized = {
           ...loadedWithoutDate,
@@ -334,24 +337,34 @@ const Editor: React.FC = () => {
     reader.onload = (e) => {
       try {
         const json = e.target?.result as string;
-        const loadedAssignment = JSON.parse(json) as Assignment;
+        const parsed = JSON.parse(json);
+
+        // Two shapes arrive here. An AUTHORING BACKUP is the complete assignment
+        // and restores everything; anything else is a student spec or an older
+        // export and is lossy. The file says which it is rather than being
+        // guessed at from its shape — a text-only assignment carries no grading
+        // prompts either, so shape cannot tell them apart.
+        const restoring = isAuthoringBackup(parsed);
+        const loadedAssignment = (restoring ? readAuthoringBackup(parsed) : parsed) as Assignment;
 
         // Basic validation
         if (!loadedAssignment.title || !Array.isArray(loadedAssignment.problems)) {
           throw new Error("Invalid assignment format.");
         }
 
-        // A spec exported before 2026-08-31 carries `aiGradingConfig`. Drop it
-        // silently — no warning: it is not the author's mistake, there is
-        // nothing for them to do about it, and nothing reads it.
-        const { aiGradingConfig: _staleGraderConfig, ...loadedWithoutGraderConfig } =
-          loadedAssignment as Assignment & { aiGradingConfig?: unknown };
+        // Fields no longer part of `Assignment`, dropped silently — no warning:
+        // they are not the author's mistake, there is nothing for them to do
+        // about it, and nothing reads them.
+        const { aiGradingConfig: _staleGraderConfig, dueDate: _d, dueTime: _t, ...loadedClean } =
+          loadedAssignment as Assignment & { aiGradingConfig?: unknown; dueDate?: string; dueTime?: string };
 
-        // Generate new IDs for everything
+        // A restore keeps its own title; a template copy is marked as one. Both
+        // get fresh ids, so importing never silently overwrites an assignment
+        // that is still in local storage — the instructor saves deliberately.
         const newAssignment = {
-          ...loadedWithoutGraderConfig,
+          ...loadedClean,
           id: uuidv4(),
-          title: loadedAssignment.title + ' (Template)',
+          title: restoring ? loadedAssignment.title : loadedAssignment.title + ' (Template)',
           createdAt: Date.now(),
           updatedAt: Date.now(),
           aiFeedback: !!loadedAssignment.aiFeedback,
@@ -368,10 +381,25 @@ const Editor: React.FC = () => {
         };
 
         setAssignment(newAssignment);
-        setAiFeedbackAnswered(true); // the template carries a value; show it as a plain toggle
+        setAiFeedbackAnswered(true); // the file carries a value; show it as a plain toggle
         setKeyInput(newAssignment.coursePublicKey || '');
         checkCourseKey(newAssignment.coursePublicKey || '');
-        alert("Template loaded! You can now edit and save it as a new assignment.");
+
+        if (restoring) {
+          alert("Restored from authoring backup. Everything came back \u2014 grading prompts, grader notes, answer-space settings, the point target and the course key.");
+        } else {
+          // Name what is missing, at the one moment the instructor can act on
+          // it. Silent loss of an instructor's rubrics is the same failure shape
+          // as the answer key: correct behaviour, no signal, discovered late.
+          const gaps = describeImportGaps(loadedAssignment);
+          alert(gaps.length === 0
+            ? "Assignment loaded as a new template. You can now edit and save it."
+            : "Assignment loaded as a new template \u2014 but this file is not a complete backup.\n\n"
+              + "It does not carry:\n"
+              + gaps.map(g => `  \u2022 ${g}`).join('\n')
+              + "\n\nFor a complete restore use instructor/{course}_{title}_authoring_backup.json from "
+              + "the export ZIP. Import Markdown also carries the grading prompts and answer-space settings.");
+        }
       } catch (error) {
         console.error(error);
         alert("Failed to load template. Please ensure the file is a valid assignment JSON.");

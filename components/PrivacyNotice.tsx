@@ -50,7 +50,32 @@ export const PrivacyNotice: React.FC = () => {
               <p className="text-blue-800 text-sm">
                 Your assignments are saved to your browser's "Local Storage". Please do not clear your
                 browser cache while working on assignments. We strongly recommend using the "Export ZIP"
-                feature frequently to create backups of your work.
+                feature frequently to create backups of your work. The file that restores an assignment
+                completely is <code className="font-mono">instructor/{'{course}'}_{'{title}'}_authoring_backup.json</code>
+                {' '}inside that ZIP.
+              </p>
+            </div>
+          </div>
+
+          {/* The largest remaining disclosure path is an instructor handing out
+              the whole ZIP, so this sits in the modal every instructor meets on
+              first use — the highest-traffic place the sentence can be. */}
+          <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-bold text-red-900 mb-2">The export ZIP contains the answer key</h3>
+              <p className="text-red-800 text-sm">
+                <strong>The export ZIP is for you. It MUST NOT be given to students.</strong> Four files
+                in <code className="font-mono">instructor/</code> contain answers: the grader document,
+                the grading rubric, the authoring backup and the <code className="font-mono">.md</code> source.
+              </p>
+              <p className="text-red-800 text-sm mt-2">
+                Students receive only the contents of the <code className="font-mono">student/</code> folder
+                &mdash; the assignment PDF, <code className="font-mono">assignment_spec.json</code>, and for a
+                handwritten assignment the <code className="font-mono">layout_*.csv</code> that must travel
+                with the PDF. The ZIP also carries a
+                {' '}<code className="font-mono">00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt</code> naming
+                every file by name.
               </p>
             </div>
           </div>

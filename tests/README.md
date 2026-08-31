@@ -56,6 +56,35 @@ against the same WebCrypto the browser uses.
   mirrored like the delimiter file, checked from both sides
   (`tests/figure-tests.mjs` in the Student app).
 
+- **The authoring backup restores everything** (§13, 2026-08-31) — the round
+  trip that is the whole point of the file. A fixture carrying **every field the
+  type allows** goes out through `buildAuthoringBackup` and back through
+  `readAuthoringBackup`, and must come back deep-equal. The fixture is not
+  trusted to be complete on its own: a second check reads `types.ts` and asserts
+  the fixture exercises every field `Assignment` and `Subsection` declare, so a
+  field added later cannot slip past by being one nobody remembered to add to
+  the fixture. A third drives the failure deliberately — drop a field from the
+  serialised form and the deep-equality check must catch it.
+
+  It also holds the two consequences that make the file worth having:
+  `targetPoints` survives (the `.md` route loses it, and the damage is delayed a
+  cycle — the reimport looks right and the *next* export halves every point) and
+  `coursePublicKey` survives (losing it silently reverts gb2 to gb1). And the
+  import warning is checked against a **real** student spec rather than a guess:
+  it must name the prompts, the grader notes, the answer-space settings and the
+  point target — and must **not** claim the course key is lost, because the
+  whitelist carries it. A warning that overstates gets ignored.
+
+- **The ZIP is split, and its notice cannot drift** (§13) — every entry is under
+  `student/` or `instructor/` bar the notice at the root; `student/` holds only
+  the PDF, the spec and (handwritten) the layout map, which must sit beside the
+  PDF it travels with; the backup and the `.md` are in `instructor/`, and the
+  backup is asserted **not** to be the file the Submission app loads. The notice
+  is generated from the entry list, so the suite checks it names no file that is
+  absent, names all four answer-bearing files, and never tells the instructor to
+  hand out one of them. `template.pdf` is asserted instructor-side: it sets up
+  the Gradescope outline, which is not a student task.
+
 - **The student spec carries no answer key** (§12, 2026-08-31) — the guard that
   matters most in the suite. It takes a real export, decrypts `assignment_spec.json`
   the way a student's browser does, and asserts it holds **no grading prompt, no
