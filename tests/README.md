@@ -170,17 +170,38 @@ metrics and asserts `estimateDescLines` is **≥** the real wrap. If the estimat
 ever drifts from the renderer, that check goes red before a stem overruns its box.
 
 **The ruling** is read back out of the PDF's own graphics operators: interior
-writing lines dashed at 0.5 pt / 0.75 grey, the dash set after the solid top rule
+writing lines dashed at 0.5 pt / 0.75 grey, the dash set after the solid border
 and reset afterwards so nothing else inherits it, and the pitch exactly
 `WRITING_LINE_MM`.
 
-**Nothing is boxed** (page-format §4.1). The suite scans the PDF's `re`
-operators for a rectangle matching any declared region and asserts there is none,
-then ties the drawn writing area to the cropped one the way that survives without
-a frame: every ruled line falls inside the declared rectangle. It also reads the
-page-1 instruction back out of the PDF and asserts it says "write on the ruled
-lines" and that the word "box" is printed nowhere — the questions themselves ask
-students to box their final answer, so the sheet must not spend that word.
+**Every answer region is boxed** (2026-08-31; page-format §4.1 and §8.5 carry the
+amendment that reversed the old "nothing is boxed" rule). The suite scans the
+PDF's `re` operators and asserts **exactly one** stroke-only rectangle per
+gradeable part, at the border's own path — inset half a stroke from the column so
+the ink lands inside it — and that the retired 0.3 mm top rule is not drawn as
+well. It asserts the declared rectangle is the box **interior**, one border stroke
+in on every side, and that no recorded border edge falls inside any declared
+rectangle: what is cropped never contains the frame. It checks every box is the
+full option-C width (12.0–203.9), no box is under the 28 mm floor, and every box
+closes at or above y 257.0, clear of the bottom registration corners. It reads the
+page-1 instruction back out of the PDF and asserts it now **names** the box — and
+still never tells a student to draw one, because a hand-drawn rectangle is another
+candidate for a rectangle detector; if a final-answer mark is ever wanted it is a
+circle.
+
+**Nothing prints in colour, and nothing but its own rules is printed inside a
+box.** A figure declaring a non-grey `fill` or `stroke` refuses the export (greys
+and `#ffffff` do not — all thirty ENG17 figures are `#111111` on white). Ink
+landing inside a declared rectangle refuses it too, which is the case the
+collision check cannot see: the ruled band starts a full pitch below the box's top
+edge, so a question that overran into the top of the box beneath it would slip
+past. Both checks are exercised with a deliberate offender and asserted to name it.
+
+**The `re`-operator suite cannot run a real detector** — that needs pixels and
+OpenCV, which are not `npm test` dependencies. The blank-sheet detector run
+(`EEC100_Final_Format_Spec` §8 check 6) was done out of band against the five real
+ENG17 homeworks; the numbers are in
+`docs/session/COMPLETION_AM_ANSWER_BOX_2026-08-31.md`.
 
 `> template:` parsing is compared **against `converter/convert.py`** over
 `fixtures/ENG17_AnswerSpaceFixture.md`, which covers `lines=N`, an absent

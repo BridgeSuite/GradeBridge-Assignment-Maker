@@ -60,3 +60,10 @@ COMPLETION_*.md
 WORKORDER_*.md
 CORRECTION_*.md
 REPORT_*.md
+
+# Internal specs — the handwritten-regions spec versions. Excluded because they
+# describe campus infrastructure and compliance topology (the P2/P3 trust zones,
+# the on-campus node, the identifier screen, the Attachment A and B controls),
+# which belong to the UC Davis filing and not to a public repository. The folder
+# also carries its own .gitignore, so the exclusion survives an edit here.
+specs-internal/

@@ -388,15 +388,21 @@ check('exactly one text line per page in the band, at the spec 8.4 anchor', () =
   }
 });
 
-check('every part gets a prompt and a rule, and the rule sits above the writing area', () => {
+check('every part gets a prompt and a box, and the prompt sits above and outside it', () => {
   for (const r of t.layout.regions) {
-    assert(r.ruleYMm < r.nominalMm.y0, `${r.regionId}: the rule is not above the writing area`);
-    assert(r.ruleYMm > r.promptTopMm, `${r.regionId}: the rule is not below the prompt text`);
+    assert(r.boxTopMm < r.nominalMm.y0, `${r.regionId}: the box top is not above the writing area`);
+    assert(r.boxTopMm > r.promptTopMm, `${r.regionId}: the box top is not below the prompt text`);
     assert(r.declaredMm.y0 < r.nominalMm.y0, `${r.regionId}: padding was not applied outward`);
-    assert(r.declaredMm.y0 > r.ruleYMm - 3.1, `${r.regionId}: the declared rectangle swallows the prompt`);
+    assert(r.declaredMm.y0 > r.boxTopMm - 3.1, `${r.regionId}: the declared rectangle swallows the prompt`);
+    // The declared rectangle is the box INTERIOR: it starts one border stroke
+    // below the outer edge, and closes one border stroke above the bottom.
+    assertEqual(round(r.declaredMm.y0 - r.boxTopMm), round(lay.BORDER_MM),
+      `${r.regionId}: the declared rectangle is not inset by the border`);
+    assertEqual(round(r.boxBottomMm - r.declaredMm.y1), round(lay.BORDER_MM),
+      `${r.regionId}: the box does not close one stroke below the declared rectangle`);
     if (r.description) {
       assert(r.descBoxMm, `${r.regionId}: has a description but no box reserved for it`);
-      assert(r.descBoxMm.y1 <= r.ruleYMm + 0.01, `${r.regionId}: the description box runs past the rule`);
+      assert(r.descBoxMm.y1 <= r.boxTopMm + 0.01, `${r.regionId}: the description box runs into the answer box`);
     }
   }
 });
@@ -592,12 +598,15 @@ check('the last region on every page runs to the bottom margin', () => {
   ]));
   for (const r of lastOnPage(l)) {
     // Within one pitch of the bottom margin: another whole line would not fit.
-    const bottom = fmt.REGION_Y_MAX_MM - fmt.REGION_PAD_MM;
+    const bottom = lay.REGION_BOTTOM_MM - lay.BORDER_MM - fmt.REGION_PAD_MM;
     assert(r.nominalMm.y1 <= bottom + 0.001,
       `${r.regionId}: the writing area ends at ${r.nominalMm.y1} mm, past the ${bottom} mm margin`);
     assert(r.nominalMm.y1 > bottom - lay.WRITING_LINE_MM,
       `${r.regionId}: ${(bottom - r.nominalMm.y1).toFixed(1)} mm of unclaimed paper is left under the last region`);
-    // The space belongs to a declared rectangle, not to decorative ruling.
+    // The space belongs to a declared rectangle, not to decorative ruling, and
+    // the box that frames it closes above the bottom registration corners.
+    assert(r.boxBottomMm <= lay.REGION_BOTTOM_MM + 0.001,
+      `${r.regionId}: the box ran past the ${lay.REGION_BOTTOM_MM} mm bottom limit`);
     assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.001,
       `${r.regionId}: the declared rectangle ran past the ${fmt.REGION_Y_MAX_MM} mm bottom limit`);
     // y1 = y0 + n x pitch is what puts the last rule on the rectangle's edge.
@@ -664,20 +673,20 @@ check('item 2: nothing printed enters the QR keep-out, on any page', () => {
   assertEqual(intruders.map(b => `page ${b.pageK} ${b.what}`), [], 'something is printed over the QR');
 });
 
-check('the column check is bound to the writing column, not the page-wide safe area', () => {
-  // It tested against REGION_X_MAX_MM (203.9) while content is drawn to
-  // COLUMN_X1_MM (192.9), so text could stand 11 mm out into the right margin
-  // and pass. That is why the unwrapped problem heading did not trip this when
-  // it first left the column, only once it was 13 mm past it.
+check('the column check is bound to the column the generator actually draws', () => {
+  // It used to test against REGION_X_MAX_MM while content was drawn in a
+  // narrower column, so text could stand 11 mm out into the right margin and
+  // pass. Under option C the column IS the page-wide safe area; the check still
+  // reads COLUMN_*, so it keeps tracking whatever the generator draws.
   const clean = selfTest.runInkChecks(t.ink, t.selfTest);
-  assertEqual(clean.failures, [], 'the real ink does not pass the tightened column check');
+  assertEqual(clean.failures, [], 'the real ink does not pass the column check');
 
-  // A row 2.1 mm out of the column: inside the old bound, outside the new one.
+  // A row 1.1 mm out of the column. It sits below every region and left of the
+  // SE corner, so it can only trip the check under test.
   const overWide = {
     pageK: 1, what: 'deliberately over-wide row',
-    x0: lay.COLUMN_X0_MM, y0: 268.0, x1: 195.0, y1: 271.0,
+    x0: lay.COLUMN_X0_MM, y0: 274.0, x1: lay.COLUMN_X1_MM + 1.1, y1: 276.0,
   };
-  assert(overWide.x1 < fmt.REGION_X_MAX_MM, 'the fixture is not inside the old, looser bound');
   assert(overWide.x1 > lay.COLUMN_X1_MM, 'the fixture is not outside the column');
 
   const dirty = selfTest.runInkChecks([...t.ink, overWide], t.selfTest);
@@ -685,11 +694,21 @@ check('the column check is bound to the writing column, not the page-wide safe a
   assertEqual(named.length, 1, `the over-wide row was not caught: ${dirty.failures.join(' | ')}`);
   assert(/deliberately over-wide row/.test(named[0]), 'the failure does not name the offending row');
 
-  // The header line keeps its exemption — the page format anchors it left of
-  // the column at x = 20.0, by design.
+  // The header line no longer needs an exemption from this check: spec 8.4
+  // anchors it at x = 20.0, which was left of the old 23.0 column and is inside
+  // the new 12.0 one. It is checked like everything else, and passes.
   const header = t.ink.filter(b => b.what === 'header line');
   assert(header.length > 0, 'no header line was inked');
-  assert(header.some(b => b.x0 < lay.COLUMN_X0_MM), 'the header line is no longer left of the column');
+  assert(header.every(b => b.x0 >= lay.COLUMN_X0_MM && b.x1 <= lay.COLUMN_X1_MM),
+    'the header line now falls outside the column it is checked against');
+  // It does still need one from the corner keep-out: (20.0, 10.0) is inside NW.
+  const nw = fmt.CORNER_KEEPOUTS_MM[0];
+  assert(header.some(b => b.x0 < nw.x1 && b.y0 < nw.y1),
+    'the header line no longer overlaps the NW corner, so its exemption is now dead code');
+  const dirtyCorner = selfTest.runInkChecks(
+    [...t.ink, { pageK: 1, what: 'stray mark', x0: 195.0, y0: 258.0, x1: 200.0, y1: 262.0 }], t.selfTest);
+  assertEqual(dirtyCorner.failures.filter(f => /corner keep-out/.test(f)).length, 1,
+    `ink in the SE corner was not caught: ${dirtyCorner.failures.join(' | ')}`);
 });
 
 check('item 2: the first prompt row on every page starts below the keep-out', () => {
@@ -912,21 +931,100 @@ check('the stem is reserved at the same line height as a sub-part description', 
     'the stem is reserved at a different line height from a description');
 });
 
-check('no answer region is boxed — spec 4.1, and the student\'s own box wins', () => {
-  // Page-format 4.1: "there is no printed answer box." The questions themselves
-  // ask students to box their final answer, so a printed frame around the whole
-  // writing area would put two different "boxes" on one sheet.
-  const declared = t.layout.regions.map(r => r.declaredMm);
-  const framed = pdfRects.filter(rect => declared.some(d =>
-    near(rect.xMm, d.x0, 0.3) && near(rect.yMm, d.y0, 0.3)
-    && near(rect.wMm, d.x1 - d.x0, 0.3) && near(rect.hMm, d.y1 - d.y0, 0.3)));
-  assertEqual(framed.length, 0, 'a bounding rectangle is still drawn around an answer region');
-  assertEqual(t.ink.filter(b => /answer box/.test(b.what)), [], 'a region box is still being inked');
+check('every answer region is boxed, and the border is the outermost thing on the row', () => {
+  // The reversal of 2026-08-31. From 2026-08-17 a region was a top rule and some
+  // ruled lines and no frame, on two reasons that have both since gone: that
+  // page-format 4.1 forbade a box (it now carries a dated amendment) and that the
+  // ENG17 questions asked students to box their own final answer (HWK1-HWK3 as
+  // rebuilt on 30-31 August ask them to box nothing).
+  //
+  // A box does four jobs and only the first is obvious: it says where to write;
+  // it is a FIDUCIAL the detector perspective-corrects from, which matters more
+  // to a phone photograph of a curled homework page than to a flatbed exam scan;
+  // it bounds the crop; and it makes the whitespace returned markup needs.
+  const boxed = t.layout.regions.map(r => pdfRects.filter(rect =>
+    near(rect.xMm, lay.COLUMN_X0_MM + lay.BORDER_MM / 2, 0.02)
+    && near(rect.yMm, r.boxTopMm + lay.BORDER_MM / 2, 0.02)
+    && near(rect.wMm, (lay.COLUMN_X1_MM - lay.COLUMN_X0_MM) - lay.BORDER_MM, 0.02)
+    && near(rect.hMm, (r.boxBottomMm - r.boxTopMm) - lay.BORDER_MM, 0.02)).length);
+  assertEqual(boxed, t.layout.regions.map(() => 1),
+    'not exactly one bordered box per gradeable part');
+
+  // Solid, at least 1 pt, and the old 0.3 mm top rule is not drawn as well:
+  // two horizontal lines 2.5 mm apart at the top of every region is noise.
+  assert(lay.BORDER_PT >= 1.0, `the border is ${lay.BORDER_PT} pt, under the 1 pt floor`);
+  assertEqual(t.ink.filter(b => /^rule /.test(b.what)), [], 'the retired top rule is still drawn');
+  assertEqual(t.ink.filter(b => /^box top /.test(b.what)).length, t.layout.regions.length,
+    'not one recorded border per region');
+
+  // No fill and square corners: jsPDF writes a stroke-only rect as "re S", and
+  // has no rounded-rect operator, so a fill would show as "re f" at these bounds.
+  const stroked = pdfText.match(/re[\s\S]{0,4}?S/g) || [];
+  assert(stroked.length >= t.layout.regions.length, 'the boxes are not stroke-only');
+});
+
+check('the declared rectangle is the box INTERIOR, so no border ink is ever cropped', () => {
+  // EEC100_Final_Format_Spec 6 requires the build to state which it records, and
+  // answerbox.sty records the inner area. Matching it keeps the border out of the
+  // numerator of the OCR addendum's ink-to-character audit, and makes the two
+  // tracks agree.
+  for (const r of t.layout.regions) {
+    assertEqual(round(r.declaredMm.x0 - lay.COLUMN_X0_MM), round(lay.BORDER_MM),
+      `${r.regionId}: the declared rectangle is not inset by one border stroke on the left`);
+    assertEqual(round(lay.COLUMN_X1_MM - r.declaredMm.x1), round(lay.BORDER_MM),
+      `${r.regionId}: ... nor on the right`);
+  }
+  // And the recorded border ink really does sit outside every declared rectangle.
+  const edges = t.ink.filter(b => /^box /.test(b.what));
+  assert(edges.length === t.layout.regions.length * 4, 'not four recorded edges per box');
+  for (const b of edges) {
+    for (const r of t.layout.regions.filter(r => r.pageK === b.pageK)) {
+      const inside = b.x0 < r.declaredMm.x1 - 0.01 && b.x1 > r.declaredMm.x0 + 0.01
+        && b.y0 < r.declaredMm.y1 - 0.01 && b.y1 > r.declaredMm.y0 + 0.01;
+      assert(!inside, `${b.what} lies inside ${r.regionId}'s declared rectangle`);
+    }
+  }
+});
+
+check('every box is the full option C width, and no box is under the 28 mm floor', () => {
+  // Option C: the column is the page-wide safe area, 12.0 to 203.9, uniform down
+  // the sheet. It buys 22 mm of writing width on every line against 5 mm of
+  // height once per page, and it is what makes the ingest spec's Z5 check (the
+  // sole region on a page spans the full permitted width) pass rather than warn.
+  assertEqual([lay.COLUMN_X0_MM, lay.COLUMN_X1_MM], [fmt.REGION_X_MIN_MM, fmt.REGION_X_MAX_MM],
+    'the column is not the page-wide safe area');
+  const widths = new Set(t.layout.regions.map(r => round(r.declaredMm.x1 - r.declaredMm.x0)));
+  assertEqual([...widths].length, 1, 'the boxes are not all the same width');
+  for (const r of t.layout.regions) {
+    assert(r.boxBottomMm - r.boxTopMm >= lay.MIN_BOX_MM - 0.01,
+      `${r.regionId} is ${(r.boxBottomMm - r.boxTopMm).toFixed(1)} mm tall, under the ${lay.MIN_BOX_MM} mm floor`);
+    assert(r.boxBottomMm <= lay.REGION_BOTTOM_MM + 0.001,
+      `${r.regionId}'s box closes at ${r.boxBottomMm.toFixed(1)} mm, past the bottom limit`);
+  }
+  // The bottom registration corners start at y 257.4; the box closes above them,
+  // which is exactly what the 5 mm of height buys the extra width.
+  assert(lay.REGION_BOTTOM_MM < fmt.PAGE_H_MM - 22.0, 'the bottom limit reaches the corner keep-outs');
+});
+
+check('a part authored under the 28 mm floor is grown to it, not emitted small', () => {
+  // EEC100_Final_Format_Spec 1.1 sets abmin at 28 mm. There was no equivalent
+  // here: "> template: lines=2" produced an 18 mm region, which is a box a
+  // detector has to find and a crop a grader has to read, and not enough of
+  // either. The floor is on the box, not on the author.
+  const l = lay.buildLayout(makeAssignment([[
+    part('Tiny', 50, { answerLines: 1 }), part('Also tiny', 50, { answerLines: 2 }),
+  ]]));
+  for (const r of l.regions) {
+    assert(r.answerLines >= lay.MIN_ANSWER_LINES,
+      `${r.regionId} kept ${r.answerLines} lines, under the ${lay.MIN_ANSWER_LINES}-line floor`);
+    assert(r.boxBottomMm - r.boxTopMm >= lay.MIN_BOX_MM - 0.01,
+      `${r.regionId} is ${(r.boxBottomMm - r.boxTopMm).toFixed(1)} mm tall`);
+  }
 });
 
 check('the ruled lines stay inside the region the map crops', () => {
-  // The frame is gone, so this is what now ties the drawn writing area to the
-  // cropped rectangle: every rule lands inside the declared region.
+  // What ties the drawn writing area to the cropped rectangle: every rule lands
+  // inside the declared region, a clear REGION_PAD_MM in from the border.
   const bands = t.ink.filter(b => /^writing lines /.test(b.what));
   const ruled = t.layout.regions.filter(r => !r.isDrawing);
   assertEqual(bands.length, ruled.length, 'not one ruled band per text region');
@@ -945,22 +1043,26 @@ check('the ruled lines stay inside the region the map crops', () => {
   }
 });
 
-check('the sheet says "ruled lines", and never says "box"', () => {
-  // "Box" belongs to the questions ("box the three currents"), so the sheet's own
-  // furniture must not spend the word on something else.
+check('the print instruction names the box, and never asks anyone to box anything', () => {
+  // From 2026-08-17 this line avoided the word "box" so the questions could own
+  // it. There is a box on the sheet now and the questions ask for none, so the
+  // instruction says where it is. What it must still never do is tell a student
+  // to draw one: a hand-drawn rectangle is another candidate for a rectangle
+  // detector, so if a final-answer mark is ever wanted it is a circle.
   // Joined with a space, not a separator: the instruction wraps across two drawn
   // lines, so the phrase spans two text operators.
   const text = [...pdfText.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' ');
-  assert(/write on the ruled lines/i.test(text), `the print instruction does not say "ruled lines": ${text.slice(0, 300)}`);
-  assert(!/ruled areas?/i.test(text), 'the print instruction still says "ruled area"');
-  assert(!/\bbox\w*\b/i.test(text), 'the template prints the word "box"');
+  assert(/inside its printed box/i.test(text), `the print instruction does not name the box: ${text.slice(0, 300)}`);
+  assert(/resting each line of writing on a rule/i.test(text), 'the baseline guidance was lost');
+  assert(!/\bbox (your|the|every|each|all)\b/i.test(text), 'the sheet tells the student to box something');
 });
 
-check('the interior rules are dashed and the region top rule is solid', async () => {
+check('the interior rules are dashed and the border is solid', async () => {
   // A solid horizontal rule next to handwritten maths is the exact shape of a
   // fraction bar, a minus sign or an overbar, and the grader reads it as one.
-  // The top rule is a region separator, not a line anyone writes maths against,
-  // so it stays solid. jsPDF writes the dash as `[a b] phase d`.
+  // The border is a frame, not a line anyone writes maths against, and a dashed
+  // border is not reliably found by a detector, so it stays solid.
+  // jsPDF writes the dash as `[a b] phase d`.
   const t1 = await gen.generateTemplate(makeAssignment([[part('Written', 100, { answerLines: 4 })]]));
   const bytes = Buffer.from(await t1.pdf.arrayBuffer()).toString('latin1');
 
@@ -973,7 +1075,7 @@ check('the interior rules are dashed and the region top rule is solid', async ()
   const firstDash = bytes.search(/\[[\d.\s]+\]\s*[\d.]+\s*d\b/);
   const lastReset = bytes.lastIndexOf('[] 0. d');
   assert(firstDash > 0, 'no dashed run in the content stream');
-  assert(bytes.indexOf('0 G') < firstDash, 'the solid black rule was set after dashing began');
+  assert(bytes.indexOf('0 G') < firstDash, 'the solid black border was set after dashing began');
   assert(lastReset > firstDash, 'the dash pattern outlives the writing lines');
 
   // Weight and grey, as the OCR review asked: 0.5 pt at 0.75 grey. jsPDF writes
@@ -1267,7 +1369,7 @@ check('question text that cannot fit a page at all is clamped, and reported', ()
   }
 });
 
-check('the question text box always sits between the prompt row and the rule', () => {
+check('the question text box always sits between the prompt row and the answer box', () => {
   const withText = lay.buildLayout(makeAssignment([[
     { ...part('Long one', 50), description: 'A '.repeat(300) },
     { ...part('Short one', 50), description: 'Brief.' },
@@ -1275,8 +1377,8 @@ check('the question text box always sits between the prompt row and the rule', (
   for (const r of withText.regions) {
     assert(r.descBoxMm, `${r.regionId}: no description box`);
     assert(r.descBoxMm.y0 >= r.promptTopMm + lay.PROMPT_ROW_MM - 0.01, `${r.regionId}: box overlaps the prompt row`);
-    assert(r.descBoxMm.y1 <= r.ruleYMm + 0.01, `${r.regionId}: box runs past the rule`);
-    assert(r.nominalMm.y0 > r.ruleYMm, `${r.regionId}: the writing area starts above the rule`);
+    assert(r.descBoxMm.y1 <= r.boxTopMm + 0.01, `${r.regionId}: text runs into the answer box`);
+    assert(r.nominalMm.y0 > r.boxTopMm, `${r.regionId}: the writing area starts above the box`);
     assert(r.declaredMm.y1 <= fmt.REGION_Y_MAX_MM + 0.01, `${r.regionId}: ran past the bottom limit`);
   }
 });
@@ -1406,6 +1508,69 @@ check('the question text box always sits between the prompt row and the rule', (
     assertEqual(exportSvc.assignmentToMd(mdParser.parseMdToAssignment(plainMd)), plainMd, 'not a fixed point');
   });
 }
+
+// ---------- black only, and the box interior ----------
+check('a coloured figure is refused; greys and #ffffff are not colour', async () => {
+  // EEC100_Final_Format_Spec 5: the scans are 8-bit grayscale and that is LOAD
+  // BEARING, because it is what lets the marking stage prove it never altered
+  // the student's work — any pixel with colour was added afterwards. One
+  // coloured element destroys that guarantee for every submission on the sheet.
+  // The generator's own ink is greyscale by construction; author-supplied SVG is
+  // the way colour can get here, and nothing used to look.
+  const svg = (stroke) => '```svg\n<svg viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">'
+    + '<title>a loop</title><rect x="5" y="5" width="190" height="90" fill="#ffffff" stroke="'
+    + stroke + '"/></svg>\n```';
+
+  const grey = makeAssignment([[{ ...part('A', 100), description: 'Find R1.' }]]);
+  grey.problems[0].description = 'The loop below.\n\n' + svg('#111111');
+  assertEqual(selfTest.figureColourViolations(grey), [], 'the ENG17 greys were called colour');
+  const ok = await gen.generateTemplate(grey);
+  assertEqual(ok.selfTest.failures, [], 'a grey figure was refused');
+
+  const red = makeAssignment([[{ ...part('A', 100), description: 'Find R1.' }]]);
+  red.problems[0].description = 'The loop below.\n\n' + svg('#c00000');
+  assertEqual(selfTest.figureColourViolations(red).length, 1, 'a red stroke was not reported');
+  let threw = null;
+  try { await gen.generateTemplate(red); } catch (err) { threw = err; }
+  assert(threw !== null, 'a coloured figure produced a template anyway');
+  assert(/black only/.test(threw.message), `the refusal does not name the cause:\n${threw.message}`);
+});
+
+check('nothing but its own writing lines may be printed inside an answer box', () => {
+  // EEC100_Final_Format_Spec 2: the detector rejects a candidate whose interior
+  // already carries ink, which is how it auto-rejects formula tables. The dashed
+  // rules are the argued exception (measured handwriting reasons, and the same
+  // document tolerates printed graph paper at 262 of 264). A question that
+  // overran its reservation into the box beneath it is not — and the collision
+  // check cannot see that, because the ruled band starts a full pitch down.
+  const declared = t.layout.regions.map(r => ({
+    pageK: r.pageK, regionId: r.regionId, partId: r.partId, rect: r.declaredMm,
+  }));
+  assertEqual(selfTest.runInkChecks(t.ink, t.selfTest, declared).failures, [],
+    'the real ink does not pass the box-interior check');
+
+  const r0 = t.layout.regions[0];
+  const intruder = {
+    pageK: r0.pageK, what: 'a description that overran',
+    x0: r0.declaredMm.x0 + 5, y0: r0.declaredMm.y0 + 1,
+    x1: r0.declaredMm.x0 + 60, y1: r0.declaredMm.y0 + 4,
+  };
+  const dirty = selfTest.runInkChecks([...t.ink, intruder], t.selfTest, declared);
+  const named = dirty.failures.filter(f => /inside an answer box/.test(f));
+  assertEqual(named.length, 1, `ink inside a box was not caught: ${dirty.failures.join(' | ')}`);
+  assert(new RegExp(r0.regionId).test(named[0]), 'the failure does not name the box');
+
+  // Without the rectangles the check is skipped rather than passing vacuously.
+  // Run it off a bare base: t.selfTest is itself an ink report, so its checks
+  // are carried forward into every re-run and would mask the absence.
+  const bare = { passed: true, checks: [], failures: [], warnings: [] };
+  assert(!selfTest.runInkChecks([...t.ink, intruder], bare).checks
+    .some(c => /inside an answer box/.test(c.name)),
+    'the interior check ran without being given any rectangles');
+  assert(selfTest.runInkChecks([...t.ink, intruder], bare, declared).checks
+    .some(c => /inside an answer box/.test(c.name)),
+    'the interior check did not run when it was given rectangles');
+});
 
 // ---------- Appendix C: what must not carry over ----------
 check('Appendix C: no exam-generator leftovers in the payload or the map', () => {

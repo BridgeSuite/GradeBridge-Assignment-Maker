@@ -12,17 +12,70 @@
 import { Assignment, Subsection } from '../types';
 import { splitFigures } from './figureBlocks';
 import {
-  PAGE_H_MM, QR_KEEPOUT_MM, REGION_PAD_MM, REGION_Y_MAX_MM,
+  PAGE_H_MM, QR_KEEPOUT_MM, REGION_PAD_MM,
   RectMm, mmRectToFraction, round4,
 } from './pageFormat';
 
 // ---- The writing column --------------------------------------------------
-// Chosen so a declared rectangle can never touch a registration-corner keep-out
-// at any y: the corners occupy x 7–22 and x 193.9–208.9, so a column strictly
-// inside 22 → 193.9 is clear top and bottom, which is what lets the last region
-// on a page run all the way down to y = 262.
-export const COLUMN_X0_MM = 23.0;   // declared (padded) left edge
-export const COLUMN_X1_MM = 192.9;  // declared (padded) right edge
+/**
+ * The full width of everything printed below the identity band, and the outer
+ * edge of every answer box.
+ *
+ * It used to be x 23.0 → 192.9, narrowed on purpose so a declared rectangle
+ * could never touch a registration-corner keep-out *at any y* — the corners
+ * occupy x 7–22 and x 193.9–208.9 — which is what let the last region on a page
+ * run down to y = 262.
+ *
+ * That trade is now made the other way round (`WORKORDER_ANSWER_BOX_2026-08-31`
+ * §2, option C). The corner keep-outs only bite in two horizontal bands, y 7–22
+ * and y 257.4–272.4; regions never start above y = 38, so only the bottom band
+ * constrains anything. Taking the page-wide safe area (12.0 → 203.9) and capping
+ * every region at `REGION_BOTTOM_MM` buys **22.0 mm of writing width on every
+ * line of every region**, 13% more, against 5.0 mm of height once per page. It
+ * is also the only option that is uniform — a box that changes width down the
+ * sheet reads as a defect — and it is what makes the ingest spec's §4.4.4 check
+ * Z5 (the sole region on a page spans the full permitted width) pass rather than
+ * warn on every page this app emits.
+ */
+export const COLUMN_X0_MM = 12.0;   // outer left edge of the printed answer box
+export const COLUMN_X1_MM = 203.9;  // outer right edge of the printed answer box
+
+// ---- The printed answer box ----------------------------------------------
+/**
+ * **Every answer region is a bordered box.** This reverses the 2026-08-17
+ * decision to draw a top rule and no frame, on the instructor's call of
+ * 2026-08-31; page-format §4.1 and §8.5 carry the amendment.
+ *
+ * A printed box does four jobs and only the first is obvious
+ * (`GradeBridge-Exam-Maker/docs/EEC100_Final_Format_Spec_2026-08-28.md` §0):
+ * it tells the student where to write; **it is a fiducial**, so a detector
+ * perspective-corrects from the box's own corners and nothing depends on the
+ * answer landing where the map predicted; it bounds the crop, and on the EEC100
+ * midterm what got clipped was the end of the working, which biased scores one
+ * way; and it creates the whitespace returned markup needs.
+ *
+ * The fiducial argument is worth **more** to homework than to the exam.
+ * Homework arrives as a phone photograph of a possibly curled page, not a
+ * flatbed scan, and page-format §6 measures corner-mark detection falling from
+ * 4 of 4 to 2 of 4 on a page rotated by 6 degrees — at 2 of 4 the page goes to
+ * manual. A per-region border survives that.
+ *
+ * 1.0 pt: the exam spec's floor ("solid, continuous and dark, at least 1 pt; a
+ * dashed or hairline border is not reliably found"). Deliberately its own value
+ * and not the 0.3 mm ≈ 0.85 pt the retired top rule used.
+ */
+export const BORDER_PT = 1.0;
+export const BORDER_MM = round4(BORDER_PT * 25.4 / 72);   // 0.3528
+
+/**
+ * The lowest any printed ink may reach — the outer edge of the last box on a
+ * page. 5.0 mm above the format's own `REGION_Y_MAX_MM` (262.0), which is what
+ * option C spends to buy the extra width: the bottom registration corners
+ * occupy y 257.4–272.4, and at the full column width a box would otherwise run
+ * straight through them. 22.4 mm of paper below it, comfortably past the exam
+ * spec's "at least 6 mm to any paper edge".
+ */
+export const REGION_BOTTOM_MM = 257.0;
 
 /**
  * Where a page's first prompt row may start.
@@ -56,14 +109,14 @@ export const PAGE1_PREAMBLE_TOP_MM = PAGE1_INSTRUCTION_TOP_MM + PAGE1_INSTRUCTIO
 export const PAGE1_FURNITURE_TOP_MM = PAGE1_TITLE_TOP_MM;
 
 /** Widest any page-1 furniture line may be — keeps it out of the QR column. */
-export const FURNITURE_MAX_WIDTH_MM = QR_KEEPOUT_MM.x0 - COLUMN_X0_MM - 2.0; // 141.0
+export const FURNITURE_MAX_WIDTH_MM = QR_KEEPOUT_MM.x0 - COLUMN_X0_MM - 2.0; // 152.0
 
 // ---- Per-region header ---------------------------------------------------
 /** `1(a). Title` on the left, `[N pts]` on the right. */
 export const PROMPT_ROW_MM = 6.0;
-/** Breath between the question text and the rule that tops the writing area. */
+/** Breath between the question text and the top edge of the answer box. */
 export const RULE_GAP_MM = 2.5;
-/** Blank space under one region before the next part's header. */
+/** Blank space under one box before the next part's header. */
 export const REGION_GAP_MM = 6.0;
 
 /**
@@ -196,6 +249,27 @@ export const answerLinesFor = (sub: Subsection): number => {
 /** Height of a writing area holding `lines` lines. */
 export const answerBoxMm = (lines: number): number => round4(lines * WRITING_LINE_MM);
 
+/**
+ * The smallest box that may be printed, outer edge to outer edge.
+ *
+ * 28 mm, the `\abmin` the exam track already uses
+ * (`EEC100_Final_Format_Spec` §1.1), below which a box moves to the next page
+ * rather than being emitted small. There was no equivalent here: a part
+ * authored `> template: lines=2` produced an 18 mm region, which is a box a
+ * detector has to find, a crop a grader has to read, and not enough of either.
+ *
+ * It is a floor on the box, not a cap on the author: a part asking for fewer
+ * lines than this gets the floor, and a part that cannot meet the floor in
+ * what is left of a page breaks to a new one, which is what `buildLayout`
+ * already does for a part that does not fit.
+ */
+export const MIN_BOX_MM = 28.0;
+
+/** `MIN_BOX_MM` expressed in writing lines — 3 at a 9 mm pitch. */
+export const MIN_ANSWER_LINES = Math.max(1, Math.ceil(
+  (MIN_BOX_MM - 2 * BORDER_MM - 2 * REGION_PAD_MM) / WRITING_LINE_MM
+));
+
 // ---- Parts ---------------------------------------------------------------
 
 export interface TemplatePart {
@@ -277,13 +351,25 @@ export interface PlacedRegion extends TemplatePart {
   /** Box the question text is rendered into, mm. Absent when there is none. */
   descBoxMm?: RectMm;
   /**
-   * The rule the student writes below, mm. It sits exactly on `declaredMm.y0`,
-   * so the region's visual start and its cropped rectangle begin together.
+   * Outer edge of the printed border, top and bottom. The border spans the full
+   * column horizontally, so `COLUMN_X0_MM`/`COLUMN_X1_MM` are its other two
+   * edges and are not repeated per region.
    */
-  ruleYMm: number;
+  boxTopMm: number;
+  boxBottomMm: number;
   /** The writing area the student sees, mm — exactly `answerLines` lines tall. */
   nominalMm: RectMm;
-  /** nominal grown by REGION_PAD_MM on all four sides — this is what is stored. */
+  /**
+   * nominal grown by REGION_PAD_MM on all four sides — **this is what is stored
+   * in `layout_*.csv`, and it is the box INTERIOR**, inside the border stroke.
+   *
+   * `EEC100_Final_Format_Spec` §6 requires a build to state which of the two it
+   * records, and `answerbox.sty` records the inner area. Matching it does two
+   * things: the crop never contains the border's own ink, which would otherwise
+   * land in the numerator of the ink-to-character audit
+   * (`GradeBridge_OCR_Transcription_v1.6_addendum` §C), and the two tracks agree,
+   * which is the point of converging on one page format.
+   */
   declaredMm: RectMm;
 }
 
@@ -343,8 +429,8 @@ export const problemHeadingMm = (heading: string): number =>
 export const problemBlockMm = (heading: string, text: string, continued: boolean): number =>
   problemHeadingMm(heading) + (continued ? 0 : descBlockMm(text)) + PROBLEM_BLOCK_GAP_MM;
 
-/** Usable vertical run for headers + writing areas on a page. */
-export const pageRunMm = (topMm: number): number => REGION_Y_MAX_MM - topMm;
+/** Usable vertical run for headers + answer boxes on a page. */
+export const pageRunMm = (topMm: number): number => REGION_BOTTOM_MM - topMm;
 
 const pad = (r: RectMm): RectMm => ({
   x0: round4(r.x0 - REGION_PAD_MM), y0: round4(r.y0 - REGION_PAD_MM),
@@ -352,7 +438,7 @@ const pad = (r: RectMm): RectMm => ({
 });
 
 /**
- * The last region on each page runs to the bottom margin.
+ * The last box on each page runs to the bottom margin.
  *
  * Before this, the bottom gaps down HW1's 21 pages were 44, 49, 66, 88, 100,
  * 119, 133, 140, 154 and 163 mm. Page 9 carried four ruled lines and 150 mm of
@@ -376,14 +462,17 @@ const fillPagesToBottom = (regions: PlacedRegion[]): void => {
     if (!held || r.nominalMm.y0 > held.nominalMm.y0) last.set(r.pageK, r);
   }
   for (const r of last.values()) {
-    // The most lines whose padded rectangle still ends at or above the bottom
-    // limit. REGION_Y_MAX_MM is 262 and the pad is 3, so the declared bottom
-    // lands at 262.0 at worst, which `safeAreaViolations` passes (`>`, not `>=`).
-    const lines = Math.floor((REGION_Y_MAX_MM - REGION_PAD_MM - r.nominalMm.y0) / WRITING_LINE_MM);
+    // The most lines whose box still *closes* at or above the bottom limit: the
+    // border's own stroke and the interior pad both sit below the last rule, and
+    // an unclosed box is not a box.
+    const lines = Math.floor(
+      (REGION_BOTTOM_MM - BORDER_MM - REGION_PAD_MM - r.nominalMm.y0) / WRITING_LINE_MM
+    );
     if (lines <= r.answerLines) continue;
     r.answerLines = lines;
     r.nominalMm = { ...r.nominalMm, y1: round4(r.nominalMm.y0 + answerBoxMm(lines)) };
     r.declaredMm = pad(r.nominalMm);
+    r.boxBottomMm = round4(r.declaredMm.y1 + BORDER_MM);
   }
 };
 
@@ -395,12 +484,14 @@ const fillPagesToBottom = (regions: PlacedRegion[]): void => {
  *
  * Pack, then break, then fill. A problem opens a new page carrying its heading
  * and shared setup; its parts then pack down the page at their authored sizes,
- * and the moment the next part's question plus its writing area does not fit the
+ * and the moment the next part's question plus its answer box does not fit the
  * rest of the page, that part starts a new one. A part is placed exactly once —
  * an answer is never split across pages, so one that outgrows an empty page
- * takes the whole page instead. Finally the last region on every page runs to
- * the bottom margin. Nothing is ever squeezed to avoid a break — a break is the
- * correct outcome, paper is cheap and unreadable text is not.
+ * takes the whole page instead. Finally the last box on every page runs to the
+ * bottom margin. Nothing is ever squeezed to avoid a break — a break is the
+ * correct outcome, paper is cheap and unreadable text is not. No box is ever
+ * emitted under `MIN_BOX_MM`; a part that cannot reach it on this page breaks
+ * to the next, which is the same path as any other part that does not fit.
  */
 export const buildLayout = (assignment: Assignment): TemplateLayout => {
   const parts = enumerateParts(assignment);
@@ -456,26 +547,33 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
       let blockTextMm = opens && !continued ? descBlockMm(part.problemDescription) : 0;
       let descMm = descBlockMm(part.description);
 
-      // Everything that is not prose and not the writing area.
-      const fixedMm = blockHeadingMm + blockGapMm + PROMPT_ROW_MM + RULE_GAP_MM + REGION_PAD_MM * 2;
+      // Everything that is not prose and not the writing area. The border's two
+      // strokes are paid for here alongside the interior padding: a box has to
+      // close inside the page, and `REGION_BOTTOM_MM` is where its outer edge
+      // may reach.
+      const fixedMm = blockHeadingMm + blockGapMm + PROMPT_ROW_MM + RULE_GAP_MM
+        + BORDER_MM * 2 + REGION_PAD_MM * 2;
       const linesThatFit = () =>
-        Math.floor((REGION_Y_MAX_MM - cursor - fixedMm - blockTextMm - descMm + 1e-6) / WRITING_LINE_MM);
+        Math.floor((REGION_BOTTOM_MM - cursor - fixedMm - blockTextMm - descMm + 1e-6) / WRITING_LINE_MM);
       let fits = linesThatFit();
+
+      // Never smaller than the minimum box, whatever the author asked for.
+      const wanted = Math.max(part.answerLines, MIN_ANSWER_LINES);
 
       // Not everything fits and this page already has something on it: break
       // rather than shrink, and try again at the top of a clean page. Nothing is
       // clamped on this path — a page break is the cheap, correct answer, and
       // reaching for the clamp first is how ordinary prose used to get trimmed
       // for no reason but its position on the page.
-      if (fits < part.answerLines && !opens) { newPage(); continue; }
+      if (fits < wanted && !opens) { newPage(); continue; }
 
-      // A page of its own and *still* no room for a single writing line: the
+      // A page of its own and *still* no room for the smallest legal box: the
       // question text is longer than a page. Last resort — trim the reservation,
       // which the self-test then refuses to emit on, naming the part. It is the
       // only case where a reservation is smaller than its text.
-      if (fits < 1) {
+      if (fits < MIN_ANSWER_LINES) {
         const requested = round4(blockTextMm + descMm);
-        const budget = REGION_Y_MAX_MM - cursor - fixedMm - WRITING_LINE_MM;
+        const budget = REGION_BOTTOM_MM - cursor - fixedMm - MIN_ANSWER_LINES * WRITING_LINE_MM;
         descMm = Math.max(descMm > 0 ? DESC_LINE_MM : 0, Math.min(descMm, budget - blockTextMm));
         if (blockTextMm + descMm > budget) {
           blockTextMm = Math.max(blockTextMm > 0 ? DESC_LINE_MM : 0, budget - descMm);
@@ -489,7 +587,7 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
       // page is the most room a page has to give, so this is not a degradation
       // anyone can act on. (The `clamped` path above, for *question text* that
       // will not fit a page, is a different thing and is still reported.)
-      const lines = Math.max(1, Math.min(part.answerLines, fits));
+      const lines = Math.max(MIN_ANSWER_LINES, Math.min(wanted, fits));
 
       let problemBlock: ProblemBlock | undefined;
       if (opens) {
@@ -511,18 +609,20 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
         x1: COLUMN_X1_MM, y1: round4(promptTop + PROMPT_ROW_MM + descMm),
       } : undefined;
 
-      // The rule sits on the declared rectangle rather than a millimetre above
-      // it, so the region's visual start and its cropped rectangle begin at the
-      // same y: what is reserved, ruled and cropped is one rectangle.
+      // Four nested rectangles, outside in: the border's outer edge (the full
+      // column, `boxTop` → `boxBottom`), the border's inner edge — which is the
+      // **declared** rectangle, so the crop carries no border ink — the 3 mm
+      // region pad, and the writing area the rules are drawn in.
       const header = PROMPT_ROW_MM + descMm + RULE_GAP_MM;
-      const declaredTop = round4(promptTop + header);
-      const nominalTop = round4(declaredTop + REGION_PAD_MM);
+      const boxTop = round4(promptTop + header);
+      const nominalTop = round4(boxTop + BORDER_MM + REGION_PAD_MM);
       const nominal: RectMm = {
-        x0: COLUMN_X0_MM + REGION_PAD_MM,
+        x0: round4(COLUMN_X0_MM + BORDER_MM + REGION_PAD_MM),
         y0: nominalTop,
-        x1: COLUMN_X1_MM - REGION_PAD_MM,
+        x1: round4(COLUMN_X1_MM - BORDER_MM - REGION_PAD_MM),
         y1: round4(nominalTop + answerBoxMm(lines)),
       };
+      const declared = pad(nominal);
 
       regions.push({
         ...part,
@@ -531,12 +631,13 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
         problemBlock,
         promptTopMm: round4(promptTop),
         descBoxMm: descBox,
-        ruleYMm: declaredTop,
+        boxTopMm: boxTop,
+        boxBottomMm: round4(declared.y1 + BORDER_MM),
         nominalMm: nominal,
-        declaredMm: pad(nominal),
+        declaredMm: declared,
       });
 
-      cursor = round4(nominal.y1 + REGION_PAD_MM + REGION_GAP_MM);
+      cursor = round4(declared.y1 + BORDER_MM + REGION_GAP_MM);
       pageIsEmpty = false;
       break;
     }

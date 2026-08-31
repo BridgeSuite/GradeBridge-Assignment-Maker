@@ -3,7 +3,7 @@
  *
  * Two artifacts, per the work order:
  *   1. `{assignment_id}_qr_template.pdf` — four corner marks, the pinned QR, one
- *      ruled answer region per part, one header line, on every page.
+ *      bordered, ruled answer box per part, one header line, on every page.
  *   2. `layout_{assignment_id}.csv` — the sidecar map, spec 4.3, whose content
  *      hash is written into every page's QR.
  *
@@ -39,7 +39,7 @@ import {
   MASTER_TOKEN, buildPayload, computeLayoutId, derivePageFormatId, isValidPageFormatId,
 } from './qrPayload';
 import {
-  COLUMN_X0_MM, COLUMN_X1_MM, FURNITURE_MAX_WIDTH_MM, LayoutRow, PAGE1_FURNITURE_TOP_MM,
+  BORDER_MM, COLUMN_X0_MM, COLUMN_X1_MM, FURNITURE_MAX_WIDTH_MM, LayoutRow, PAGE1_FURNITURE_TOP_MM,
   DESC_FONT_PT, DESC_LINE_MM, FIGURE_LINES, HEADING_FONT_PT, PAGE1_INSTRUCTION_LINE_MM,
   PAGE1_INSTRUCTION_LINES, PAGE1_INSTRUCTION_TOP_MM, PAGE1_TITLE_H_MM, PROBLEM_HEADING_LINE_MM,
   PROMPT_ROW_MM, PlacedRegion, TemplateLayout, WRITING_LINE_MM, buildLayout, descBlockMm,
@@ -314,15 +314,18 @@ const drawPage1Furniture = async (
   );
 
   applyText(doc, 7.5, false, 110);
-  // Says "ruled lines", never "box" or "area": the questions themselves ask
-  // students to box their final answer, and the sheet must not compete for that
-  // word with a second meaning.
+  // **Names the box.** From 2026-08-17 this line deliberately avoided the words
+  // "box" and "area", to leave the word to the questions, which asked students
+  // to box their own final answer. There is a box on the sheet now and the
+  // questions ask for none, so the instruction says where it is: writing that
+  // lands outside a box is never cropped and never graded, and that is the one
+  // thing a student cannot recover from.
   //
   // "resting each line of writing on a rule" is worth its width: sitting the
   // baseline on the rule leaves descenders as the only strokes that cross one,
   // which is the easy case for the OCR pass. Writing that floats between rules
   // is what produces baseline drift.
-  const instruction = 'Print at 100%, not "fit to page". Check all four corner squares are on the paper before you start, and write on the ruled lines, resting each line of writing on a rule.';
+  const instruction = 'Print at 100%, not "fit to page". Check all four corner squares are on the paper before you start, and keep every answer inside its printed box, resting each line of writing on a rule.';
   const lines: string[] = doc.splitTextToSize(instruction, FURNITURE_MAX_WIDTH_MM);
   lines.slice(0, PAGE1_INSTRUCTION_LINES).forEach((line, i) => {
     drawPlain(doc, line, COLUMN_X0_MM, PAGE1_INSTRUCTION_TOP_MM + i * PAGE1_INSTRUCTION_LINE_MM,
@@ -383,10 +386,11 @@ const drawProblemHeading = (
 };
 
 /**
- * The prompt row, the question text, and the rule that tops the writing area.
+ * The prompt row, the question text, and the bordered answer box beneath them.
  *
- * Nothing drawn here is inside the declared rectangle: it all sits above the
- * rule, and the rule sits on the rectangle's top edge.
+ * Nothing drawn here is inside the declared rectangle: the prompt sits above and
+ * outside the box (`EEC100_Final_Format_Spec` §2), and the box's own border is
+ * drawn outside the declared rectangle rather than on it.
  */
 const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
   // The problem's heading and shared setup, above its first part. Without this
@@ -435,36 +439,56 @@ const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
       ink, r.pageK, `description ${r.partId}`);
   }
 
-  drawWritingArea(doc, r, ink);
+  drawAnswerBox(doc, r, ink);
 };
 
 /**
- * The writing area: a rule under the prompt, then `answerLines` faint ruled
- * lines at `WRITING_LINE_MM` pitch. A sketch part gets the rule and then
- * nothing — reserved blank space to draw in.
+ * The answer box: a bordered rectangle, then `answerLines` faint dashed writing
+ * lines at `WRITING_LINE_MM` pitch inside it. A sketch part gets the border and
+ * nothing else — reserved blank space to draw in, which is the cleanest case.
  *
- * **No bounding rectangle**, per page-format spec 4.1: "there is no printed
- * answer box." An earlier build drew one around the declared rectangle; it is
- * gone. Two reasons it had to go. The spec is plain, and nothing in the pipeline
- * detects a box, a rule or an edge anyway — a region is located solely by
- * registering the page and applying the declared rectangle. And the ENG17
- * questions ask students to **box their final answer**, so a printed box around
- * the whole writing area put two different "boxes" on one sheet. The student's
- * final-answer box is now the only box on the page.
+ * **The border replaces the old solid top rule; the two are never both drawn**
+ * (work order §3: two horizontal lines 2.5 mm apart at the top of every region
+ * is noise). From 2026-08-17 to 2026-08-31 a region was a rule and some ruled
+ * lines and no frame, on the reasoning that page-format §4.1 forbade a box and
+ * that the ENG17 questions asked students to box their own final answer. Both
+ * legs are gone: §4.1 carries a dated amendment, and HWK1–HWK3 as rebuilt on 30
+ * and 31 August ask students to box nothing.
  *
- * The lines still land inside the declared rectangle, so what is reserved is
- * still what is cropped and graded — that identity never depended on the frame.
+ * **Solid, continuous, black, 1 pt, square corners, no fill** — the exam
+ * detector's contract (`EEC100_Final_Format_Spec` §2). Drawn immediately
+ * *outside* the declared rectangle: jsPDF centres a stroke on its path, so the
+ * path is inset half a stroke from the column and the ink lands exactly in
+ * `COLUMN_X0_MM … COLUMN_X1_MM` with its inner edge on the declared boundary.
+ * The crop therefore carries none of the border's own ink.
+ *
+ * The interior is **not** empty, which is the one place this departs from the
+ * exam contract's "empty on the blank exam". The writing lines stay, for
+ * measured handwriting reasons rather than detector ones (see below), and the
+ * same document's §3 records printed graph paper — far more ink than 9 mm dashed
+ * rules at 0.5 pt in 75% grey — tolerated at 262 of 264.
  */
-const drawWritingArea = (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
-  // The rule that tops the region (spec 4.1): the region's visual start, and the
-  // line the student's eye should land on.
+const drawAnswerBox = (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
   doc.setDrawColor(0);
-  doc.setLineWidth(0.3);
-  doc.line(COLUMN_X0_MM, r.ruleYMm, COLUMN_X1_MM, r.ruleYMm);
-  ink.push({
-    pageK: r.pageK, what: `rule ${r.partId}`,
-    x0: COLUMN_X0_MM, y0: r.ruleYMm - 0.2, x1: COLUMN_X1_MM, y1: r.ruleYMm + 0.2,
-  });
+  doc.setLineWidth(BORDER_MM);
+  doc.setLineDashPattern([], 0);   // never inherit a dash from the region above
+  doc.rect(
+    COLUMN_X0_MM + BORDER_MM / 2, r.boxTopMm + BORDER_MM / 2,
+    (COLUMN_X1_MM - COLUMN_X0_MM) - BORDER_MM, (r.boxBottomMm - r.boxTopMm) - BORDER_MM,
+    'S'
+  );
+
+  // Four thin edge boxes, not one big one. The border legitimately encloses the
+  // writing lines, so a single ink box spanning the whole frame would read as a
+  // collision with them and refuse the export — and the tolerance in that check
+  // is what caught the print instruction landing inside the preamble, so it is
+  // not the thing to loosen.
+  const edge = (what: string, x0: number, y0: number, x1: number, y1: number) =>
+    ink.push({ pageK: r.pageK, what: `box ${what} ${r.partId}`, x0, y0, x1, y1 });
+  edge('top', COLUMN_X0_MM, r.boxTopMm, COLUMN_X1_MM, round4(r.boxTopMm + BORDER_MM));
+  edge('bottom', COLUMN_X0_MM, round4(r.boxBottomMm - BORDER_MM), COLUMN_X1_MM, r.boxBottomMm);
+  edge('left', COLUMN_X0_MM, r.boxTopMm, round4(COLUMN_X0_MM + BORDER_MM), r.boxBottomMm);
+  edge('right', round4(COLUMN_X1_MM - BORDER_MM), r.boxTopMm, COLUMN_X1_MM, r.boxBottomMm);
 
   if (r.isDrawing) return;
 
@@ -553,7 +577,9 @@ export const generateTemplate = async (assignment: Assignment): Promise<Generate
   // right-aligned label still overruns into the QR's column. Text over the
   // modules can stop the symbol decoding, and the QR is the whole registration
   // mechanism, so this is as fatal as any of checks 1–7.
-  const inkReport = runInkChecks(ink, selfTest);
+  const inkReport = runInkChecks(ink, selfTest, layout.regions.map(r => ({
+    pageK: r.pageK, regionId: r.regionId, partId: r.partId, rect: r.declaredMm,
+  })));
   if (!inkReport.passed) fail(inkReport);
 
   return {

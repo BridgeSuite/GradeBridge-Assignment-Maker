@@ -181,11 +181,13 @@ A third key configures the **printed QR template** (§10) and is handwritten-onl
 | `> template: lines=N, sketch` | The printed handwritten template only. `lines=N` reserves **N writing lines** for the student's answer to this part, and the lines printed are exactly the region the layout map crops. `sketch` marks a drawing region (the space is reserved and left blank, no rules). Both optional, order-free — `> template: sketch` alone is valid. |
 
 Omit `lines=N` and the part gets `DEFAULT_ANSWER_LINES` (6). The generator reserves exactly the
-requested lines, prints them as ruled writing lines (blank space for a `sketch`), and never shrinks the question
+requested lines, prints them as ruled writing lines inside a bordered box (an empty box for a `sketch`), and never shrinks the question
 text to make room: if a part's question and writing lines do not fit the rest of a page, the part starts
 a new page, and a part whose answer exceeds a whole page simply takes the page. An answer is never
-split across two pages. Where a page has room left under the last part, that part's ruled lines run on
-to the bottom margin, so the extra paper belongs to a region that is actually cropped and graded. The older
+split across two pages. Where a page has room left under the last part, that part's box and its ruled lines run on
+to the bottom margin, so the extra paper belongs to a region that is actually cropped and graded. A part
+asking for fewer lines than a **28 mm** box holds gets 28 mm anyway — below that a box is too small to
+find reliably and too small to read. The older
 `space=half|full|short|medium|tall|xtall` values still import, mapped to a line count, but Export
 always writes `lines=N`.
 
@@ -268,13 +270,21 @@ The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Pa
 | Top 25 mm, every page | The QR, the four corner marks, one header line. Nothing else, ever. |
 | Page 1, under the band | Course and title, the print instruction, then the assignment **preamble**. |
 | Above each problem's first part | `Problem 2: Rectangular waveguide` and the problem's **shared setup text**. On a later page the heading repeats as `(continued)`; the setup does not. |
-| Each region | `1(a).`, the sub-part title, the points, the **question text**, a rule, then the part's authored number of **ruled writing lines** (blank space for a sketch). |
+| Each region | `1(a).`, the sub-part title, the points, the **question text**, then a **bordered box** holding the part's authored number of **ruled writing lines** (blank space for a sketch). |
 
 Prompt, problem and question text all go through the same KaTeX renderer as the other exports, so `$\delta_s$` and a bare `ω` print as glyphs rather than being garbled by jsPDF's Latin-1 fonts.
 
-The prompt row is the authored sub-part name and nothing else. No page instruction is injected into it — the ruled lines beneath are the cue, and a problem carried onto another page says so in its heading.
+The prompt row is the authored sub-part name and nothing else. No page instruction is injected into it — the box beneath it is the cue, and a problem carried onto another page says so in its heading.
 
-**Nothing is boxed.** Page-format §4.1 is explicit that there is no printed answer box, and the questions themselves ask students to box their final answer — so the student's box is the only box on the sheet. A region is a rule, then ruled writing lines, and nothing detects any of it: the crop comes from the declared rectangle alone.
+**Every answer is boxed** (2026-08-31; this reverses the 2026-08-17 rule and page-format §4.1 and §8.5 carry the amendment). One part, one box: solid, continuous, black, **1 pt**, a true rectangle with square corners, no fill, stacked vertically, the full **x 12.0–203.9** writing column wide, never under **28 mm** tall, and always closing at or above **y 257.0** so it clears the bottom registration corners.
+
+*Why, given the old rule said the opposite.* A printed box does four jobs and only the first is obvious: it says where to write; **it is a fiducial**, so a detector perspective-corrects from the box's own corners and nothing depends on the answer landing where the map predicted; it bounds the crop; and it makes the whitespace that returned markup needs. The fiducial job is worth *more* to homework than to an exam, because homework arrives as a phone photograph of a possibly curled page and page-format §6 measures corner-mark detection falling from 4 of 4 to 2 of 4 on a page rotated by six degrees. Both reasons the box was removed have since gone: the spec sentence is amended, and ENG17 HWK1–HWK3 as rebuilt on 30–31 August ask students to box nothing. **If a final-answer mark is ever wanted again, the instruction is to *circle* it** — a circle cannot be a candidate for a rectangle detector.
+
+**The declared rectangle in `layout_{TemplateID}.csv` is the box INTERIOR**, inside the border stroke, and the border is drawn immediately outside it — so a crop never carries the border's own ink, and the exam track's `answerbox.sty`, which records the inner area, agrees. The crop still comes from the declared rectangle alone; nothing in the consume path detects the box. The box is redundancy, not a new dependency.
+
+**There is no separate top rule.** The border replaced it. Drawing both puts two horizontal lines 2.5 mm apart at the top of every region, which is noise.
+
+**Nothing prints in colour**, and it is now asserted. The scans are 8-bit greyscale and that is load bearing: it is what lets the marking stage prove it never altered the student's work, since any pixel with colour was added afterwards. Author-supplied SVG was the one way colour could reach the page, so a figure declaring a non-grey `fill`, `stroke` or `stop-color` **refuses the export**. All thirty ENG17 figures are `#111111` on `#ffffff` and are unaffected.
 
 **The writing lines are dashed, at a 9 mm pitch.** Dashed because a solid horizontal rule beside handwritten maths is the exact shape of a fraction bar, a minus sign or an overbar, and a grader reads it as one; a dash gives the same alignment and skew reference with no long connected run to mistake for a glyph. 9 mm because at 8 mm a sub- or superscript (`V_{32} = V_3 - V_2`) pushes into the next line's zone. They print at 0.5 pt in 75% grey — heavy enough to survive a toner-saving laser, pale enough to threshold out cleanly, since students print these themselves. The region's own top rule stays solid: it is a separator above the writing area, not a line anyone writes maths against. A sketch region carries no rules at all.
 
@@ -304,9 +314,9 @@ part and the overflow; splitting the problem is the author's call and nobody els
 Pack, then break. Nothing is derived from points, and nothing is squeezed to avoid a break:
 
 1. **Every problem starts a new page**, carrying its heading and shared setup text.
-2. Its parts then **pack down the page**: a part's prompt, its fixed-size question text, and its N ruled lines. When the **next** part's prompt, text and lines do not fit in what is left of the page, that part **breaks to a new page**. However many fit at their authored sizes is however many the page carries.
+2. Its parts then **pack down the page**: a part's prompt, its fixed-size question text, and its box of N ruled lines. When the **next** part's prompt, text and box do not fit in what is left of the page — or the box that would be left for it is under 28 mm — that part **breaks to a new page**. However many fit at their authored sizes is however many the page carries.
 3. If a single part's prompt, text and writing area **exceed a whole page**, the part takes the whole page. **An answer is never split across pages** — the next page is no bigger, so a break cannot help, and what splitting produced instead was a 15 mm orphan: one writing line under a repeated heading, which is not somewhere anyone finishes an answer.
-4. **The last region on each page runs to the bottom margin.** Earlier parts on the page keep exactly their authored lines; the final one absorbs the slack. Blank paper below a region is paper a student may write on that is never cropped and never graded, so the rectangle is extended to claim it. A sketch region grows the same way and stays unruled.
+4. **The last box on each page runs to the bottom margin** (`y 257.0`, five millimetres above the format's own limit so the box closes clear of the bottom registration corners). Earlier parts on the page keep exactly their authored lines; the final one absorbs the slack. Blank paper below a region is paper a student may write on that is never cropped and never graded, so the rectangle is extended to claim it. A sketch region grows the same way and stays unruled.
 5. Never squeeze to avoid a break. A break is the correct outcome — paper is cheap, unreadable text is not.
 
 **Every `part_id` gets exactly one region.** The map still *permits* a part to own more than one — `region_id` is the unique key and `part_id` is a display string the spec lets repeat — and a consumer should still **group crops by `part_id` and grade the part once**, so that nothing breaks if the shape ever comes back. As of 2026-08-18 the generator does not produce it.
@@ -315,7 +325,8 @@ Pack, then break. Nothing is derived from points, and nothing is squeezed to avo
 
 - **The QR is the same on every copy.** One class-wide master, no per-student code; the app identifies the student from their login, not from the paper.
 - **Nothing printed may enter the QR's keep-out**, so the first prompt row on every page starts below it. The generator checks the ink it actually laid down, not just the layout, and refuses to emit a template where anything overlaps the symbol — text over the modules can stop it decoding, and the QR is the whole registration mechanism.
-- **Nothing printed may leave the writing column** (x 23.0–192.9, plus 0.25 mm for rounding), checked the same way, against the ink rather than the layout. The header line is the one exemption — the page format anchors it at x = 20.0, left of the column, by design.
+- **Nothing printed may leave the writing column** (x 12.0–203.9, plus 0.25 mm for rounding), checked the same way, against the ink rather than the layout. The column *is* the page-wide safe area now: it used to stop at 23.0/192.9 so a rectangle could never touch a registration corner at any y, and it buys 22 mm of writing width on every line by capping every box at y 257.0 instead, which only costs height on the last box of each page. The header line no longer needs an exemption here — spec 8.4 anchors it at x = 20.0, which was left of the old column and is inside the new one — but it keeps one from the corner keep-out check, since (20.0, 10.0) is inside the NW corner by design.
+- **Nothing but its own writing lines may be printed inside a box**, and **no box may be under 28 mm**. Both are checked at generation and both refuse the template.
 
 ---
 
