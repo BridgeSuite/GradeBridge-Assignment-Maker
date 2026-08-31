@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
+import { Assignment, InputMode, Problem, Subsection, SubmissionType } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService } from '../services/exportService';
 import {
@@ -23,8 +23,6 @@ import { derivePageFormatId } from '../services/qrPayload';
 import { apportionPoints } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, PenLine, Keyboard, QrCode } from 'lucide-react';
-
-const DEFAULT_AI_GRADING_CONFIG: AiGradingConfig = { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 };
 
 const AI_GRADED_TYPES = new Set([
   SubmissionType.AI_GRADED_BINARY,
@@ -99,7 +97,6 @@ const Editor: React.FC = () => {
     aiFeedback: false,
     preamble: '',
     problems: [emptyProblem()],
-    aiGradingConfig: DEFAULT_AI_GRADING_CONFIG,
     createdAt: Date.now(),
     updatedAt: Date.now()
   });
@@ -140,12 +137,15 @@ const Editor: React.FC = () => {
       const loaded = storageService.get(id);
       if (loaded) {
         // Ensure new fields exist on loaded data; strip deprecated fields
-        const { dueDate: _d, dueTime: _t, ...loadedWithoutDate } = loaded as any;
+        // `aiGradingConfig` joins the deprecated fields dropped here: it was a
+        // grader configuration nothing read, removed 2026-08-31. An assignment
+        // saved before then still carries one; drop it silently — it is not the
+        // author's mistake and there is nothing for them to do about it.
+        const { dueDate: _d, dueTime: _t, aiGradingConfig: _ai, ...loadedWithoutDate } = loaded as any;
         const sanitized = {
           ...loadedWithoutDate,
           inputMode: loaded.inputMode || 'electronic',
           aiFeedback: !!loaded.aiFeedback,
-          aiGradingConfig: loaded.aiGradingConfig || DEFAULT_AI_GRADING_CONFIG,
           problems: loaded.problems.map(p => ({
             ...p,
             subsections: p.subsections.map(s => ({
@@ -341,14 +341,19 @@ const Editor: React.FC = () => {
           throw new Error("Invalid assignment format.");
         }
 
+        // A spec exported before 2026-08-31 carries `aiGradingConfig`. Drop it
+        // silently — no warning: it is not the author's mistake, there is
+        // nothing for them to do about it, and nothing reads it.
+        const { aiGradingConfig: _staleGraderConfig, ...loadedWithoutGraderConfig } =
+          loadedAssignment as Assignment & { aiGradingConfig?: unknown };
+
         // Generate new IDs for everything
         const newAssignment = {
-          ...loadedAssignment,
+          ...loadedWithoutGraderConfig,
           id: uuidv4(),
           title: loadedAssignment.title + ' (Template)',
           createdAt: Date.now(),
           updatedAt: Date.now(),
-          aiGradingConfig: loadedAssignment.aiGradingConfig || DEFAULT_AI_GRADING_CONFIG,
           aiFeedback: !!loadedAssignment.aiFeedback,
           problems: loadedAssignment.problems.map(p => ({
             ...p,

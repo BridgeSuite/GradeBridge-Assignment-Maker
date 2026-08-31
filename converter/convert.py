@@ -55,13 +55,6 @@ MIN_WORDS_MAP = {
 
 AI_GRADED_TYPES = set(TYPE_MAP[k] for k in TYPE_MAP if k.startswith('ai-graded:'))
 
-DEFAULT_AI_CONFIG = {
-    "model": "claude-haiku-4-5-20251001",
-    "temperature": 0.1,
-    "maxTokens": 512
-}
-
-
 # --- Figures -------------------------------------------------------------
 # Port of services/figureBlocks.ts — keep the two in lockstep. A figure sits in
 # the problem stem, above the first sub-part, in one of two forms:
@@ -525,7 +518,6 @@ def parse_md(filepath):
         # Only present when the .md pinned one; otherwise the QR template
         # generator derives it from the course code and title.
         **({'pageFormatId': meta['pageFormatId']} if meta.get('pageFormatId') else {}),
-        'aiGradingConfig': DEFAULT_AI_CONFIG,
         'createdAt': now_ms,
         'updatedAt': now_ms
     }

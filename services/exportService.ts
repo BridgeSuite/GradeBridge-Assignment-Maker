@@ -619,6 +619,14 @@ export const generateGradingRubric = (assignment: Assignment): object => {
         // and the authored `.md` still carries the full `<svg>`.
         ...(prob.description ? { problem_statement: stemForGrader(prob.description) } : {}),
         max_points: sub.points,
+        // The declared modality of the *answer*, so a consumer holding the
+        // rubric alone can route without guessing at read time (OCR addendum
+        // v1.5 §3, T19) and without joining to the layout map. Derived from the
+        // same `isDrawing` that writes `is_drawing` in `layout_*.csv`: the two
+        // are deliberately duplicated and must agree. `"hybrid"` is reserved in
+        // the documented value set but never emitted — this app declares one
+        // boolean per part today.
+        answer_modality: sub.isDrawing ? 'figure' : 'text',
         // Handwritten is checked first: pages are cropped per region, so it never
         // falls through to the image or plain-human branches.
         grading_type: isHandwritten
@@ -640,11 +648,9 @@ export const generateGradingRubric = (assignment: Assignment): object => {
     assignment_id: assignmentId,
     course_code: assignment.courseCode,
     assignment_title: assignment.title,
-    ai_grading_config: {
-      model: assignment.aiGradingConfig?.model || 'claude-haiku-4-5-20251001',
-      temperature: assignment.aiGradingConfig?.temperature ?? 0.1,
-      max_tokens: assignment.aiGradingConfig?.maxTokens || 1024
-    },
+    // No model, temperature or token budget travels with the rubric. The
+    // Assignment Maker describes the work; the grading system decides how to
+    // grade it and allocates its own resources — see ASSIGNMENT_MD_SPEC.md §12.
     rubrics
   };
 };
@@ -892,7 +898,13 @@ ${katexCss}
 // Student Submission app switches to gb2; when unset the field is omitted
 // entirely, leaving the spec identical to pre-gb2 exports (→ gb1).
 export const buildAssignmentSpec = async (assignment: Assignment): Promise<Assignment> => {
-  const { coursePublicKey, ...withoutKey } = assignment;
+  // `aiGradingConfig` was a grader configuration nothing read. It rode inside
+  // the spec because it was a required field on `Assignment`, which put a
+  // grading-resource decision in the student's browser. Removed 2026-08-31;
+  // dropped here as well so an assignment loaded from a pre-change JSON or from
+  // localStorage cannot carry one back out. See ASSIGNMENT_MD_SPEC.md §12.
+  const { coursePublicKey, aiGradingConfig: _staleGraderConfig, ...withoutKey } =
+    assignment as Assignment & { aiGradingConfig?: unknown };
   const pem = normalizeCoursePublicKey(coursePublicKey || '');
   if (!pem) return withoutKey as Assignment;
 

@@ -56,6 +56,29 @@ against the same WebCrypto the browser uses.
   mirrored like the delimiter file, checked from both sides
   (`tests/figure-tests.mjs` in the Student app).
 
+- **The export contract** (§12, 2026-08-31) — the guard that makes the spec
+  sentence real rather than advice. **No exported artifact carries a model name,
+  a temperature or a token budget**: the rubric JSON, the decrypted spec JSON and
+  the layout CSV are all scanned, over what `buildExportEntries()` actually
+  writes rather than a hand-built object. It scans **keys**, not raw text —
+  engineering prose says "temperature" and "model" constantly, and a substring
+  scan would cry wolf on every thermal problem ever set, which is how a guard
+  gets deleted; a model *identifier* (`claude-…`) is scanned as text, since that
+  shape does not occur in prose. The fixture's own prose says both words on
+  purpose. Mutation-tested: putting `ai_grading_config` back fails two checks.
+
+  The second half asserts every rubric item declares an **`answer_modality`** in
+  the documented set, that the reserved `"hybrid"` is never emitted, and that it
+  **agrees with `is_drawing`** in the layout map for every region — the two are
+  deliberately duplicated so no consumer has to join two files to learn one fact,
+  which only holds if they cannot drift. Both values have to appear or the check
+  proves nothing. Also mutation-tested, in both directions (hardcode the value,
+  and drop the field).
+
+  Acceptance is covered too: a pre-change spec carrying `aiGradingConfig` loads,
+  says nothing about it, and does not carry it back out; and the `.md` round trip
+  is still byte-stable, since the markdown format never carried any of this.
+
 ## `tests/templateTests.mjs`
 
 The **spec 8.7 self-test** for the GradeBridge page-format QR template, all eight

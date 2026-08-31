@@ -104,7 +104,6 @@ const makeAssignment = (problems, extra = {}) => ({
   id: 'qr1', courseCode: 'EEC130B', title: 'Homework 3',
   inputMode: 'handwritten', preamble: 'Show all working on paper.',
   problems: problems.map((subs, i) => ({ id: `p${i}`, name: `Problem ${i + 1}`, description: '', subsections: subs })),
-  aiGradingConfig: { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 },
   createdAt: 1700000000000, updatedAt: 1700000000000, ...extra,
 });
 

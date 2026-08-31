@@ -13,12 +13,6 @@ export enum SubmissionType {
   FILE_UPLOAD = 'File Upload'
 }
 
-export interface AiGradingConfig {
-  model: string;
-  temperature: number;
-  maxTokens: number;
-}
-
 /**
  * How much writing space a handwritten part gets on the printed template,
  * **authored** rather than derived: the number of writing lines to reserve.
@@ -78,7 +72,14 @@ export interface Assignment {
   dueTime?: string; // HH:MM — optional, managed in Canvas
   preamble: string;
   problems: Problem[];
-  aiGradingConfig: AiGradingConfig;
+  /**
+   * There is deliberately no grading-resource field here — no model, no
+   * temperature, no token budget. **The Assignment Maker describes the work; the
+   * grading system decides how to grade it** (ASSIGNMENT_MD_SPEC.md §12). The
+   * `aiGradingConfig` that used to live here was read by nothing and was
+   * removed on 2026-08-31; a spec exported before then still carries it and is
+   * silently ignored on import.
+   */
   targetPoints?: number; // Target total for point scaling (default 100)
   coursePublicKey?: string; // SPKI PEM (public only). Present → students produce hardened gb2 submissions; absent → gb1.
   createdAt: number;

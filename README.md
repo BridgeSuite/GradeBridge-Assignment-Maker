@@ -258,12 +258,12 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
   "assignment_id": "EEC1_Lab1_Prelab",
   "course_code": "EEC1",
   "assignment_title": "Lab 1 Prelab",
-  "ai_grading_config": { "model": "claude-haiku-4-5-20251001", "temperature": 0.1, "max_tokens": 1024 },
   "rubrics": {
     "p1s0": {
       "subsection_id": "p1s0",
       "max_points": 75,
       "grading_type": "ai",
+      "answer_modality": "text",
       "grading_prompt": "Required elements: (1) ...; (2) ...",
       "min_words": 150
     },
@@ -271,11 +271,17 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
       "subsection_id": "p0s0",
       "max_points": 5,
       "grading_type": "human_image",
+      "answer_modality": "text",
       "grading_prompt": ""
     }
   }
 }
 ```
+
+**The rubric never carries a model name, a temperature or a token budget.** The Assignment Maker
+describes the work; the grading system decides how to grade it and allocates its own resources. An
+`ai_grading_config` block appeared here until 2026-08-31; nothing ever read it, and a test now fails
+if any exported artifact grows one back. See `ASSIGNMENT_MD_SPEC.md` §12.
 
 `grading_type` values:
 
@@ -285,6 +291,12 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
 | `"human"` | TA reviews text response (also used for Text + Image) |
 | `"human_image"` | TA reviews uploaded image |
 | `"ai_image_completion"` | Auto-award if `images_submitted > 0` |
+| `"ai_handwritten"` | Handwritten part, OCR then AI-graded from the page crop |
+| `"human_handwritten"` | Handwritten part, TA grades from the page crop |
+
+`answer_modality` values: `"text"` (a written answer) or `"figure"` (a drawing — a part authored
+`> template: sketch`). `"hybrid"` is reserved and not emitted. It is the declared modality a grader
+routes on, and it must agree with `is_drawing` in `layout_{TemplateID}.csv`.
 
 ---
 

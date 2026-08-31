@@ -5,16 +5,10 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Assignment, InputMode, Problem, Subsection, SubmissionType, AiGradingConfig } from '../types';
+import { Assignment, InputMode, Problem, Subsection, SubmissionType } from '../types';
 import { LEGACY_SPACE_LINES } from './templateLayout';
 import { FIGURE_FENCE_CLOSE_RE, FIGURE_FENCE_OPEN_RE, splitFigures } from './figureBlocks';
 import { RETIRED_TYPE_TAGS, keepPromptAsGraderNote, retiredTypeWarning } from './retiredTypes';
-
-const DEFAULT_AI_CONFIG: AiGradingConfig = {
-  model: 'claude-haiku-4-5-20251001',
-  temperature: 0.1,
-  maxTokens: 512,
-};
 
 const TYPE_MAP: Record<string, SubmissionType> = {
   'text':                 SubmissionType.TEXT,
@@ -368,7 +362,6 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
     aiFeedback: meta.aiFeedback,
     preamble: meta.preamble,
     problems,
-    aiGradingConfig: DEFAULT_AI_CONFIG,
     createdAt: now,
     updatedAt: now,
   };

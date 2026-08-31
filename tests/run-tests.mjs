@@ -178,7 +178,6 @@ const makeAssignment = (extra = {}) => ({
     id: 'p1', name: 'Problem 1', description: '',
     subsections: [{ id: 's1', name: 'Part a', description: 'Do the thing', points: 100, submissionType: 'Text' }],
   }],
-  aiGradingConfig: { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 },
   createdAt: 1700000000000,
   updatedAt: 1700000000000,
   ...extra,
@@ -424,7 +423,6 @@ if (fixture) {
         },
       ],
     }],
-    aiGradingConfig: { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 },
     createdAt: 1700000000000,
     updatedAt: 1700000000000,
   };
@@ -609,7 +607,6 @@ if (fixture) {
         },
       ],
     }],
-    aiGradingConfig: { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 },
     createdAt: 1700000000000,
     updatedAt: 1700000000000,
   };
@@ -1376,6 +1373,185 @@ ${r.problem_statement}`);
     const clean = makeAssignment();
     assertEqual(degradeRetiredTypes(clean), [], 'a clean assignment reported a degrade');
     assertEqual(clean.problems[0].subsections[0].submissionType, 'Text', 'a clean part was rewritten');
+  });
+}
+
+// =====================================================
+// 9. The export contract (ASSIGNMENT_MD_SPEC.md §12)
+// =====================================================
+// Two guards, both over the artifacts a real export actually writes rather than
+// a hand-built object:
+//
+//   1. No exported artifact carries a grading-system resource decision. The
+//      Assignment Maker describes the work; the grading system decides how to
+//      grade it. `ai_grading_config` was deleted on 2026-08-31 after two agents
+//      spent a cycle escalating a 512-token ceiling that nothing ever read.
+//      Without this check the spec sentence is only advice.
+//   2. Every rubric item declares `answer_modality`, and it agrees with
+//      `is_drawing` in the layout map. The two are deliberately duplicated so a
+//      consumer never has to join two files to learn one fact — which only
+//      holds if they cannot drift.
+{
+  const MODALITIES = ['text', 'figure', 'hybrid'];
+
+  // Keys, not raw text: real question prose says "temperature" and "model" all
+  // the time in an engineering course, and a substring scan would cry wolf on
+  // every thermal problem ever set. A model *identifier* is scanned as text,
+  // because that shape does not occur in prose.
+  const RESOURCE_KEY = /^(model|model_name|temperature|max_?tokens|top_?[pk])$/i;
+  const MODEL_ID = /claude-[a-z0-9]/i;
+
+  const resourceKeys = (node, path = '$') => {
+    if (Array.isArray(node)) return node.flatMap((v, i) => resourceKeys(v, `${path}[${i}]`));
+    if (node && typeof node === 'object') {
+      return Object.entries(node).flatMap(([k, v]) => [
+        ...(RESOURCE_KEY.test(k) ? [`${path}.${k} = ${JSON.stringify(v)}`] : []),
+        ...resourceKeys(v, `${path}.${k}`),
+      ]);
+    }
+    return [];
+  };
+
+  // A handwritten assignment exercises every artifact at once: it is the only
+  // mode that writes a layout map, and its sketch part is the only thing that
+  // produces answer_modality "figure". The prose deliberately says "model" and
+  // "temperature" — a guard that a course on heat transfer would trip is a
+  // guard someone will delete.
+  const contractAssignment = {
+    id: 'xc1', courseCode: 'ENG17', title: 'HW 1',
+    inputMode: 'handwritten',
+    preamble: 'Show all working. Ambient temperature is 300 K unless stated.',
+    problems: [{
+      id: 'p1', name: 'Thermal model of the divider', description: '',
+      subsections: [
+        {
+          id: 's1', name: 'Node equations',
+          description: 'Write the node equations, and state the model you assume for the source temperature.',
+          points: 60, submissionType: 'Handwritten', handwrittenGradingMode: 'ai',
+          answerLines: 8,
+          aiGradingPrompt: 'Required elements: (1) one equation per node; (2) a stated source model.',
+        },
+        {
+          id: 's2', name: 'Field sketch', description: 'Sketch the field pattern.',
+          points: 40, submissionType: 'Handwritten', handwrittenGradingMode: 'human',
+          answerLines: 10, isDrawing: true,
+          graderNote: 'Arrows normal to the walls.',
+        },
+      ],
+    }],
+    createdAt: 1700000000000,
+    updatedAt: 1700000000000,
+  };
+
+  let entries = null, entryError = null;
+  try { entries = await exportPdfSvc.buildExportEntries(contractAssignment); }
+  catch (err) { entryError = err; }
+
+  if (!entries) {
+    skip('export contract: exported artifacts carry no grading-resource field',
+      `buildExportEntries threw: ${entryError && entryError.message}`);
+    skip('export contract: answer_modality present and agrees with is_drawing',
+      'no export entries');
+  } else {
+    const csvName = Object.keys(entries).find(n => /^layout_.*\.csv$/.test(n));
+    const rubricName = Object.keys(entries).find(n => n.endsWith('_grading_rubric.json'));
+
+    check('export contract: the ZIP holds a rubric, an encrypted spec and a layout map', () => {
+      assert(rubricName, `no grading rubric in: ${Object.keys(entries).join(', ')}`);
+      assert(csvName, `no layout map in: ${Object.keys(entries).join(', ')}`);
+      assert(typeof entries['assignment_spec.json'] === 'string', 'no spec JSON');
+    });
+
+    const rubricJson = entries[rubricName];
+    const layoutCsv = entries[csvName];
+    const specJson = JSON.stringify(await decryptJson(entries['assignment_spec.json']));
+
+    check('export contract: no exported artifact carries a model, temperature or token budget', () => {
+      for (const [label, text] of [['grading rubric', rubricJson], ['assignment spec', specJson]]) {
+        assertEqual(resourceKeys(JSON.parse(text)), [],
+          `the ${label} carries a grading-system resource decision`);
+        assert(!MODEL_ID.test(text), `the ${label} names a model: ${text.match(MODEL_ID)}`);
+      }
+      const header = layoutCsv.split('\n')[0].split(',').map(c => c.trim());
+      assertEqual(header.filter(c => RESOURCE_KEY.test(c)), [],
+        'the layout map has a grading-resource column');
+      assert(!MODEL_ID.test(layoutCsv), 'the layout map names a model');
+      assert(!/ai_grading_config/.test(rubricJson + specJson + layoutCsv),
+        'ai_grading_config is back in an exported artifact');
+    });
+
+    check('export contract: every rubric item declares an answer_modality in the documented set', () => {
+      const { rubrics } = JSON.parse(rubricJson);
+      const items = Object.entries(rubrics);
+      assert(items.length > 0, 'no rubric items');
+      for (const [key, item] of items) {
+        assert('answer_modality' in item, `${key} has no answer_modality`);
+        assert(MODALITIES.includes(item.answer_modality),
+          `${key} declares answer_modality ${JSON.stringify(item.answer_modality)}`);
+        assert(item.answer_modality !== 'hybrid', `${key} emitted the reserved value "hybrid"`);
+      }
+    });
+
+    check('export contract: answer_modality agrees with is_drawing in the layout map', () => {
+      const { rubrics } = JSON.parse(rubricJson);
+      const rows = layoutCsv.trim().split('\n').slice(1).map(line => {
+        const c = line.split(',');
+        return { partId: c[3], isDrawing: c[9] === '1' };
+      });
+      // The map is keyed by part_id (`1(a)`, or a plain `2` for a lone part);
+      // the rubric is keyed by p{i}s{j}. Rebuild the display string the way
+      // enumerateParts() does, out of what the rubric itself carries.
+      const partsPerProblem = {};
+      for (const item of Object.values(rubrics)) {
+        partsPerProblem[item.problem_number] = (partsPerProblem[item.problem_number] || 0) + 1;
+      }
+      let compared = 0;
+      for (const [key, item] of Object.entries(rubrics)) {
+        const partId = partsPerProblem[item.problem_number] === 1
+          ? `${item.problem_number}`
+          : `${item.problem_number}(${item.subsection_letter})`;
+        const row = rows.find(r => r.partId === partId);
+        assert(row, `no layout row for ${key} (part_id ${partId})`);
+        assertEqual(item.answer_modality, row.isDrawing ? 'figure' : 'text',
+          `${key} (part_id ${partId}) disagrees with the map's is_drawing`);
+        compared++;
+      }
+      assertEqual(compared, rows.length, 'not every region was compared');
+      // Both values have to be exercised, or the check proves nothing.
+      const seen = [...new Set(Object.values(rubrics).map(r => r.answer_modality))].sort();
+      assertEqual(seen, ['figure', 'text'], 'the fixture did not exercise both modalities');
+    });
+  }
+
+  check('export contract: an electronic rubric declares a modality too', () => {
+    const { rubrics } = generateGradingRubric(makeAssignment());
+    for (const [key, item] of Object.entries(rubrics)) {
+      assert(MODALITIES.includes(item.answer_modality),
+        `${key} declares answer_modality ${JSON.stringify(item.answer_modality)}`);
+    }
+  });
+
+  // The markdown format never carried any of this, so the round trip should be
+  // untouched by the removal — assert it rather than assume it.
+  check('export contract: dropping the grader config left the .md round trip byte-stable', () => {
+    const md = assignmentToMd(contractAssignment);
+    assertEqual(assignmentToMd(parseMdToAssignment(md)), md, '.md round trip is not byte-stable');
+  });
+}
+
+// Acceptance 3: a spec exported before this change carries `aiGradingConfig`.
+// It must load, say nothing about it, and not carry it back out.
+{
+  const stale = {
+    ...makeAssignment(),
+    aiGradingConfig: { model: 'claude-haiku-4-5-20251001', temperature: 0.1, maxTokens: 512 },
+  };
+  const spec = await buildAssignmentSpec(stale);
+  const rubric = JSON.stringify(generateGradingRubric(stale));
+
+  check('export contract: a pre-change spec loads and does not re-export the stale field', () => {
+    assert(!('aiGradingConfig' in spec), 'the stale grader config rode back out in the spec');
+    assert(!/ai_grading_config|claude-/.test(rubric), 'the stale grader config reached the rubric');
   });
 }
 

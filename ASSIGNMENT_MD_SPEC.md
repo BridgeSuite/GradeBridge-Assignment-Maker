@@ -166,6 +166,12 @@ Attach grading guidance to a sub-part with a blockquote **immediately under** it
 | `> grading_prompt:` | the `ai-graded:*` tiers **and** `handwritten` (AI) | The rubric/prompt the AI grades against. |
 | `> grader_note:` | `text`, `image`, `text+image`, and `handwritten:human` | The human grader's reference: expected answer / what to look for. Never shown to students. |
 
+**Before writing a grading prompt, read §12.** It says who reads each exported artifact and what each
+one is authoritative for. The short version: **the Assignment Maker describes the work; the grading
+system decides how to grade it.** A grading prompt says what a good answer contains — never which model
+should read it, how hot it should run, or how many tokens it is worth. Those are the grading system's
+own decisions and it makes them from the question type and the materials it is given.
+
 Wrap long guidance across multiple lines by starting each continuation line with `>`; the lines are joined into one value:
 ```markdown
 > grading_prompt: Required elements: (1) correct use of f_c = c/(2a);
@@ -406,3 +412,61 @@ Import → Export reproduces the file byte-for-byte:
 - Two problems sharing the same figure keep both copies.
 
 A figure is separated from the prose around it by one blank line, which is the form Export writes; a hand-authored file that omits the blank line gains one on its first round trip and is stable from then on, the same way point normalisation behaves.
+
+---
+
+## 12. Who reads each exported artifact
+
+**The Assignment Maker describes the work; the grading system decides how to grade it.**
+
+That sentence is here because on 31 August 2026 two agents spent a cycle on a false alarm. An exported
+`{stem}_grading_rubric.json` carried `"ai_grading_config": {"model": "claude-haiku-4-5-20251001",
+"temperature": 0.1, "max_tokens": 512}`. Both agents reasoned correctly — a 512-token ceiling on the
+smallest model in the family really would bind on a prompt that asks a grader to review a method, name
+a misconception and find the first wrong line — and escalated. The whole thing was moot: the field had
+no consumers anywhere in the suite, nobody had chosen 512 per assignment (it was hardcoded on import),
+and the grading and OCR code that exists picks its own model and ceiling from its own CLI. The field
+was deleted on 2026-08-31 and a test now fails if any exported artifact grows one back. **Do not delete
+this paragraph as obvious** — it is the reason the sentence above exists, and the sentence is what stops
+the next recurrence.
+
+The failure was documentation, not code: the artifact never said who reads it. So, per artifact:
+
+| Artifact | Read by | Authoritative for | Never carries |
+|---|---|---|---|
+| `assignment_spec.json` | the Student Submission app | what the student is asked, and how they are allowed to answer it | anything about grading resources; anything a student must not see |
+| `layout_{TemplateID}.csv` | the page consumer that crops (§10) | **where** each region is on the page — nothing else | anything a grader needs in order to grade |
+| `{stem}_grading_rubric.json` | the grading system | what each item asks, what it is worth, what a grader is told, and the answer's **modality** | **model names, temperature, token budgets, or any other grading-system resource decision** |
+| `{stem}_grader_document.html` | a human TA, on screen or on paper | the answer key and the rubric in readable form | anything machine-parsed — nothing may depend on its markup |
+| `assignment.pdf` | the student, on paper | the whole assignment | identity fields — no name, ID or date blank (§10) |
+| `assignment.html`, `assignment.tex` | a human, for reading and hand-editing | the assignment as a document | anything the other artifacts are authoritative for |
+
+The grading system is **told the type of question and given the supporting materials, and allocates its
+own resources from there.** How many tokens a grader needs, which model it runs, how hot it runs — none
+of that is an authoring decision, none of it can be made well from this side of the boundary, and a
+value written here is a value some consumer will one day obey.
+
+### `answer_modality` — the declaration a grader does need
+
+Every rubric item carries `answer_modality`. It exists because the ingest contract requires it:
+
+> **Routing SHALL be by declared modality from the authoring stage, not guessed at read time.**
+> (`GradeBridge_OCR_Transcription_v1.5_addendum` §3, T19)
+
+| Value | Meaning |
+|---|---|
+| `"text"` | The answer is writing. |
+| `"figure"` | The answer is a drawing — a part authored `> template: sketch` (§7). |
+| `"hybrid"` | **Reserved, never emitted.** The exam track declares text, figure or hybrid per part; this app has one boolean today. Reserving the value now makes adding it later additive rather than a migration. |
+
+`answer_modality` and `is_drawing` in `layout_{TemplateID}.csv` are **deliberately duplicated** and must
+agree. They are not redundant: the two artifacts have different consumers and different lifetimes, and
+no consumer should have to join two files to learn one fact. A test asserts they agree.
+
+**Open question, not yet decided.** There is no authoring surface for `hybrid` — a part that wants both
+working and a sketch. Deciding one means choosing a tag or a `> template:` option, and that is a
+separate call, deliberately not invented here. The same applies to the electronic `[image]` and
+`[text+image]` types: they are answered with a picture but are declared `"text"` today, because
+`answer_modality` is derived from the one boolean this app has (`sketch`, §7), which is handwritten-only.
+Neither gap blocks anything: no consumer routes on modality for an electronic assignment.
+
