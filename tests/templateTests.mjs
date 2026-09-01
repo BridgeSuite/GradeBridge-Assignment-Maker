@@ -1308,7 +1308,20 @@ check('the standing instructions name the box, and never ask anyone to box anyth
   // a phrase spans two text operators.
   const text = [...pdfText.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' ');
   assert(/inside its printed box/i.test(text), `the instructions do not name the box: ${text.slice(0, 300)}`);
-  assert(!/\bbox (your|the|every|each|all)\b/i.test(text), 'the sheet tells the student to box something');
+  // The danger is the IMPERATIVE "box your final answer" — a hand-drawn
+  // rectangle is another candidate for a rectangle detector. The old pattern was
+  // `box (your|the|...)`, which also caught "write into the box the solution",
+  // where "box" is a noun with a determiner in front of it. So: "box" used as a
+  // verb (nothing determiner-ish before it) taking an answer-like object.
+  const BOX_IMPERATIVE = /(?<!\b(?:the|a|an|its|his|her|their|each|every|this|that|printed|one)\s)\bbox\s+(?:your|the|every|each|all)\s+(?:final\s+)?(?:answer|result|solution|working|work)s?\b/i;
+  assert(!BOX_IMPERATIVE.test(text), 'the sheet tells the student to box something');
+  // Proof the precision did not disarm it: the real phrasing still trips.
+  assert(BOX_IMPERATIVE.test('Box your final answer.'),
+    'the box-imperative check no longer catches the thing it exists for');
+  assert(BOX_IMPERATIVE.test('When you are done, box the answer clearly.'),
+    'the check misses a mid-sentence imperative');
+  assert(!BOX_IMPERATIVE.test('write into the box the solution you want read'),
+    'the check still trips on "box" used as a noun');
 
   // "resting each line of writing on a rule" was dropped on 2026-09-01, and
   // deliberately: it is advice that helps only the automatic reader, which the

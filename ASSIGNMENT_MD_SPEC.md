@@ -364,11 +364,34 @@ neither able to see the other's. **The self-test refuses an export whose preambl
 instruction**, matching on normalised six-word windows rather than exact strings, because "almost word
 for word" is the shape the failure actually takes.
 
-The tool prints, once, on page 1: how to print the sheet and check the corner marks; not to write a
-name or student ID; that only what is inside a box is collected, and what to do about running out of
-room; how to cancel abandoned work; and to write darker rather than bigger. The author's preamble
-keeps everything about the work — show your working, give units, and course conventions such as
-ENG17's cover-sheet rule.
+The tool prints, once, on page 1, in this order: that the work must be the student's own; how to print
+the sheet and check the corner marks; not to write a name or student ID; that only what is inside a
+box is collected, and that the box wants a composed answer rather than a workspace; how to cancel
+abandoned work; and to write darker rather than bigger. The author's preamble keeps everything about
+the work — show your working, give units, and course conventions such as ENG17's cover-sheet rule.
+
+**The integrity block names no institution, and none may be named.** "The work you submit must be your
+own. Submitting work that is not your own is academic misconduct." That is true wherever the sheet is
+printed, which it has to be: this tool is meant for use beyond the course and the campus that
+commissioned it, and a named code, an office, a penalty schedule or a reporting route all differ by
+institution and would be wrong somewhere. It is the split extended one step — **the tool states the
+obligation, the author states the policy.** An author citing their institution's code by name does it
+in the preamble, where course and campus specifics already live.
+
+> **Open, and it belongs to the author: what assistance is permitted.** The standing text does not say
+> whether a calculator, a textbook, a classmate, a study group or an AI assistant is allowed, because
+> that varies by course and by institution. **Decide it in the preamble.** If you do not, your course
+> inherits the previous course's unstated assumption, which is the failure this note exists to
+> prevent.
+
+**On "the box is not scratch paper."** The item about running out of room used to end *"the boxes are
+sized for a full answer; if you are running out of room, there is usually a shorter route"*. That
+treats running out of room as a **sizing** problem and answers it by telling a student who needed the
+room that they took the long way. Running out of room is a **composition** problem: the sheet now says
+to work the problem out on scratch paper and write into the box the solution you want read. That
+teaches something, drops the implicit accusation, makes the space question largely disappear, and is
+honest about the artifact — a box that collects only what is inside it should say plainly that it
+wants a solution rather than a workspace.
 
 **The governing rule for anything added to the tool's half:**
 

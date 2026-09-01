@@ -307,6 +307,28 @@ export const MIN_ANSWER_LINES = Math.max(1, Math.ceil(
  */
 export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: readonly string[] }> = [
   {
+    // First on the page, above the printing instructions, so it is read rather
+    // than buried among them.
+    //
+    // **No institution is named, and none may be.** This tool is meant for use
+    // beyond the course and the campus that commissioned it, so the standing
+    // text has to be true everywhere it is printed. "Academic misconduct" is the
+    // common term; a named code, an office, a penalty schedule and a reporting
+    // route all differ by institution and would be wrong somewhere. That is the
+    // split extended one step: **the tool states the obligation, the author
+    // states the policy.**
+    //
+    // OPEN, AND IT BELONGS TO THE AUTHOR: this says nothing about what
+    // assistance is permitted — a calculator, a textbook, a classmate, a study
+    // group, an AI assistant. That varies by course and by institution, so it
+    // belongs in the preamble. Every course that adopts this tool will otherwise
+    // inherit the previous course's unstated assumption.
+    heading: 'Your own work',
+    items: [
+      'The work you submit must be your own. Submitting work that is not your own is academic misconduct.',
+    ],
+  },
+  {
     heading: 'Before you start',
     items: [
       'Print at 100%, not "fit to page". Check that all four black corner squares appear on every sheet.',
@@ -316,12 +338,22 @@ export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: read
   {
     heading: 'As you work',
     items: [
-      // States the constraint and then gives a route out of it, rather than the
+      // States the constraint and then says what the box is FOR, rather than the
       // bare prohibition that was held back in August: "do not continue in the
       // margin or on the back" told a student who had run out of room to write
       // less, with no alternative. If a continuation mechanism is ever built,
       // this is the sentence that announces it.
-      'Write each answer inside its printed box. Only what is inside the box is collected. The boxes are sized for a full answer; if you are running out of room, there is usually a shorter route.',
+      //
+      // Amended 2026-09-01. It previously ended "the boxes are sized for a full
+      // answer; if you are running out of room, there is usually a shorter
+      // route" — which treats running out of room as a SIZING problem and
+      // answers it by telling a student who needed the room that they took the
+      // long way. Running out of room is a COMPOSITION problem. Saying so
+      // teaches something, drops the implicit accusation, and makes the space
+      // question largely disappear. It also makes the sheet honest about the
+      // artifact: a box that collects only what is inside it should say plainly
+      // that it wants a solution, not a workspace.
+      'Write each answer inside its printed box. Only what is inside the box is collected. Work the problem out on scratch paper first, then write into the box the solution you want read. The box is not scratch paper. It is sized for a composed answer, not for everything you tried.',
       'One line through anything you have abandoned.',
       'Darker beats bigger. A faint pencil scans badly.',
     ],

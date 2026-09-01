@@ -209,6 +209,20 @@ near-miss paraphrase and asserts the failure names the duplicated sentence, and
 drives an on-topic preamble to assert it is left alone — a check that fires on
 ordinary authoring would be turned off within a week.
 
+The standing text was amended the same day (A1/A2): an integrity block goes
+first, and the running-out-of-room item now says the box wants a composed answer
+rather than a workspace. Neither is structural — page 1 has no regions, so
+`layout_id` cannot move for a text change, and the suite proves it does not.
+
+That amendment did surface one real weakness. The check that the sheet never
+tells a student to **draw** a box was `box (your|the|every|each|all)`, which also
+matched *"write into the box the solution"* — "box" as a noun with a determiner
+in front of it. It now requires "box" used as a **verb** (nothing determiner-ish
+before it) taking an answer-like object, and the check carries its own positive
+controls: it must still fire on "Box your final answer." and on a mid-sentence
+"box the answer", and must not fire on the noun. A loosened check with no proof
+it still catches the original case is how a guard quietly dies.
+
 Mutation-tested: letting problems back onto page 1 makes generation refuse
 outright (naming every region it placed there), and making the overflow
 unreportable fails guard 4. Electronic assignments are asserted to get neither an
