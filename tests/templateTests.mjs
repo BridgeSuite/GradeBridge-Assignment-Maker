@@ -26,7 +26,7 @@ import { build } from 'esbuild';
 import jsQR from 'jsqr';
 import { spawnSync } from 'node:child_process';
 import { webcrypto } from 'node:crypto';
-import { copyFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -1881,6 +1881,146 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
   assertEqual(cols, ['assignment_id', 'layout_id', 'region_id', 'part_id', 'page_k',
     'x0', 'y0', 'x1', 'y1', 'is_drawing', 'max_points'], 'the map columns are not spec 4.3');
 });
+
+// =====================================================
+// THE LAYOUT MAP AND THE GRADING RUBRIC JOIN
+// =====================================================
+// THE CHECK THAT NEVER EXISTED. Two identifier schemes name one entity and were
+// generated independently: the map and the printed crop use `p1a` / `1(a)`, the
+// rubric is keyed `p0s0`. `rubrics["p1a"]` does not exist, and a consumer's
+// first guess is that it does — they get an absent entry, not an error.
+//
+// The join is also asymmetric. A single-part problem's `part_id` is `4`, not
+// `4(a)`, while the rubric still records `subsection_letter: "a"`, so a consumer
+// parsing `part_id` literally silently missed seven of ENG17 HW1's seventeen
+// regions. Nothing read both files, so nothing could notice.
+//
+// Every check below is written synchronously with its awaits hoisted: `check()`
+// pushes async bodies onto `pending`, which nothing awaits before the report is
+// printed.
+{
+  const exportJoinSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportJoin.mjs');
+  const mdParserJoin = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParserJoin.mjs');
+
+  /** Both files, as a consumer receives them: the map's rows and the rubric's entries. */
+  const joinReport = async (assignment) => {
+    const t = await gen.generateTemplate(assignment);
+    const rubric = exportJoinSvc.generateGradingRubric(assignment);
+
+    const lines = t.csv.trim().split('\n');
+    const head = lines[0].split(',');
+    const col = (n) => head.indexOf(n);
+    const rows = lines.slice(1).map(r => r.split(',')).map(r => ({
+      regionId: r[col('region_id')],
+      partId: r[col('part_id')],
+      maxPoints: Number(r[col('max_points')]),
+    }));
+
+    const entries = Object.entries(rubric.rubrics).map(([key, v]) => ({
+      key, regionId: v.region_id, partId: v.part_id, maxPoints: v.max_points,
+    }));
+    return { rows, entries, layoutId: t.layoutId };
+  };
+
+  const assertJoinsOneToOne = ({ rows, entries }, label) => {
+    // Every map row finds exactly one rubric entry…
+    for (const row of rows) {
+      const hits = entries.filter(e => e.regionId === row.regionId);
+      assert(hits.length === 1,
+        `${label}: region ${row.regionId} matched ${hits.length} rubric entries, expected 1`);
+      assert(hits[0].maxPoints === row.maxPoints,
+        `${label}: region ${row.regionId} is worth ${row.maxPoints} on the map and ` +
+        `${hits[0].maxPoints} in the rubric`);
+      assert(hits[0].partId === row.partId,
+        `${label}: region ${row.regionId} is part "${row.partId}" on the map and ` +
+        `"${hits[0].partId}" in the rubric`);
+    }
+    // …and every rubric entry is claimed by exactly one map row.
+    for (const e of entries) {
+      const hits = rows.filter(r => r.regionId === e.regionId);
+      assert(hits.length === 1,
+        `${label}: rubric entry ${e.key} (region ${e.regionId}) matched ${hits.length} map rows, expected 1`);
+    }
+    assert(rows.length === entries.length,
+      `${label}: ${rows.length} map rows against ${entries.length} rubric entries`);
+    // The rubric key is NOT the region id, and must not become it — `p0s0` is
+    // load-bearing for the student payload keys and the electronic image names.
+    assert(entries.every(e => e.key !== e.regionId),
+      `${label}: the rubric key and the region id have been unified; three consumers depend on them differing`);
+  };
+
+  // The asymmetric case, which is the one that actually broke: a single-part
+  // problem beside multi-part ones. `p2` / "2" against `p1a` / "1(a)".
+  const mixed = makeAssignment([
+    [part('Node equations', 20), part('Solve', 20), part('Check', 10)],
+    [part('The only part', 25)],
+    [part('Sketch', 15, { isDrawing: true }), part('Explain', 10)],
+  ]);
+  const mixedJoin = await joinReport(mixed);
+
+  check('map and rubric join one-to-one, single-part problems included', () => {
+    assertJoinsOneToOne(mixedJoin, 'mixed');
+    const byRegion = Object.fromEntries(mixedJoin.entries.map(e => [e.regionId, e]));
+    // The exact shapes, so a change to either scheme is caught here rather than
+    // by a consumer months later.
+    assertEqual(mixedJoin.rows.map(r => r.regionId), ['p1a', 'p1b', 'p1c', 'p2', 'p3a', 'p3b'],
+      'the map no longer names regions the way the spec worked example does');
+    assertEqual(byRegion['p2'].partId, '2', 'a single-part problem gained a letter');
+    assertEqual(byRegion['p2'].key, 'p1s0', 'the rubric key scheme moved');
+    assertEqual(byRegion['p1a'].partId, '1(a)', 'a multi-part problem lost its letter');
+  });
+
+  check('an electronic assignment carries the same link, unconditionally', () => {
+    // Electronic produces no layout map, but the fields are written all the
+    // same: a field that appears and disappears on a condition the consumer
+    // cannot see is worse than one that is always there.
+    const electronic = {
+      ...makeAssignment([[part('a', 50), part('b', 50)]]),
+      inputMode: 'electronic',
+      problems: [{ id: 'p1', name: 'Problem 1', description: '', subsections: [
+        { id: 's1', name: 'a', description: '', points: 50, submissionType: 'Text' },
+        { id: 's2', name: 'b', description: '', points: 50, submissionType: 'Text' },
+      ] }],
+    };
+    const entries = Object.values(exportJoinSvc.generateGradingRubric(electronic).rubrics);
+    assertEqual(entries.map(e => e.region_id), ['p1a', 'p1b'], 'region_id is missing or wrong');
+    assertEqual(entries.map(e => e.part_id), ['1(a)', '1(b)'], 'part_id is missing or wrong');
+  });
+
+  check('the additive fields did not disturb what the rubric already carried', () => {
+    const [first] = Object.values(exportJoinSvc.generateGradingRubric(mixed).rubrics);
+    assertEqual(first.subsection_id, 'p0s0', 'subsection_id changed');
+    assertEqual(first.problem_number, 1, 'problem_number changed');
+    assertEqual(first.subsection_letter, 'a', 'subsection_letter changed');
+    assertEqual(first.display_name, 'Problem 1(a): Node equations', 'display_name changed');
+  });
+
+  // ---- The real ENG17 homeworks -------------------------------------------
+  // Outside this repo (course material under the ENG17 side's control), so this
+  // reports SKIP rather than failing when they are absent. The committed checks
+  // above hold the property; these hold the counts the work order names, and the
+  // layout_id, because a rubric-only change may move no geometry.
+  // Override with:  ENG17_HWK_DIR=/path/to/"New HWKs" npm test
+  const HWK = process.env.ENG17_HWK_DIR
+    ? resolve(process.env.ENG17_HWK_DIR)
+    : resolve(REPO, '..', '..', '..', 'Knoesen', 'ENG17-Assignments', 'New HWKs');
+  for (const { n, regions, layoutId } of [
+    { n: 1, regions: 17, layoutId: '95438EDF' },
+    { n: 2, regions: 10, layoutId: '8505F1E5' },
+    { n: 3, regions: 14, layoutId: 'B549DC53' },
+  ]) {
+    const name = `ENG17 HW${n}: ${regions} regions join the rubric one-to-one, layout_id ${layoutId}`;
+    const mdPath = join(HWK, `HWK${n}`, `ENG17_HW${n}_assignment.md`);
+    if (!existsSync(mdPath)) { results.push(`  SKIP  ${name} (not at ${mdPath})`); continue; }
+    const report = await joinReport(mdParserJoin.parseMdToAssignment(readFileSync(mdPath, 'utf8')));
+    check(name, () => {
+      assertJoinsOneToOne(report, `HW${n}`);
+      assertEqual(report.rows.length, regions, `HW${n} has the wrong number of regions`);
+      assertEqual(report.layoutId, layoutId,
+        `HW${n} layout_id moved — this change may touch the rubric only`);
+    });
+  }
+}
 
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);

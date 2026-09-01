@@ -478,17 +478,38 @@ export interface TemplatePart {
 }
 
 /**
- * `1(a)` when a problem has several sub-parts, plain `2` when it has one — the
- * shape the spec's worked example uses. `region_id` mirrors it as `p1a` / `p2`.
+ * The two identifiers the layout map and the printed sheet use for one sub-part.
+ *
+ * `partId` is `1(a)` when a problem has several sub-parts and plain `2` when it
+ * has one — the shape the spec's worked example uses. `regionId` mirrors it as
+ * `p1a` / `p2`.
+ *
+ * **Exported so `generateGradingRubric` can name the region each rubric entry
+ * grades using this exact derivation rather than a second copy of it.** The
+ * rubric and the map are keyed by different schemes on purpose (`p0s0` is
+ * load-bearing in three places at once — see ASSIGNMENT_MD_SPEC.md §12), so the
+ * link between them has to be written, and it has to come from one place. Two
+ * independent derivations of the same string is how they drifted in the first
+ * place: the single-part case drops the letter here while the rubric still
+ * records `subsection_letter: "a"`, so a consumer parsing `part_id` literally
+ * failed to join seven of ENG17 HW1's seventeen regions, silently.
  */
+export const partIdentifiers = (
+  pIdx: number, sIdx: number, partCount: number
+): { regionId: string; partId: string } => {
+  const single = partCount === 1;
+  const letter = String.fromCharCode(97 + sIdx);
+  return {
+    regionId: single ? `p${pIdx + 1}` : `p${pIdx + 1}${letter}`,
+    partId: single ? `${pIdx + 1}` : `${pIdx + 1}(${letter})`,
+  };
+};
+
 export const enumerateParts = (assignment: Assignment): TemplatePart[] =>
   assignment.problems.flatMap((prob, pIdx) =>
     prob.subsections.map((sub, sIdx) => {
-      const single = prob.subsections.length === 1;
-      const letter = String.fromCharCode(97 + sIdx);
       return {
-        regionId: single ? `p${pIdx + 1}` : `p${pIdx + 1}${letter}`,
-        partId: single ? `${pIdx + 1}` : `${pIdx + 1}(${letter})`,
+        ...partIdentifiers(pIdx, sIdx, prob.subsections.length),
         name: sub.name || '',
         description: sub.description || '',
         maxPoints: sub.points,

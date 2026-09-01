@@ -4,6 +4,7 @@ import { encryptJson, normalizeCoursePublicKey, validateCoursePublicKey } from '
 import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
 import { stemForGrader } from './figureText';
 import { generateTemplate } from './templateGenerator';
+import { partIdentifiers } from './templateLayout';
 import { buildAuthoringBackup } from './authoringBackup';
 import { apportionPoints } from './pointsService';
 import jsPDF from 'jspdf';
@@ -683,6 +684,9 @@ export const generateGradingRubric = (assignment: Assignment): object => {
   assignment.problems.forEach((prob, pIndex) => {
     prob.subsections.forEach((sub, sIndex) => {
       const subsectionId = `p${pIndex}s${sIndex}`;
+      // The SAME derivation the layout map uses, imported rather than copied —
+      // see `partIdentifiers`. This is the link between the two schemes.
+      const { regionId, partId } = partIdentifiers(pIndex, sIndex, prob.subsections.length);
       const isAi = AI_GRADED_TYPES.has(sub.submissionType);
       const isImage = sub.submissionType === SubmissionType.IMAGE;
       const isTextAndImage = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
@@ -700,6 +704,27 @@ export const generateGradingRubric = (assignment: Assignment): object => {
 
       rubrics[subsectionId] = {
         subsection_id: subsectionId,
+        // THE REGION THIS ENTRY GRADES.
+        //
+        // Two identifier schemes exist for one entity and both are load-bearing:
+        // the layout map and the printed crop use `p1a` / `1(a)`, while the
+        // rubric key, the student payload keys (`p{i}_s{j}`) and the electronic
+        // image names (`p{i}s{j}_image_{k}.jpg`) use `p0s0`. Renaming either
+        // would break three consumers at once, so the schemes stay and the
+        // *link* is written down instead.
+        //
+        // Without it a consumer holding `crops/p1a.jpg` looks up `rubrics["p1a"]`,
+        // finds nothing, and gets no error — only an absent entry. The join is
+        // also asymmetric: a single-part problem's `part_id` is `4`, not `4(a)`,
+        // while `subsection_letter` here still says `"a"`, so parsing `part_id`
+        // literally silently missed seven of ENG17 HW1's seventeen regions.
+        //
+        // Written for every assignment, not only handwritten ones: a field that
+        // appears and disappears on a condition the consumer cannot see is worse
+        // than one that is always there. `tests/run-tests.mjs` asserts the map
+        // and the rubric join one-to-one with agreeing `max_points`.
+        region_id: regionId,
+        part_id: partId,
         problem_number: pIndex + 1,
         problem_name: prob.name,
         subsection_letter: subsectionLetter,
