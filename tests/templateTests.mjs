@@ -92,6 +92,7 @@ const qrp = await loadModule(join(REPO, 'services', 'qrPayload.ts'), 'qrPayload.
 const lay = await loadModule(join(REPO, 'services', 'templateLayout.ts'), 'templateLayout.mjs');
 const enc = await loadModule(join(REPO, 'services', 'qrEncoder.ts'), 'qrEncoder.mjs');
 const selfTest = await loadModule(join(REPO, 'services', 'templateSelfTest.ts'), 'templateSelfTest.mjs');
+const exportSvcForInstr = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportForInstr.mjs');
 
 console.log('\nAssignment Maker — GradeBridge page format (QR template)\n');
 
@@ -452,9 +453,12 @@ check('a long assignment paginates, and every page carries its own correct k of 
     const f = qrp.parsePayload(p);
     assertEqual([f.k, f.n], [i + 1, big.pageCount], `page ${i + 1} carries the wrong k of N`);
   });
+  // Page 1 is the instructions page and carries no rows on purpose; every page
+  // after it must carry at least one, or a page went out with nothing on it.
   const pages = new Set(big.rows.map(r => r.pageK));
-  assertEqual([...pages].sort((a, b) => a - b), Array.from({ length: big.pageCount }, (_, i) => i + 1),
-    'some page has no regions');
+  assertEqual([...pages].sort((a, b) => a - b), Array.from({ length: big.pageCount - 1 }, (_, i) => i + 2),
+    'a page after the instructions page has no regions');
+  assert(!pages.has(1), 'a region was placed on the instructions page');
 });
 
 // ---------- authored answer space (2026-08-17) ----------
@@ -551,12 +555,139 @@ check('every problem starts a new page; no page mixes two problems', () => {
   // split across pages at all.
   const pages = l.regions.map(r => r.pageK);
   assertEqual(pages, [...pages].sort((a, b) => a - b), 'the parts are not in page order');
-  assertEqual(l.regions[0].pageK, 1, '1(a) does not start on page 1');
+  // Page 1 is the instructions page since 2026-09-01, so problems begin on 2.
+  assertEqual(l.regions[0].pageK, 2, '1(a) does not start on page 2');
   const problem2 = l.regions.find(r => r.problemIndex === 1);
   assert(problem2.pageK > l.regions.filter(r => r.problemIndex === 0).at(-1).pageK,
     'problem 2 did not start a new page');
   assertEqual(l.regions.map(r => r.partId), ['1(a)', '1(b)', '1(c)', '2(a)', '2(b)'], 'a part was lost');
 });
+
+// ---------- the instructions page (2026-09-01) ----------
+// Page 1 is an instructions page BY DESIGN. It used to be emergent: ENG17 wrote a
+// preamble long enough to push Problem 1 onto page 2, which worked and was a side
+// effect — twenty words shorter and the instructions were squeezed beside a
+// circuit diagram with nothing announcing it. Then the column widened, the
+// region-height fix landed, and the break silently stopped happening.
+{
+  const instr = (extra = {}) => ({
+    id: 'ip1', courseCode: 'ENG17', title: 'HW 1',
+    inputMode: 'handwritten', preamble: 'Show all working. Give every answer in SI units.',
+    problems: [
+      { id: 'p0', name: 'One', description: '', subsections: [part('A', 50, { answerLines: 6 })] },
+      { id: 'p1', name: 'Two', description: '', subsections: [part('B', 50, { answerLines: 6 })] },
+    ],
+    createdAt: 1700000000000, updatedAt: 1700000000000, ...extra,
+  });
+
+  check('guard 1: page 1 carries no region and no row in the map', async () => {
+    const g = await gen.generateTemplate(instr());
+    assertEqual(g.layout.regions.filter(r => r.pageK === 1).map(r => r.regionId), [],
+      'a region was placed on the instructions page');
+    assertEqual(g.rows.filter(r => r.pageK === 1).map(r => r.regionId), [],
+      'the instructions page has a row in the layout map, so something could be cropped from it');
+    // The guarantee this is really about: nothing on page 1 is ever cropped.
+    assert(g.rows.length > 0, 'no rows at all — the fixture is not exercising the map');
+  });
+
+  check('guard 2: N counts the instructions page, and problems begin on page 2', async () => {
+    const g = await gen.generateTemplate(instr());
+    // Two problems, each opening a page, plus page 1.
+    assertEqual(g.pageCount, 3, 'N is not problems-plus-one for a fixture where each problem fits a page');
+    assertEqual(Math.min(...g.layout.regions.map(r => r.pageK)), 2, 'a problem did not begin on page 2');
+    const k1 = qrp.parsePayload(g.payloads[0]);
+    assertEqual(k1.k, 1, "page 1's QR does not carry k=1");
+    assertEqual(k1.n, g.pageCount, "page 1's QR carries the wrong N");
+  });
+
+  check('guard 2: N is at least problems-plus-one even when a problem spans pages', () => {
+    // The literal "N equals problems-plus-one" only holds when every problem
+    // fits one page. A problem that needs two makes N larger, which is ordinary
+    // and correct — so the invariant that is actually held is the inequality.
+    const l = lay.buildLayout({
+      ...instr(),
+      problems: [{ id: 'p0', name: 'One', description: '', subsections: [
+        part('A', 50, { answerLines: 20 }), part('B', 50, { answerLines: 20 }),
+      ] }],
+    });
+    assert(l.pageCount >= 1 + 1, 'N is below problems-plus-one');
+    assert(!l.regions.some(r => r.pageK === 1), 'a region reached the instructions page');
+  });
+
+  check('guard 3: the tool refuses when the preamble repeats a standing instruction', async () => {
+    // The duplication that motivated the split: ENG17's first preamble draft
+    // opened by repeating the print instruction almost word for word. Matching is
+    // on normalised six-word windows, so a near-miss is caught too — an exact
+    // check would have missed the very case this exists for.
+    const near = 'Please print at 100%, not "fit to page", and check that all four black corner ' +
+      'squares appear on every sheet before you begin.';
+    let threw = null;
+    try { await gen.generateTemplate(instr({ preamble: near })); } catch (err) { threw = err; }
+    assert(threw, 'a preamble repeating a standing instruction was emitted anyway');
+    assert(/repeats the standing instruction/.test(threw.message),
+      `the failure does not name the duplication: ${threw.message}`);
+    assert(/print at 100/i.test(threw.message), `the failure does not quote the sentence: ${threw.message}`);
+  });
+
+  check('guard 3: an ordinary preamble about the work is left alone', () => {
+    // The boundary: the tool owns the sheet and the submission, the preamble owns
+    // the work. This one is entirely about the work and must not trip the check.
+    assertEqual(selfTest.duplicatedStandingInstructions(
+      'Show all working. Give every answer in SI units, and state any assumption you make. ' +
+      'Staple the cover sheet to the front.'), [], 'an on-topic preamble was flagged as a duplicate');
+    assertEqual(selfTest.duplicatedStandingInstructions(''), [], 'an empty preamble was flagged');
+  });
+
+  check('guard 4: an instructions page that overflows refuses the export and names it', async () => {
+    const huge = 'This assignment covers the whole of unit three and you should read it carefully. '.repeat(60);
+    let threw = null;
+    try { await gen.generateTemplate(instr({ preamble: huge })); } catch (err) { threw = err; }
+    assert(threw, 'an overflowing instructions page was emitted anyway');
+    assert(/instructions page fits on one page|run .* past the bottom of page 1/.test(threw.message),
+      `the failure does not name the overflow: ${threw.message}`);
+    assert(/mm past the bottom of page 1/.test(threw.message),
+      `the failure does not say by how much: ${threw.message}`);
+  });
+
+  check('the standing instructions are printed once, on page 1, and nowhere else', async () => {
+    const g = await gen.generateTemplate(instr());
+    const rows = g.ink.filter(b => /^instructions /.test(b.what));
+    assert(rows.length > 0, 'the standing instructions were not drawn at all');
+    assertEqual([...new Set(rows.map(b => b.pageK))], [1],
+      'standing instructions were drawn on a page other than page 1');
+    // Each sanctioned sentence appears exactly once in the drawn text.
+    const bytes = Buffer.from(await g.pdf.arrayBuffer()).toString('latin1');
+    const text = [...bytes.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' ')
+      .toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+    for (const sentence of [...lay.STANDING_INSTRUCTIONS.flatMap(x => x.items), lay.STANDING_CLOSING]) {
+      const norm = sentence.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const first = norm.split(' ').slice(0, 6).join(' ');
+      const hits = text.split(first).length - 1;
+      assertEqual(hits, 1, `"${first}..." appears ${hits} times; it must appear exactly once`);
+    }
+  });
+
+  check('the closing line survives, because it is the one that stops students writing bigger', () => {
+    assert(/neat handwriting is not marked/i.test(lay.STANDING_CLOSING),
+      'the closing line was rewritten away');
+  });
+
+  check('electronic assignments get no instructions page and no standing instructions', async () => {
+    // buildLayout is the handwritten layout; an electronic export never reaches
+    // it. Assert the export shape rather than the layout.
+    const entries = await exportSvcForInstr.buildExportEntries({
+      ...instr(), inputMode: 'electronic',
+      problems: instr().problems.map(p => ({
+        ...p, subsections: p.subsections.map(x => ({ ...x, submissionType: 'Text', maxImages: 1 })),
+      })),
+    });
+    assertEqual(Object.keys(entries).filter(n => n.endsWith('.csv')), [],
+      'an electronic export gained a layout map');
+    const html = entries[Object.keys(entries).find(n => n.endsWith('assignment.html'))];
+    assert(!/Print at 100%, not/.test(html),
+      'the standing instructions leaked into an electronic assignment');
+  });
+}
 
 // ---------- a region is never shorter than its authored line count (2026-08-31) ----------
 // The regression fixture that did not exist, which is why a three-line reduction
@@ -627,7 +758,8 @@ check('every problem starts a new page; no page mixes two problems', () => {
     // authored count. 40 lines fit nowhere, so breaking would trade a blank
     // sheet for a line or two and still end in "take the page" — one page.
     const l = lay.buildLayout(withStem([part('Enormous', 100, { answerLines: 40 })], ''));
-    assertEqual(l.pageCount, 1, 'a part that outgrows every page burned an extra page first');
+    // 2 = the instructions page plus the part's own. Not 3: no blank was burned.
+    assertEqual(l.pageCount, 2, 'a part that outgrows every page burned an extra page first');
     assertEqual(l.standaloneBlocks.length, 0, 'a setup page was emitted for an assignment with no setup');
   });
 
@@ -653,7 +785,8 @@ check('an answer is never split across pages — a part owns exactly one region'
   // part takes the whole page instead, which with the page-fill pass is the most
   // room there is to give.
   const l = lay.buildLayout(makeAssignment([[part('Enormous', 20, { answerLines: 40 })]]));
-  assertEqual(l.pageCount, 1, 'a part that outgrows a page did not simply take the page');
+  // 2 = the instructions page plus the one the part took.
+  assertEqual(l.pageCount, 2, 'a part that outgrows a page did not simply take the page');
   assertEqual(l.regions.map(r => r.regionId), ['p1'], 'the part was split into more than one region');
   assert(!/x\d/.test(l.regions.map(r => r.regionId).join(' ')), 'a continuation region id was generated');
   assert(l.regions[0].answerLines > 1, 'the part got a token region rather than the page');
@@ -705,7 +838,7 @@ check('a part that will not fit the rest of a page moves to a new one, unshrunk'
   const l = lay.buildLayout(makeAssignment([[
     part('First', 10, { answerLines: 18 }), part('Second', 10, { answerLines: 18 }),
   ]]));
-  assertEqual(l.regions.map(r => r.pageK), [1, 2], 'the second part did not break to a new page');
+  assertEqual(l.regions.map(r => r.pageK), [2, 3], 'the second part did not break to a new page');
   for (const r of l.regions) {
     // Never fewer than authored. Each is the last region on its page, so each
     // also grows into the slack below it — that is the page-fill pass, not a
@@ -744,9 +877,26 @@ check('item 1: no name, student ID or date field anywhere on the template', () =
   // is redundant, contradicts "do not write your name on the pages", and a
   // filled-in one is exactly the PII the band gate exists to keep out.
   const text = [...pdfText.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' | ');
-  for (const banned of [/\bName\b/i, /\bStudent ID\b/i, /\bDate\b/i, /_{5,}/]) {
-    assert(!banned.test(text), `the template prints an identity field matching ${banned}: "${text.slice(0, 200)}"`);
+
+  // The standing instruction *tells students not to* write their name or ID,
+  // which is the very reason there is no field — the spec's Appendix C rationale
+  // cites it. So the sanctioned sentences are subtracted before the word scan
+  // rather than the scan being loosened: everything else on the sheet is still
+  // held to the strict form. Normalised, because the sentences wrap across
+  // several Tj chunks on the page.
+  const norm = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+  const sanctioned = [...lay.STANDING_INSTRUCTIONS.flatMap(s => s.items), lay.STANDING_CLOSING];
+  let scan = norm(text);
+  for (const sentence of sanctioned) scan = scan.split(norm(sentence)).join(' ');
+  assert(scan.length < norm(text).length, 'the standing instructions are not on the page at all');
+
+  for (const banned of [/\bname\b/, /\bstudent id\b/, /\bdate\b/]) {
+    assert(!banned.test(scan),
+      `the template prints an identity field matching ${banned}: "${scan.slice(0, 200)}"`);
   }
+  // A rule to write on is a field whatever it is labelled, and underscores do
+  // not survive normalising, so this one runs on the raw text.
+  assert(!/_{5,}/.test(text), `the template prints a fill-in rule: "${text.slice(0, 200)}"`);
 });
 
 check('item 2: nothing printed enters the QR keep-out, on any page', () => {
@@ -1028,13 +1178,32 @@ check('every answer region is boxed, and the border is the outermost thing on th
   // it is a FIDUCIAL the detector perspective-corrects from, which matters more
   // to a phone photograph of a curled homework page than to a flatbed exam scan;
   // it bounds the crop; and it makes the whitespace returned markup needs.
-  const boxed = t.layout.regions.map(r => pdfRects.filter(rect =>
-    near(rect.xMm, lay.COLUMN_X0_MM + lay.BORDER_MM / 2, 0.02)
-    && near(rect.yMm, r.boxTopMm + lay.BORDER_MM / 2, 0.02)
-    && near(rect.wMm, (lay.COLUMN_X1_MM - lay.COLUMN_X0_MM) - lay.BORDER_MM, 0.02)
-    && near(rect.hMm, (r.boxBottomMm - r.boxTopMm) - lay.BORDER_MM, 0.02)).length);
-  assertEqual(boxed, t.layout.regions.map(() => 1),
+  // `pdfRects` carries no page number, so two regions at the same y on
+  // different pages are indistinguishable to it — which they now routinely are,
+  // since every problem opens a page at the same cursor. Counting per region
+  // would double-count them. So count per GEOMETRY: the number of bordered
+  // rectangles drawn at each distinct box shape must equal the number of regions
+  // that ask for that shape. Same property, and it no longer depends on regions
+  // happening to sit at different heights.
+  const sig = (x, y, w, h) => [x, y, w, h].map(n => n.toFixed(2)).join(',');
+  const wantedBoxes = new Map();
+  for (const r of t.layout.regions) {
+    const k = sig(lay.COLUMN_X0_MM + lay.BORDER_MM / 2, r.boxTopMm + lay.BORDER_MM / 2,
+      (lay.COLUMN_X1_MM - lay.COLUMN_X0_MM) - lay.BORDER_MM, (r.boxBottomMm - r.boxTopMm) - lay.BORDER_MM);
+    wantedBoxes.set(k, (wantedBoxes.get(k) || 0) + 1);
+  }
+  const drawnBoxes = new Map();
+  for (const [k, want] of wantedBoxes) {
+    const [x, y, w, h] = k.split(',').map(Number);
+    drawnBoxes.set(k, pdfRects.filter(rect =>
+      near(rect.xMm, x, 0.02) && near(rect.yMm, y, 0.02)
+      && near(rect.wMm, w, 0.02) && near(rect.hMm, h, 0.02)).length);
+    void want;
+  }
+  assertEqual([...drawnBoxes.values()], [...wantedBoxes.values()],
     'not exactly one bordered box per gradeable part');
+  assertEqual([...drawnBoxes.values()].reduce((a, b) => a + b, 0), t.layout.regions.length,
+    'the number of bordered boxes drawn does not equal the number of regions');
 
   // Solid, at least 1 pt, and the old 0.3 mm top rule is not drawn as well:
   // two horizontal lines 2.5 mm apart at the top of every region is noise.
@@ -1129,18 +1298,24 @@ check('the ruled lines stay inside the region the map crops', () => {
   }
 });
 
-check('the print instruction names the box, and never asks anyone to box anything', () => {
+check('the standing instructions name the box, and never ask anyone to box anything', () => {
   // From 2026-08-17 this line avoided the word "box" so the questions could own
   // it. There is a box on the sheet now and the questions ask for none, so the
   // instruction says where it is. What it must still never do is tell a student
   // to draw one: a hand-drawn rectangle is another candidate for a rectangle
   // detector, so if a final-answer mark is ever wanted it is a circle.
-  // Joined with a space, not a separator: the instruction wraps across two drawn
-  // lines, so the phrase spans two text operators.
+  // Joined with a space, not a separator: the text wraps across drawn lines, so
+  // a phrase spans two text operators.
   const text = [...pdfText.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' ');
-  assert(/inside its printed box/i.test(text), `the print instruction does not name the box: ${text.slice(0, 300)}`);
-  assert(/resting each line of writing on a rule/i.test(text), 'the baseline guidance was lost');
+  assert(/inside its printed box/i.test(text), `the instructions do not name the box: ${text.slice(0, 300)}`);
   assert(!/\bbox (your|the|every|each|all)\b/i.test(text), 'the sheet tells the student to box something');
+
+  // "resting each line of writing on a rule" was dropped on 2026-09-01, and
+  // deliberately: it is advice that helps only the automatic reader, which the
+  // governing rule for this page excludes. A student reading it learns nothing
+  // about the physics and something about being machine-read.
+  assert(!/resting each line of writing on a rule/i.test(text),
+    'the retired baseline-on-the-rule guidance is being printed again');
 });
 
 check('the interior rules are dashed and the border is solid', async () => {
@@ -1240,7 +1415,8 @@ check('a text answer is ruled at the writing pitch; a sketch area is left blank'
     && l.x0 >= r.nominalMm.x0 - 0.01 && l.x1 <= r.nominalMm.x1 + 0.01);
 
   const written = await gen.generateTemplate(makeAssignment([[part('Written', 100, { answerLines: 7 })]]));
-  assertEqual(written.pageCount, 1, 'the text fixture should be one page');
+  // 2 = the instructions page plus the one the part is on.
+  assertEqual(written.pageCount, 2, 'the text fixture should be the instructions page plus one');
   const wr = written.layout.regions[0];
   // One region on the page, so it runs to the bottom margin: the count to check
   // against is the region's own, and every line lands on the pitch.
@@ -1361,20 +1537,25 @@ check('the sheet carries the whole question: preamble, problem setup, part text'
 
   const g = await gen.generateTemplate(full);
 
-  // Preamble: reserved on page 1 and actually drawn.
-  assert(g.layout.preambleBoxMm, 'no room was reserved for the preamble');
+  // Preamble: reserved on the instructions page and actually drawn, under its
+  // own heading and below the standing instructions.
+  assert(g.layout.instructionsPage.preambleBoxMm, 'no room was reserved for the preamble');
   assert(g.ink.some(b => b.what === 'preamble'), 'the preamble was not drawn');
+  assert(g.ink.some(b => b.what === 'instructions preambleHeading'),
+    'the preamble was printed without its own heading');
+  assertEqual(g.layout.instructionsPage.overflowMm, 0, 'the instructions page overflowed');
 
   // Each problem gets a heading and its shared setup, above its first part.
   const headings = g.ink.filter(b => /^problem heading/.test(b.what));
   const texts = g.ink.filter(b => /^problem text/.test(b.what));
   // Every page of a problem gets a heading; only its first page repeats the setup.
-  assertEqual(headings.length, g.pageCount, 'expected a problem heading on every page');
+  // Every page EXCEPT the instructions page opens a problem here.
+  assertEqual(headings.length, g.pageCount - 1, 'expected a problem heading on every page but page 1');
   assertEqual(texts.length, 2, 'the shared setup should be printed once per problem');
 
   // The heading belongs to the problem's first part only, and sits above it.
   const openers = g.layout.regions.filter(r => r.problemBlock);
-  assertEqual(openers.length, g.pageCount, 'every page should open with a problem block');
+  assertEqual(openers.length, g.pageCount - 1, 'every page but the instructions page should open with a problem block');
   for (const r of openers) {
     assert(r.problemBlock.boxMm.y1 <= r.promptTopMm + 0.01,
       `${r.regionId}: the problem block overlaps the prompt row`);
@@ -1389,14 +1570,15 @@ check('the sheet carries the whole question: preamble, problem setup, part text'
 });
 
 check('a problem continued on a later page repeats the heading, not the setup', () => {
-  // Three parts: 1(a) and 1(b) on page 1, 1(c) on page 2.
+  // Three parts: 1(a) and 1(b) on page 2, 1(c) on page 3 — page 1 is the
+  // instructions page, so the problem opens on 2.
   const l = lay.buildLayout(makeAssignment([[
     { ...part('A', 10), description: 'a' },
     { ...part('B', 10), description: 'b' },
     { ...part('C', 10), description: 'c' },
   ]]));
   l.problems = undefined;
-  const opener = l.regions.find(r => r.pageK === 2 && r.problemBlock);
+  const opener = l.regions.find(r => r.pageK === 3 && r.problemBlock);
   assert(opener, 'the continued problem got no heading on its second page');
   assert(opener.problemBlock.continued, 'the second page was not marked as a continuation');
   assertEqual(opener.problemBlock.text, '', 'the shared setup was repeated on the continuation page');

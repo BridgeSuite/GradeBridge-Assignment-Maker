@@ -286,7 +286,7 @@ The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Pa
 | Where | What |
 |---|---|
 | Top 25 mm, every page | The QR, the four corner marks, one header line. Nothing else, ever. |
-| Page 1, under the band | Course and title, the print instruction, then the assignment **preamble**. |
+| **Page 1, all of it** | The **instructions page**: course and title, the standing instructions, then the author's **preamble** under its own heading. No problem, no answer region, no row in the map. See below. |
 | Above each problem's first part | `Problem 2: Rectangular waveguide` and the problem's **shared setup text**. On a later page the heading repeats as `(continued)`; the setup does not. |
 | Each region | `1(a).`, the sub-part title, the points, the **question text**, then a **bordered box** holding the part's authored number of **ruled writing lines** (blank space for a sketch). |
 
@@ -327,18 +327,77 @@ part and the overflow; splitting the problem is the author's call and nobody els
 
 **There is no name, student ID or date field, deliberately.** Identity comes from Gradescope authenticating the upload, so a blank for it is redundant; students are told not to write their name on the pages, so a labelled blank is a mixed message; a filled-in name is exactly the PII the band gate exists to keep out; and grading is meant to be blind to identity. Appendix C of the page-format spec says the same — because the app authenticates the student, there is no identity page.
 
+### Page 1 is the instructions page
+
+**For `**Input:** handwritten`, page 1 carries the standing instructions and the author's preamble,
+and nothing else. Always** — not when the preamble happens to be long enough. Three guarantees follow,
+and the self-test holds all three rather than leaving them to be inferred:
+
+- **Page 1 carries no rows in `layout_{TemplateID}.csv`, and is therefore never cropped.** Nothing a
+  student writes on it is collected, because there is nothing on it to collect from.
+- **`N` counts it.** Every problem opens a page, so `N` is at least problems-plus-one; it is more
+  whenever a problem needs more than one page, which is ordinary.
+- **`k=1` is always the instructions page**, in every handwritten assignment. That is a fact the
+  Submission app, the student and any instruction anyone writes can all rely on.
+
+It used to be emergent, and that is why it is now stated. ENG17 wrote a preamble long enough to push
+Problem 1 onto page 2; it worked, and it was a side effect. Twenty words shorter and the instructions
+would have been squeezed beside a circuit diagram with nothing announcing it; a re-tuning of
+`CHAR_ADVANCE_EM`, entirely reasonable on its own terms, would have done the same. Then the writing
+column widened and the region-height fix landed, and the break stopped happening — silently, which is
+the whole problem with an emergent first page.
+
+**An instructions page that does not fit refuses the export and names the overflow**, the same
+treatment a question too long for a page already gets. That is what makes `k=1` an invariant rather
+than a usual case: "problems begin on page 2" would otherwise quietly break the moment the standing
+instructions plus a long preamble ran past the bottom.
+
+### Who writes what on it
+
+> **The tool owns instructions about the sheet and the submission. The author's preamble owns
+> instructions about the work.**
+
+The boundary exists because it was crossed. ENG17's first preamble draft opened by repeating the
+tool's print instruction almost word for word, because it was written without looking at the exported
+page — two authors writing standing instructions into one page with no rule about who owned what, and
+neither able to see the other's. **The self-test refuses an export whose preamble repeats a standing
+instruction**, matching on normalised six-word windows rather than exact strings, because "almost word
+for word" is the shape the failure actually takes.
+
+The tool prints, once, on page 1: how to print the sheet and check the corner marks; not to write a
+name or student ID; that only what is inside a box is collected, and what to do about running out of
+room; how to cancel abandoned work; and to write darker rather than bigger. The author's preamble
+keeps everything about the work — show your working, give units, and course conventions such as
+ENG17's cover-sheet rule.
+
+**The governing rule for anything added to the tool's half:**
+
+> **If a piece of advice would only ever help the automatic reader, it does not belong in front of
+> students. No mark, anywhere in any rubric, for following any of it.**
+
+Adopted from `EEC100_Final_Student_Note_2026-08-28.md`. Centralising these sentences means a bad one
+appears on every sheet in the system rather than one course's, so the bar goes **up**: every line must
+earn its place with a human grader too. That rule is why "resting each line of writing on a rule" was
+dropped on 2026-09-01 — true, useful to the OCR pass, and of no interest to a student or a human
+grader.
+
+The closing line, *"Neat handwriting is not marked. Clear working is."*, is not decoration. Students
+read "your work is scanned" as "my handwriting is being judged", and the anxious response is to write
+larger and slower, which costs them time and helps nobody.
+
 ### How the pages are laid out
 
 Pack, then break. Nothing is derived from points, and nothing is squeezed to avoid a break:
 
-1. **Every problem starts a new page**, carrying its heading and shared setup text.
-2. Its parts then **pack down the page**: a part's prompt, its fixed-size question text, and its box of N ruled lines. When the **next** part's prompt, text and box do not fit in what is left of the page — or the box that would be left for it is under 28 mm — that part **breaks to a new page**. However many fit at their authored sizes is however many the page carries.
-3. **A region is never shorter than its authored line count.** Growing is allowed; shrinking is not. When a page cannot give a part its N lines, the part moves to a page that can, and there are exactly two things that take room away which another page would not: **page 1's furniture** (title, print instruction, preamble) and **the problem's shared setup**, which is printed once. So a part escapes at most twice, and the second escape is the unusual one — the shared setup is printed on **a page of its own** and the part follows on the next page under a `(continued)` heading. That is the only way a part authored more lines than fit beneath its own stem can still be given them, and giving them is not optional.
+1. **Page 1 is the instructions page** and carries no part. **Problems begin on page 2.**
+2. **Every problem starts a new page**, carrying its heading and shared setup text.
+3. Its parts then **pack down the page**: a part's prompt, its fixed-size question text, and its box of N ruled lines. When the **next** part's prompt, text and box do not fit in what is left of the page — or the box that would be left for it is under 28 mm — that part **breaks to a new page**. However many fit at their authored sizes is however many the page carries.
+4. **A region is never shorter than its authored line count.** Growing is allowed; shrinking is not. When a page cannot give a part its N lines, the part moves to a page that can. Since page 1 carries no part, every page a part can stand on begins at the same height, so there is exactly **one** thing left that takes room away which another page would not: **the problem's shared setup**, printed once above the problem's first part. So there is one escape, and it is the unusual-looking one: the shared setup is printed on **a page of its own**, and the part follows on the next page under a `(continued)` heading. That is the only way a part authored more lines than fit beneath its own stem can still be given them, and giving them is not optional.
 
    A break only happens when the better page can actually deliver the authored count. Breaking to gain a line or two without reaching it would trade a blank sheet for nothing, so in that case the part simply takes the page it is on.
-4. If a single part's prompt, text and writing area **exceed the roomiest page there is**, the part takes the whole page. **An answer is never split across pages** — the next page is no bigger, so a break cannot help, and what splitting produced instead was a 15 mm orphan: one writing line under a repeated heading, which is not somewhere anyone finishes an answer.
-5. **The last box on each page runs to the bottom margin** (`y 257.0`, five millimetres above the format's own limit so the box closes clear of the bottom registration corners). Earlier parts on the page keep exactly their authored lines; the final one absorbs the slack. Blank paper below a region is paper a student may write on that is never cropped and never graded, so the rectangle is extended to claim it. A sketch region grows the same way and stays unruled.
-6. Never squeeze to avoid a break, and never squeeze instead of one. A break is the correct outcome — paper is cheap, and a student given less room than the assignment says is not.
+5. If a single part's prompt, text and writing area **exceed the roomiest page there is**, the part takes the whole page. **An answer is never split across pages** — the next page is no bigger, so a break cannot help, and what splitting produced instead was a 15 mm orphan: one writing line under a repeated heading, which is not somewhere anyone finishes an answer.
+6. **The last box on each page runs to the bottom margin** (`y 257.0`, five millimetres above the format's own limit so the box closes clear of the bottom registration corners). Earlier parts on the page keep exactly their authored lines; the final one absorbs the slack. Blank paper below a region is paper a student may write on that is never cropped and never graded, so the rectangle is extended to claim it. A sketch region grows the same way and stays unruled.
+7. Never squeeze to avoid a break, and never squeeze instead of one. A break is the correct outcome — paper is cheap, and a student given less room than the assignment says is not.
 
 **Every `part_id` gets exactly one region.** The map still *permits* a part to own more than one — `region_id` is the unique key and `part_id` is a display string the spec lets repeat — and a consumer should still **group crops by `part_id` and grade the part once**, so that nothing breaks if the shape ever comes back. As of 2026-08-18 the generator does not produce it.
 

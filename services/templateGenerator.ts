@@ -305,39 +305,35 @@ const drawHeaderLine = (doc: jsPDF, assignmentId: string, k: number, n: number, 
  * meant to be blind to identity. Appendix C says the same — because the app
  * authenticates the student, there is no identity page. Nothing replaces it.
  */
-const drawPage1Furniture = async (
+/**
+ * Page 1: the standing instructions, then the author's preamble under its own
+ * heading. No problem, no answer region, no row in the map — see
+ * `buildInstructionsPage` for why this is a designed page rather than an
+ * emergent one, and for the boundary between what the tool prints here and what
+ * the preamble is for.
+ *
+ * The rows' geometry is computed in the layout, not here, so the overflow can be
+ * refused before anything is drawn.
+ */
+const drawInstructionsPage = async (
   doc: jsPDF, assignment: Assignment, layout: TemplateLayout, ink: InkBox[]
 ) => {
-  await drawAuthoredText(
-    doc, `${assignment.courseCode}: ${assignment.title}`,
-    { x0: COLUMN_X0_MM, y0: PAGE1_FURNITURE_TOP_MM, x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM, y1: PAGE1_FURNITURE_TOP_MM + PAGE1_TITLE_H_MM },
-    { fontPt: 12, bold: true }, ink, 1, 'course and title'
-  );
+  for (const row of layout.instructionsPage.rows) {
+    const style =
+        row.style === 'title'            ? { fontPt: 12,  bold: true }
+      : row.style === 'section'          ? { fontPt: 10,  bold: true }
+      : row.style === 'preambleHeading'  ? { fontPt: 10,  bold: true }
+      // The closing line is the one that stops a student writing larger and
+      // slower out of anxiety, so it is not printed as fine print.
+      : row.style === 'closing'          ? { fontPt: DESC_FONT_PT, bold: true, grey: 40 }
+      :                                    { fontPt: DESC_FONT_PT, grey: 40 };
+    await drawAuthoredText(doc, row.text, row.boxMm, style, ink, 1, `instructions ${row.style}`);
+  }
 
-  applyText(doc, 7.5, false, 110);
-  // **Names the box.** From 2026-08-17 this line deliberately avoided the words
-  // "box" and "area", to leave the word to the questions, which asked students
-  // to box their own final answer. There is a box on the sheet now and the
-  // questions ask for none, so the instruction says where it is: writing that
-  // lands outside a box is never cropped and never graded, and that is the one
-  // thing a student cannot recover from.
-  //
-  // "resting each line of writing on a rule" is worth its width: sitting the
-  // baseline on the rule leaves descenders as the only strokes that cross one,
-  // which is the easy case for the OCR pass. Writing that floats between rules
-  // is what produces baseline drift.
-  const instruction = 'Print at 100%, not "fit to page". Check all four corner squares are on the paper before you start, and keep every answer inside its printed box, resting each line of writing on a rule.';
-  const lines: string[] = doc.splitTextToSize(instruction, FURNITURE_MAX_WIDTH_MM);
-  lines.slice(0, PAGE1_INSTRUCTION_LINES).forEach((line, i) => {
-    drawPlain(doc, line, COLUMN_X0_MM, PAGE1_INSTRUCTION_TOP_MM + i * PAGE1_INSTRUCTION_LINE_MM,
-      { fontPt: 7.5, grey: 110 }, ink, 1, 'print instruction');
-  });
-
-  // The assignment's own instructions. Held to the furniture width so it stays
-  // clear of the QR column, which it would otherwise reach at this height.
-  if (layout.preambleBoxMm && assignment.preamble) {
-    await drawAuthoredBlock(doc, assignment.preamble,
-      { ...layout.preambleBoxMm, x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM },
+  // The author's own instructions. Authored text, so it goes through the same
+  // math and figure renderer as everything else on the sheet.
+  if (layout.instructionsPage.preambleBoxMm && assignment.preamble) {
+    await drawAuthoredBlock(doc, assignment.preamble, layout.instructionsPage.preambleBoxMm,
       { fontPt: DESC_FONT_PT, grey: 40 }, ink, 1, 'preamble');
   }
 };
@@ -582,7 +578,7 @@ export const generateTemplate = async (assignment: Assignment): Promise<Generate
     drawMarks(doc);
     drawQr(doc, payloads[k - 1]);
     drawHeaderLine(doc, assignmentId, k, layout.pageCount, ink);
-    if (k === 1) await drawPage1Furniture(doc, assignment, layout, ink);
+    if (k === 1) await drawInstructionsPage(doc, assignment, layout, ink);
     // A setup printed on a page of its own, ahead of the part it belongs to.
     for (const b of layout.standaloneBlocks.filter(b => b.pageK === k)) {
       await drawProblemBlock(doc, b.block, k, b.block.heading, ink);

@@ -31,7 +31,7 @@ import {
 } from './qrPayload';
 import {
   BORDER_MM, COLUMN_X0_MM, COLUMN_X1_MM, LayoutRow, MIN_ANSWER_LINES, MIN_BOX_MM,
-  REGION_BOTTOM_MM, TemplateLayout, WRITING_LINE_MM,
+  REGION_BOTTOM_MM, STANDING_CLOSING, STANDING_INSTRUCTIONS, TemplateLayout, WRITING_LINE_MM,
   answerBoxMm, csvUnsafeFields, enumerateParts,
 } from './templateLayout';
 import { splitFigures } from './figureBlocks';
@@ -129,6 +129,49 @@ export interface SelfTestInput {
   layoutId: string;
   csv: string;
 }
+
+/**
+ * Standing instructions the author's preamble repeats.
+ *
+ * This check exists because the duplication actually happened: ENG17's first
+ * preamble draft opened by repeating the tool's print instruction almost word
+ * for word, written without looking at the exported page. Two authors were
+ * writing standing instructions into one page with no rule about who owned
+ * what, and neither could see the other's.
+ *
+ * Matching is on **normalised six-word windows** taken from the tool's own
+ * sentences, not on exact strings. "Almost word for word" is the shape the
+ * failure actually takes, and an exact-match check would have missed the very
+ * case that motivated it. Deriving the windows from `STANDING_INSTRUCTIONS`
+ * rather than a hand-kept list is what stops the two drifting apart.
+ */
+const NORMALISE = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const WINDOW_WORDS = 6;
+
+export const duplicatedStandingInstructions = (preamble: string): string[] => {
+  const hay = ` ${NORMALISE(preamble || '')} `;
+  if (hay.trim().length === 0) return [];
+  const sentences = [
+    ...STANDING_INSTRUCTIONS.flatMap(sec => sec.items),
+    STANDING_CLOSING,
+  ];
+  const hits: string[] = [];
+  for (const sentence of sentences) {
+    const words = NORMALISE(sentence).split(' ').filter(Boolean);
+    for (let i = 0; i + WINDOW_WORDS <= words.length; i++) {
+      const window = words.slice(i, i + WINDOW_WORDS).join(' ');
+      if (hay.includes(` ${window} `)) {
+        hits.push(
+          `the preamble repeats the standing instruction "${sentence}" ` +
+          `(matched on "${window}"). The tool owns instructions about the sheet and the submission; ` +
+          `the preamble owns instructions about the work — drop this sentence from the preamble.`
+        );
+        break;
+      }
+    }
+  }
+  return hits;
+};
 
 export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport> => {
   const { assignment, layout, rows, payloads, layoutId } = input;
@@ -337,6 +380,65 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
         })
         .filter(Boolean) as string[]);
   }
+
+  // ---- The instructions page (2026-09-01) --------------------------------
+  //
+  // Page 1 is the instructions page BY DESIGN, not because a preamble happened
+  // to be long enough. It used to be emergent, and emergent is how it silently
+  // stopped happening once the column widened and the region-height fix landed.
+  // These four make it an invariant.
+
+  // Guard 1. Nothing on page 1 is ever cropped, because there is nothing on it
+  // to crop. Asserted rather than inferred: that is the difference between a
+  // guarantee and a consequence.
+  add(0, 'page 1 is the instructions page and carries no answer region',
+    layout.regions
+      .filter(r => r.pageK === 1)
+      .map(r => `${r.regionId} (${r.partId}) was placed on page 1, which is the instructions page`));
+  add(0, 'page 1 carries no row in the layout map',
+    rows.filter(r => r.pageK === 1).map(r => `${r.regionId} has a page 1 row; page 1 is never cropped`));
+
+  // Guard 2. `k=1` is always the instructions page, and `N` counts it. Every
+  // problem opens a page, so N is at least problems-plus-one; it is more
+  // whenever a problem needs more than one page, which is ordinary.
+  {
+    const problems = assignment.problems.length;
+    const trouble: string[] = [];
+    if (problems > 0 && layout.pageCount < problems + 1) {
+      trouble.push(
+        `N is ${layout.pageCount} for ${problems} problems; every problem opens a page and page 1 is ` +
+        `the instructions page, so N must be at least ${problems + 1}`);
+    }
+    const firstProblemPage = Math.min(...layout.regions.map(r => r.pageK), Infinity);
+    if (layout.regions.length > 0 && firstProblemPage < 2) {
+      trouble.push(`the first problem region is on page ${firstProblemPage}; problems begin on page 2`);
+    }
+    add(0, 'N counts the instructions page, and problems begin on page 2', trouble);
+    if (payloads.length > 0) {
+      const k1 = parsePayload(payloads[0]);
+      add(0, 'the page 1 QR carries k=1',
+        k1 && k1.k === 1 ? [] : [`page 1's payload decodes k=${k1 ? k1.k : 'unparseable'}`]);
+    }
+  }
+
+  // Guard 3. The tool must not print an instruction the author's preamble also
+  // prints. See `duplicatedStandingInstructions` — the duplication is the reason
+  // the split exists, so it is checked rather than trusted.
+  add(0, 'the preamble does not repeat a standing instruction',
+    duplicatedStandingInstructions(assignment.preamble || ''));
+
+  // Guard 4. "Problems begin on page 2, always" breaks if the standing
+  // instructions plus a long preamble overflow the page, so an overflow refuses
+  // the export and names it — the same treatment a question that cannot fit a
+  // page already gets. That is what makes k=1 an invariant rather than a usual
+  // case.
+  add(0, 'the instructions page fits on one page',
+    layout.instructionsPage.overflowMm > 0
+      ? [`the standing instructions and the preamble run ${layout.instructionsPage.overflowMm.toFixed(1)} mm ` +
+         `past the bottom of page 1. The preamble is the part that can move: shorten it, or move ` +
+         `detail into the problems it applies to. Nothing on this page is ever cropped, so it cannot ` +
+         `simply run on.`]
+      : []);
 
   // Question text is never scaled, so a block the page cannot hold is not a
   // warning about slightly small print any more — it is a template that would

@@ -270,6 +270,152 @@ export const MIN_ANSWER_LINES = Math.max(1, Math.ceil(
   (MIN_BOX_MM - 2 * BORDER_MM - 2 * REGION_PAD_MM) / WRITING_LINE_MM
 ));
 
+// ---- The instructions page (page 1) --------------------------------------
+
+/**
+ * **Page 1 of a handwritten assignment is an instructions page, by design.** It
+ * carries the standing instructions and the author's preamble and nothing else:
+ * no problem, no answer region, no row in `layout_*.csv`, and therefore nothing
+ * that is ever cropped. Problems begin on page 2. Always — not when the preamble
+ * happens to be long enough.
+ *
+ * It used to be emergent. The ENG17 preamble was written long enough to push
+ * Problem 1 onto page 2, which worked and was a side effect rather than a
+ * feature: twenty words shorter and the instructions were squeezed beside a
+ * circuit diagram with nothing announcing it, and a tuning of `CHAR_ADVANCE_EM`
+ * would have done the same. After the column widened and the region-height fix
+ * landed the break stopped happening, and nothing noticed.
+ *
+ * Three properties are now guarantees rather than consequences, and the
+ * self-test holds them: page 1 carries no rows in the map, `k=1` is always the
+ * instructions page, and `N` counts it.
+ *
+ * THE SPLIT (2026-09-01): **the tool owns instructions about the sheet and the
+ * submission; the author's preamble owns instructions about the work.** The
+ * evidence for needing a boundary at all is that ENG17's first preamble draft
+ * opened by repeating the print instruction almost word for word, because it was
+ * written without looking at the exported page — two authors writing standing
+ * instructions into one page with no rule about who owned what.
+ *
+ * THE GOVERNING RULE for what may be added here: **if a piece of advice would
+ * only ever help the automatic reader, it does not belong in front of students,
+ * and no mark anywhere in any rubric may depend on following it.** Adopted from
+ * `EEC100_Final_Student_Note_2026-08-28.md`. Centralising these sentences means
+ * a bad one appears on every sheet in the system rather than one course's, so
+ * the bar goes up rather than down: every line below earns its place with a
+ * human grader too.
+ */
+export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: readonly string[] }> = [
+  {
+    heading: 'Before you start',
+    items: [
+      'Print at 100%, not "fit to page". Check that all four black corner squares appear on every sheet.',
+      'Do not write your name or student ID anywhere on these pages. You are identified when you upload.',
+    ],
+  },
+  {
+    heading: 'As you work',
+    items: [
+      // States the constraint and then gives a route out of it, rather than the
+      // bare prohibition that was held back in August: "do not continue in the
+      // margin or on the back" told a student who had run out of room to write
+      // less, with no alternative. If a continuation mechanism is ever built,
+      // this is the sentence that announces it.
+      'Write each answer inside its printed box. Only what is inside the box is collected. The boxes are sized for a full answer; if you are running out of room, there is usually a shorter route.',
+      'One line through anything you have abandoned.',
+      'Darker beats bigger. A faint pencil scans badly.',
+    ],
+  },
+];
+
+/**
+ * Not decoration. Students read "your work is scanned" as "my handwriting is
+ * being judged", and the anxious response is to write larger and slower, which
+ * costs them time and helps nobody.
+ */
+export const STANDING_CLOSING = 'Neat handwriting is not marked. Clear working is.';
+
+/** The author's preamble prints below the standing instructions, under this. */
+export const PREAMBLE_HEADING = 'About this assignment';
+
+const INSTR_HEADING_H_MM = 5.0;
+const INSTR_ITEM_GAP_MM = 1.4;
+const INSTR_SECTION_GAP_MM = 4.0;
+const INSTR_INDENT_MM = 4.0;
+
+export type InstructionsRowStyle = 'title' | 'section' | 'item' | 'closing' | 'preambleHeading';
+
+export interface InstructionsPage {
+  /** Plain rows the generator draws top to bottom. The preamble is separate: it
+   *  is authored text and goes through the math/figure renderer. */
+  rows: { style: InstructionsRowStyle; text: string; boxMm: RectMm }[];
+  preambleBoxMm?: RectMm;
+  /** Millimetres past `REGION_BOTTOM_MM`. Non-zero refuses the export. */
+  overflowMm: number;
+}
+
+/**
+ * Page 1's geometry. The title sits beside the QR so it keeps the narrower
+ * furniture width; everything below `FIRST_PROMPT_TOP_MM` is clear of the symbol
+ * and uses the full writing column.
+ */
+export const buildInstructionsPage = (assignment: Assignment): InstructionsPage => {
+  const rows: InstructionsPage['rows'] = [];
+  const colW = COLUMN_X1_MM - COLUMN_X0_MM;
+  const itemX0 = round4(COLUMN_X0_MM + INSTR_INDENT_MM);
+  const itemW = round4(COLUMN_X1_MM - itemX0);
+
+  rows.push({
+    style: 'title',
+    text: `${assignment.courseCode}: ${assignment.title}`,
+    boxMm: {
+      x0: COLUMN_X0_MM, y0: PAGE1_TITLE_TOP_MM,
+      x1: round4(COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM), y1: round4(PAGE1_TITLE_TOP_MM + PAGE1_TITLE_H_MM),
+    },
+  });
+
+  let y = FIRST_PROMPT_TOP_MM;
+  STANDING_INSTRUCTIONS.forEach((section, i) => {
+    if (i > 0) y = round4(y + INSTR_SECTION_GAP_MM);
+    rows.push({
+      style: 'section', text: section.heading,
+      boxMm: { x0: COLUMN_X0_MM, y0: round4(y), x1: COLUMN_X1_MM, y1: round4(y + INSTR_HEADING_H_MM) },
+    });
+    y = round4(y + INSTR_HEADING_H_MM);
+    for (const item of section.items) {
+      const h = descBlockMm(item, itemW);
+      rows.push({
+        style: 'item', text: item,
+        boxMm: { x0: itemX0, y0: round4(y), x1: COLUMN_X1_MM, y1: round4(y + h) },
+      });
+      y = round4(y + h + INSTR_ITEM_GAP_MM);
+    }
+  });
+
+  y = round4(y + INSTR_SECTION_GAP_MM);
+  const closingH = descBlockMm(STANDING_CLOSING, colW);
+  rows.push({
+    style: 'closing', text: STANDING_CLOSING,
+    boxMm: { x0: COLUMN_X0_MM, y0: round4(y), x1: COLUMN_X1_MM, y1: round4(y + closingH) },
+  });
+  y = round4(y + closingH);
+
+  let preambleBoxMm: RectMm | undefined;
+  if ((assignment.preamble || '').trim()) {
+    y = round4(y + INSTR_SECTION_GAP_MM * 2);
+    rows.push({
+      style: 'preambleHeading', text: PREAMBLE_HEADING,
+      boxMm: { x0: COLUMN_X0_MM, y0: round4(y), x1: COLUMN_X1_MM, y1: round4(y + INSTR_HEADING_H_MM) },
+    });
+    y = round4(y + INSTR_HEADING_H_MM);
+    const h = descBlockMm(assignment.preamble, colW);
+    preambleBoxMm = { x0: COLUMN_X0_MM, y0: round4(y), x1: COLUMN_X1_MM, y1: round4(y + h) };
+    y = round4(y + h);
+  }
+
+  return { rows, preambleBoxMm, overflowMm: round4(Math.max(0, y - REGION_BOTTOM_MM)) };
+};
+
 // ---- Parts ---------------------------------------------------------------
 
 export interface TemplatePart {
@@ -377,10 +523,12 @@ export interface TemplateLayout {
   parts: TemplatePart[];
   regions: PlacedRegion[];
   pageCount: number;
-  /** The assignment's instructions, printed under the title on page 1. */
-  preambleBoxMm?: RectMm;
-  /** Where page 1's first prompt row starts, once the furniture is measured. */
-  page1TopMm: number;
+  /**
+   * Page 1: the standing instructions and the author's preamble, and nothing
+   * else. It carries no region and no row in the map, so nothing on it is ever
+   * cropped. See `buildInstructionsPage`.
+   */
+  instructionsPage: InstructionsPage;
   /**
    * Question text that would not fit a page even on its own, and so was
    * reserved smaller than authored — the one place the renderer still scales
@@ -511,25 +659,20 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
   // space is not negotiable. Rare and deliberate — see case 2 below.
   const standaloneBlocks: TemplateLayout['standaloneBlocks'] = [];
 
-  // Page 1's furniture stack: title, print instruction, then the preamble. The
-  // preamble is *rendered* at the narrower furniture width (it must stay clear
-  // of the QR column at this height), so it is *reserved* at that width too —
-  // estimating against the full column would under-reserve and shrink the text.
-  const preambleMm = descBlockMm(assignment.preamble || '', FURNITURE_MAX_WIDTH_MM);
-  const preambleBoxMm: RectMm | undefined = preambleMm > 0 ? {
-    x0: COLUMN_X0_MM, y0: PAGE1_PREAMBLE_TOP_MM,
-    x1: COLUMN_X0_MM + FURNITURE_MAX_WIDTH_MM, y1: round4(PAGE1_PREAMBLE_TOP_MM + preambleMm),
-  } : undefined;
-  const furnitureBottom = (preambleBoxMm ? preambleBoxMm.y1 : PAGE1_PREAMBLE_TOP_MM) + 2.0;
-  const page1Top = round4(Math.max(FIRST_PROMPT_TOP_MM, furnitureBottom));
+  // Page 1 is the instructions page and carries no region, so the first
+  // `newPage()` opens page 2. That is what makes `k=1` an invariant rather than
+  // a usual case, and it is why every page a part can be placed on now starts at
+  // the same `FIRST_PROMPT_TOP_MM` — page 1's furniture is no longer something a
+  // part has to fit beneath.
+  const instructionsPage = buildInstructionsPage(assignment);
 
   const seenProblem = new Set<number>();
-  let pageK = 0;
-  let cursor = 0;
+  let pageK = 1;
+  let cursor = FIRST_PROMPT_TOP_MM;
   let pageIsEmpty = true;
   const newPage = () => {
     pageK += 1;
-    cursor = pageK === 1 ? page1Top : FIRST_PROMPT_TOP_MM;
+    cursor = FIRST_PROMPT_TOP_MM;
     pageIsEmpty = true;
   };
 
@@ -587,19 +730,22 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
       //      first part, so a part that follows it on a `(continued)` page does
       //      not pay for it again.
       //
-      // Each is escapable once, which is also why this terminates: a part breaks
-      // at most twice before it is standing on the roomiest page that exists.
-      const cleanFits = (headingMm: number, stemMm: number) => Math.floor(
-        (REGION_BOTTOM_MM - FIRST_PROMPT_TOP_MM
-          - (headingMm + PROBLEM_BLOCK_GAP_MM + PROMPT_ROW_MM + RULE_GAP_MM
-             + BORDER_MM * 2 + REGION_PAD_MM * 2)
-          - stemMm - descMm + 1e-6) / WRITING_LINE_MM
-      );
-      // Keeping the whole problem block with the part, on a page of its own.
-      const fitsOnCleanPage = cleanFits(headingMm, blockTextMm);
+      // Since 2026-09-01 there is only ONE thief left. Page 1 used to be the
+      // other — its title, print instruction and preamble sat above the first
+      // part — but page 1 is now the instructions page and carries no region, so
+      // every page a part can stand on begins at the same `FIRST_PROMPT_TOP_MM`.
+      // The remaining escape is therefore escapable once, which is why this
+      // terminates: a part breaks at most once before it is on the roomiest page
+      // that exists.
+      //
       // Leaving the shared setup behind and carrying on under a `(continued)`
       // heading — the roomiest page this part can ever stand on.
-      const fitsWithoutStem = cleanFits(problemHeadingMm(`${part.problemHeading} (continued)`), 0);
+      const fitsWithoutStem = Math.floor(
+        (REGION_BOTTOM_MM - FIRST_PROMPT_TOP_MM
+          - (problemHeadingMm(`${part.problemHeading} (continued)`) + PROBLEM_BLOCK_GAP_MM
+             + PROMPT_ROW_MM + RULE_GAP_MM + BORDER_MM * 2 + REGION_PAD_MM * 2)
+          - descMm + 1e-6) / WRITING_LINE_MM
+      );
 
       if (fits < wanted) {
         // This page already has something on it: break rather than shrink, and
@@ -609,21 +755,16 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
         // but its position on the page.
         if (!opens) { newPage(); continue; }
 
-        // Case 1: a clean page is enough. On page 1 the thief is the furniture;
-        // the whole problem block moves with the part, so the setup still sits
-        // directly above the question.
+        // The shared setup itself is what does not leave room. Print it
+        // here, on its own, and take the part to the next page under a
+        // `(continued)` heading. This is the only way a part authored more lines
+        // than fit beneath its own stem can still be given them, and giving them
+        // is not optional — see the rule at the top of this function.
         //
         // The test is `>= wanted`, not "more than this page offers". A break
         // that improves the fit without achieving the authored count trades a
         // blank page for a line or two and still ends in rule 3 — so it is not
         // worth a sheet of paper.
-        if (fitsOnCleanPage >= wanted) { newPage(); continue; }
-
-        // Case 2: the shared setup itself is what does not leave room. Print it
-        // here, on its own, and take the part to the next page under a
-        // `(continued)` heading. This is the only way a part authored more lines
-        // than fit beneath its own stem can still be given them, and giving them
-        // is not optional — see the rule at the top of this function.
         if (blockTextMm > 0 && fitsWithoutStem >= wanted) {
           standaloneBlocks.push({
             pageK,
@@ -725,10 +866,8 @@ export const buildLayout = (assignment: Assignment): TemplateLayout => {
   fillPagesToBottom(regions);
 
   return {
-    parts, regions, standaloneBlocks,
+    parts, regions, standaloneBlocks, instructionsPage,
     pageCount: Math.max(1, pageK),
-    preambleBoxMm,
-    page1TopMm: round4(page1Top),
     clamped,
   };
 };

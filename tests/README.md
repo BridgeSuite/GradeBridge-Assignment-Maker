@@ -192,6 +192,28 @@ author. A text region is ruled at `WRITING_LINE_MM` and a sketch region is left
 blank. The prompt row carries no injected "write your answer below this line" —
 the PDF's own text operators are searched for all three retired sentences.
 
+**The instructions page** (2026-09-01). Page 1 of a handwritten sheet carries the
+standing instructions and the preamble and nothing else, **by design** — it used
+to be emergent, and the suite now holds the four properties that makes it. Page 1
+carries no region and no row in the map, so nothing on it is ever cropped; `N`
+counts it and the page-1 QR decodes `k=1`; the standing instructions are drawn on
+page 1 and nowhere else, each sanctioned sentence appearing exactly once; and an
+instructions page that overflows **refuses** the export and says by how many
+millimetres.
+
+The fourth is the one with history: **the tool refuses a preamble that repeats a
+standing instruction**, matched on normalised six-word windows rather than exact
+strings, because "almost word for word" is the shape the failure took when ENG17's
+first preamble draft reproduced the print instruction. The suite drives a
+near-miss paraphrase and asserts the failure names the duplicated sentence, and
+drives an on-topic preamble to assert it is left alone — a check that fires on
+ordinary authoring would be turned off within a week.
+
+Mutation-tested: letting problems back onto page 1 makes generation refuse
+outright (naming every region it placed there), and making the overflow
+unreportable fails guard 4. Electronic assignments are asserted to get neither an
+instructions page nor the standing instructions.
+
 **A region is never shorter than its authored line count** (2026-08-31). The
 regression fixture that did not exist, which is why a three-line reduction on
 page 1 of ENG17 HW1 survived two rounds of review: every older fixture has an
