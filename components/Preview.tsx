@@ -2,7 +2,7 @@
 import React from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { storageService } from '../services/storageService';
-import { exportService } from '../services/exportService';
+import { exportService, isRescaleDeclined } from '../services/exportService';
 import { Layout, Card, Button } from './Common';
 import { Download, ArrowLeft, Edit2 } from 'lucide-react';
 import { SubmissionType } from '../types';
@@ -18,6 +18,8 @@ const Preview: React.FC = () => {
     try {
       await exportService.downloadZIP(assignment);
     } catch (error) {
+      // Declining the rescale is a decision, not a failure. Say nothing.
+      if (isRescaleDeclined(error)) return;
       console.error(error);
       alert(error instanceof Error ? error.message : 'Failed to export the assignment package.');
     }

@@ -356,22 +356,35 @@ def extract_blockquote_value(key, body):
     return ' '.join(parts)
 
 
-def normalize_points(problems):
+def normalize_points(problems, target=None):
     """
-    Scale all subsection point values so they sum to exactly 100.
+    Scale all subsection point values so they sum to `target`.
+
+    THE FILE'S OWN TOTAL IS THE TARGET. `target=None` means "whatever this file
+    already sums to", which makes the conversion an identity rather than a
+    silent transformation. This mirrors `parseMdToAssignment` in
+    `services/mdParserService.ts`, which sets `targetPoints` from the same sum —
+    the two are kept in lockstep, and before 2026-09-01 both defaulted to 100
+    and quietly halved a 200-point assignment.
+
+    Pass an explicit `target` to rescale on purpose.
+
     Returns (was_normalized: bool, original_total: int).
     Modifies problems in-place.
     """
     all_subs = [sub for p in problems for sub in p['subsections']]
     total = sum(sub['points'] for sub in all_subs)
 
-    if total == 0 or total == 100:
+    if target is None:
+        target = total
+
+    if total == 0 or total == target:
         return False, total
 
-    scaled = [round(sub['points'] * 100 / total) for sub in all_subs]
+    scaled = [round(sub['points'] * target / total) for sub in all_subs]
 
     # Fix rounding error — add/subtract from the largest-point subsection
-    diff = 100 - sum(scaled)
+    diff = target - sum(scaled)
     if diff != 0:
         max_idx = scaled.index(max(scaled))
         scaled[max_idx] += diff
@@ -502,8 +515,9 @@ def parse_md(filepath):
     if current_problem is not None:
         problems.append(current_problem)
 
-    # Normalize points to sum to 100
+    # Adopt the file's own total as the target — see normalize_points().
     was_normalized, original_total = normalize_points(problems)
+    authored_total = sum(sub['points'] for p in problems for sub in p['subsections'])
 
     now_ms = int(__import__('time').time() * 1000)
 
@@ -515,6 +529,9 @@ def parse_md(filepath):
         'aiFeedback': meta['aiFeedback'],
         'preamble': meta['preamble'],
         'problems': problems,
+        # The intended total, carried explicitly so a later export in the
+        # Assignment Maker does not fall back to its 100 default.
+        **({'targetPoints': authored_total} if authored_total > 0 else {}),
         # Only present when the .md pinned one; otherwise the QR template
         # generator derives it from the course code and title.
         **({'pageFormatId': meta['pageFormatId']} if meta.get('pageFormatId') else {}),
@@ -523,7 +540,7 @@ def parse_md(filepath):
     }
 
     if was_normalized:
-        assignment['_normalization_note'] = f'Points scaled from {original_total} to 100'
+        assignment['_normalization_note'] = f'Points scaled from {original_total} to {authored_total}'
 
     return assignment
 

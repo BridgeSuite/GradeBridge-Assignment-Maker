@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { Assignment } from '../types';
 import { storageService } from '../services/storageService';
-import { exportService } from '../services/exportService';
+import { exportService, isRescaleDeclined } from '../services/exportService';
 import { Layout, Card, Button } from '../components/Common';
 import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
@@ -49,6 +49,8 @@ const Dashboard: React.FC = () => {
     try {
       await exportService.downloadZIP(assignment);
     } catch (error) {
+      // Declining the rescale is a decision, not a failure. Say nothing.
+      if (isRescaleDeclined(error)) return;
       console.error(error);
       alert(error instanceof Error ? error.message : 'Failed to export the assignment package.');
     }

@@ -1918,6 +1918,129 @@ ${r.problem_statement}`);
   }
 }
 
+// =====================================================
+// THE FILE'S OWN TOTAL IS THE TARGET, AND NOTHING RESCALES SILENTLY
+// =====================================================
+// Points are outside the layout_id hash. Every hash check, page count and
+// geometry test in this suite and the next passes on a halved assignment, so
+// nothing downstream can see this — the checks have to sit on the import and on
+// the transformation itself. On 2026-09-01 a 200-point ENG17 homework exported
+// at 100 three times, twice for operators who already knew about the trap.
+{
+  const { normalizePointsConfirmed, rescaleNotice, rescaleConfirmationMessage,
+          isRescaleDeclined, setRescaleConfirm } = exportSvc;
+
+  const totalOf = a => a.problems.flatMap(p => p.subsections).reduce((n, s) => n + s.points, 0);
+  const rubricTotal = a => Object.values(generateGradingRubric(a).rubrics)
+    .reduce((n, r) => n + r.max_points, 0);
+
+  // Answer the question, and record that it was asked.
+  const asked = [];
+  const answering = (reply) => { asked.length = 0; setRescaleConfirm(m => { asked.push(m); return reply; }); };
+
+  const TARGET_FIXTURE = resolve(REPO, 'tests', 'fixtures', 'ENG17_TargetPointsFixture.md');
+  const md = readFileSync(TARGET_FIXTURE, 'utf8');
+
+  // 1. Import a 200-point .md and export WITHOUT touching the Target box.
+  check('md import adopts the file\u2019s own total as the target', () => {
+    const a = parseMdToAssignment(md);
+    assertEqual(totalOf(a), 200, 'the fixture no longer totals 200');
+    assertEqual(a.targetPoints, 200, 'targetPoints was not taken from the file');
+  });
+
+  check('a 200-point .md exports at 200 with nothing typed into the Target box', () => {
+    answering(false);   // declining must never come up: there is nothing to rescale
+    const a = parseMdToAssignment(md);
+    assertEqual(rescaleNotice(a), null, 'an untouched import wants to rescale itself');
+    const out = normalizePointsConfirmed(a);
+    assertEqual(totalOf(out), 200, 'the export rescaled a 200-point assignment');
+    assertEqual(rubricTotal(out), 200, 'the grading rubric does not total 200');
+    assertEqual(asked, [], 'the instructor was asked about a rescale that was not happening');
+  });
+
+  check('every part keeps the points its author wrote \u2014 not just the total', () => {
+    answering(true);
+    const a = parseMdToAssignment(md);
+    const before = a.problems.flatMap(p => p.subsections).map(s => s.points);
+    const after = normalizePointsConfirmed(a).problems.flatMap(p => p.subsections).map(s => s.points);
+    assertEqual(after, before, 'a part value moved');
+    assertEqual(before, [40, 35, 45, 35, 45], 'the fixture\u2019s per-part values changed');
+  });
+
+  // 2. An authoring backup carries targetPoints explicitly. Keep honouring it.
+  check('an authoring backup with targetPoints 200 exports at 200', () => {
+    answering(false);
+    const authored = parseMdToAssignment(md);
+    const restored = readAuthoringBackup(JSON.parse(buildAuthoringBackup(authored)));
+    assertEqual(restored.targetPoints, 200, 'the backup lost the point target');
+    assertEqual(totalOf(normalizePointsConfirmed(restored)), 200, 'a restored backup was rescaled');
+    assertEqual(asked, [], 'a backup at its own target was questioned');
+  });
+
+  // 3. A NEW, EMPTY assignment is the one case with nothing to infer from.
+  check('a new assignment still defaults to 100, and still rescales to it', () => {
+    answering(true);
+    const draft = makeAssignment({
+      problems: [{ id: 'p1', name: 'Problem 1', description: '', subsections: [
+        { id: 's1', name: 'a', description: '', points: 10, submissionType: 'Text' },
+        { id: 's2', name: 'b', description: '', points: 30, submissionType: 'Text' },
+      ] }],
+    });
+    assertEqual(draft.targetPoints, undefined, 'the fixture pinned a target');
+    assertEqual(rescaleNotice(draft), { authoredTotal: 40, targetPoints: 100 }, 'wrong notice');
+    assertEqual(totalOf(normalizePointsConfirmed(draft)), 100, 'a 40-point draft did not scale to 100');
+    assertEqual(asked.length, 1, 'the rescale happened without asking');
+  });
+
+  check('an .md with no points anywhere pins no target', () => {
+    const a = parseMdToAssignment('# X: Y\n\n## Problem 1: P\n\n### (a) A [0 pts] [text]\nDo it.\n');
+    assertEqual(a.targetPoints, undefined, 'a zero total was adopted as a target');
+  });
+
+  // 4. Declining stops the export before anything is written.
+  check('a target that disagrees with the total is put to the instructor, with both numbers', () => {
+    answering(true);
+    const a = { ...parseMdToAssignment(md), targetPoints: 100 };
+    normalizePointsConfirmed(a);
+    assertEqual(asked.length, 1, 'the export rescaled without asking');
+    assert(/\b200\b/.test(asked[0]) && /\b100\b/.test(asked[0]),
+      `the question names neither total: "${asked[0]}"`);
+    assert(/rescale/i.test(asked[0]), `the question does not say what happens: "${asked[0]}"`);
+  });
+
+  // `check` is synchronous, so the one await here is done up front.
+  // The key below is not a key: reaching buildAssignmentSpec would throw about
+  // that instead, which is what proves the export stopped before building.
+  answering(false);
+  const declined = { ...parseMdToAssignment(md), targetPoints: 100 };
+  let downloadErr = null;
+  try {
+    await exportSvc.exportService.downloadZIP({ ...declined, coursePublicKey: 'not a key' });
+  } catch (err) { downloadErr = err; }
+
+  check('declining the rescale stops the export and writes nothing', () => {
+    let threw = null;
+    try { normalizePointsConfirmed(declined); } catch (err) { threw = err; }
+    assert(threw, 'declining rescaled anyway');
+    assert(isRescaleDeclined(threw), `the caller cannot tell a decline from a failure: ${threw}`);
+    assertEqual(totalOf(declined), 200, 'the declined assignment was mutated');
+    assert(isRescaleDeclined(downloadErr),
+      `downloadZIP got past the question before stopping: ${downloadErr && downloadErr.message}`);
+  });
+
+  check('the message is the two numbers and the consequence, in the instructor\u2019s words', () => {
+    const m = rescaleConfirmationMessage({ authoredTotal: 200, targetPoints: 100 });
+    assert(m.includes('totals 200 points'), `no authored total: "${m}"`);
+    assert(m.includes('export target is 100'), `no target: "${m}"`);
+    // window.confirm's buttons are unlabelled, so the message has to say which
+    // is which — on their own lines, which is the bit an edit can quietly lose.
+    assert(/\nOK\b/.test(m) && /\nCancel\b/.test(m), `OK and Cancel are not on their own lines: ${JSON.stringify(m)}`);
+  });
+
+  // Leave the seam as production found it — later suites export too.
+  setRescaleConfirm(() => true);
+}
+
 // ---------- report ----------
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped\n`);

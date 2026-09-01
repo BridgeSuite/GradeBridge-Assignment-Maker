@@ -223,7 +223,10 @@ Sketch the transverse field pattern.
 ## 8. Round-trip and points
 
 - **Export .md → Import Markdown is stable**: importing an exported file and re-exporting yields the same file. A legacy electronic file that has no `**Input:**` line round-trips unchanged, and so does a file carrying figures (§11).
-- On export, sub-part points are **normalised** to the assignment's target total (default 100), so the numbers you write are relative weights; the exported file shows the scaled values.
+- On export, sub-part points are **normalised** to the assignment's target total, so the numbers you write are relative weights; the exported file shows the scaled values.
+- **The file's own total is the target.** Import Markdown sets the assignment's target to the sum of the sub-part points it just read. A `.md` carries already-scaled values, so its own sum is the total its author intended, and adopting it makes the export an identity rather than a silent transformation. Only a **new, empty** assignment starts at the 100 default — it is the one case with nothing to infer from. `converter/convert.py` does the same, and writes `targetPoints` into the spec it emits.
+- **The export never silently rescales.** When the authored total and the target disagree, the export stops and asks, naming both numbers and what will happen. Declining writes nothing. The Target box and the Rescale button are unchanged: an instructor who wants a rescale still gets one, deliberately.
+  - *Added 2026-09-01.* The target used to come from an invisible default whenever the file did not carry one, so a 200-point assignment listed as 200 and exported as 100. **Points sit outside the `layout_id` hash**, so every hash check, page count and geometry test passes on a halved assignment — there is no downstream check that can ever catch this, which is why the guard is at the moment of the transformation and why a badge was not enough.
 
 ---
 
@@ -679,7 +682,7 @@ complete:
 | Route | Restores | Loses |
 |---|---|---|
 | `{stem}_authoring_backup.json` → Import JSON | **everything** | — |
-| `{stem}.md` → Import Markdown | prompts byte-for-byte, `answerLines`, `handwrittenGradingMode`, `inputMode`, `pageFormatId`, `aiFeedback` | `targetPoints`, `coursePublicKey`, `config` |
+| `{stem}.md` → Import Markdown | prompts byte-for-byte, `answerLines`, `handwrittenGradingMode`, `inputMode`, `pageFormatId`, `aiFeedback`, and **`targetPoints`, reconstructed from the file's own total** (2026-09-01) | `coursePublicKey`, `config` |
 | `assignment_spec.json` → Import JSON | what a student needs | `aiGradingPrompt`, `graderNote`, `answerLines`, `handwrittenGradingMode`, `targetPoints` |
 
 Two of those losses are worse than they look:
@@ -691,6 +694,11 @@ Two of those losses are worse than they look:
   values, so the reimport reads 200 and everything looks right. The *target* is gone, so the NEXT
   export normalises to the default 100 and halves every point. The instructor sees a correct
   assignment, exports it, and gets a different one.
+  **Fixed at the source on 2026-09-01** (§8): the `.md` route no longer loses the target, because the
+  import reconstructs it from the file's own total, and any remaining disagreement between the total
+  and the target is put to the instructor before the export writes anything. The warning stayed —
+  naming the loss was never a substitute for not losing it, and it was not enough: the amber badge was
+  showing on all three ENG17 homeworks each of the three times they exported at half their points.
 
 **Import now names what a file does not carry**, at the one moment the instructor can act on it. It
 reports absence rather than inferring it from the file's kind, so an assignment that genuinely has no

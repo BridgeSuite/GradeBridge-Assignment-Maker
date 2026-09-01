@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { Assignment, InputMode, Problem, Subsection, SubmissionType } from '../types';
 import { storageService } from '../services/storageService';
-import { exportService } from '../services/exportService';
+import { exportService, isRescaleDeclined } from '../services/exportService';
 import {
   validateCoursePublicKey,
   normalizeCoursePublicKey,
@@ -222,6 +222,8 @@ const Editor: React.FC = () => {
         (warnings.length ? `\n\nNotes:\n${warnings.map(w => `  • ${w}`).join('\n')}` : '')
       );
     } catch (err) {
+      // Declining the rescale is a decision, not a failure. Say nothing.
+      if (isRescaleDeclined(err)) return;
       console.error(err);
       alert(err instanceof Error ? err.message : 'Failed to build the QR template.');
     }
@@ -485,12 +487,21 @@ const Editor: React.FC = () => {
               Delete
             </Button>
           )}
-          <Button variant="secondary" onClick={() => exportService.downloadMd(assignment)}>
+          <Button variant="secondary" onClick={() => {
+            try {
+              exportService.downloadMd(assignment);
+            } catch (err) {
+              if (isRescaleDeclined(err)) return;
+              console.error(err);
+              alert(err instanceof Error ? err.message : 'Failed to export the markdown.');
+            }
+          }}>
             <FileDown className="w-4 h-4 mr-2" />
             Export .md
           </Button>
           <Button variant="secondary" onClick={() => {
             exportService.downloadGraderDoc(assignment).catch(err => {
+              if (isRescaleDeclined(err)) return;
               console.error(err);
               alert('Failed to build the grader document.');
             });

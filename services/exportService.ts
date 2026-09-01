@@ -52,13 +52,20 @@ const MIN_WORDS_BY_TYPE: Partial<Record<SubmissionType, number>> = {
 };
 
 /**
+ * Where an assignment with no target of its own lands. Only a new, empty
+ * assignment gets here: an imported one takes its target from the file (see
+ * `parseMdToAssignment`), which is the point of that change.
+ */
+const DEFAULT_TARGET_POINTS = 100;
+
+/**
  * Scale all subsection point values so they sum to assignment.targetPoints
  * (default 100). Largest-remainder apportionment — see services/pointsService.ts
  * for why, and for the negative-points bug the old rounding produced.
  * Returns a new Assignment; does not mutate the input.
  */
 const normalizePoints = (assignment: Assignment): Assignment => {
-  const target = assignment.targetPoints || 100;
+  const target = assignment.targetPoints || DEFAULT_TARGET_POINTS;
   const allSubs = assignment.problems.flatMap(p => p.subsections);
   const scaled = apportionPoints(allSubs.map(s => s.points), target);
 
@@ -70,6 +77,87 @@ const normalizePoints = (assignment: Assignment): Assignment => {
       subsections: p.subsections.map(s => ({ ...s, points: scaled[idx++] }))
     }))
   };
+};
+
+// =====================================================
+// THE EXPORT NEVER SILENTLY RESCALES
+// =====================================================
+// Every download below runs `normalizePoints`, which is the one moment a point
+// value changes. When the authored total and the target disagree, that moment
+// writes a different assignment than the one on screen — and NOTHING
+// DOWNSTREAM CAN SEE IT. Points sit outside the `layout_id` hash, so every hash
+// check, page count and geometry test passes on a halved assignment. There is
+// no later check to catch this, which is why the guard has to be here.
+//
+// A badge was not enough. It was amber on 2026-09-01 for ENG17 HW1–HW3 and the
+// export went ahead anyway, three times, twice for operators who knew about the
+// trap. So the question is asked out loud, with both numbers in it, and it is
+// asked from the service rather than from the four call sites — a fifth caller
+// added later cannot forget it, and there is deliberately no way to skip it.
+//
+// It also closes the stale-target case: the dialog states the values actually
+// about to be written, so a target typed into the box but never saved is
+// visible before it does any damage.
+
+/** The two numbers a rescale is about to reconcile. */
+export interface RescaleNotice { authoredTotal: number; targetPoints: number; }
+
+/** The rescale this export would perform, or null when there is nothing to do. */
+export const rescaleNotice = (assignment: Assignment): RescaleNotice | null => {
+  const authoredTotal = (assignment.problems || [])
+    .flatMap(p => p.subsections || [])
+    .reduce((sum, s) => sum + (Number.isFinite(s.points) ? s.points : 0), 0);
+  const targetPoints = assignment.targetPoints || DEFAULT_TARGET_POINTS;
+  // Nothing authored yet: an empty assignment is not a rescale to warn about,
+  // and apportionPoints leaves an all-zero list alone in any case.
+  if (authoredTotal <= 0 || authoredTotal === targetPoints) return null;
+  return { authoredTotal, targetPoints };
+};
+
+/** What the instructor is asked. Both numbers, and what happens next. */
+export const rescaleConfirmationMessage = ({ authoredTotal, targetPoints }: RescaleNotice): string =>
+  `This assignment totals ${authoredTotal} points. The export target is ${targetPoints}. `
+  + `Exporting will rescale every part.\n\n`
+  + `OK — export and rescale to ${targetPoints}.\n`
+  + `Cancel — stop, and change the Target box to ${authoredTotal}.`;
+
+/** Thrown when the instructor declines the rescale. Nothing is written. */
+export class RescaleDeclinedError extends Error {
+  readonly rescaleDeclined = true;
+  constructor(readonly notice: RescaleNotice) {
+    super(`Export cancelled: ${notice.authoredTotal} points authored, target ${notice.targetPoints}.`);
+    this.name = 'RescaleDeclinedError';
+  }
+}
+
+/** True for the error above — call sites use it to stay quiet rather than report a failure. */
+export const isRescaleDeclined = (err: unknown): err is RescaleDeclinedError =>
+  !!err && typeof err === 'object' && (err as RescaleDeclinedError).rescaleDeclined === true;
+
+/** How the question is put. Replaced only by the test suite. */
+let askToRescale: (message: string) => boolean = message =>
+  typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true;
+
+/** Test seam. There is no production caller — see the block comment above. */
+export const setRescaleConfirm = (ask: (message: string) => boolean) => { askToRescale = ask; };
+
+/**
+ * `normalizePoints`, but it asks first when the numbers disagree.
+ *
+ * Every download entry point goes through this. `assignmentToMd` still
+ * normalises on its own, deliberately: it is a pure serialiser the export ZIP
+ * and the test suite both call on an assignment that has already been through
+ * here, and apportioning an apportioned list is a no-op.
+ *
+ * Exported so the suite can assert on the transformation itself rather than on
+ * a download, which needs a DOM.
+ */
+export const normalizePointsConfirmed = (assignment: Assignment): Assignment => {
+  const notice = rescaleNotice(assignment);
+  if (notice && !askToRescale(rescaleConfirmationMessage(notice))) {
+    throw new RescaleDeclinedError(notice);
+  }
+  return normalizePoints(assignment);
 };
 
 // Student-app contract: these element strings are matched verbatim downstream.
@@ -1147,7 +1235,9 @@ export const buildExportEntries = async (
 
 export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
-    assignment = normalizePoints(assignment);
+    // Asks before rescaling, and throws RescaleDeclinedError if told not to —
+    // before the ZIP is built, so declining writes nothing.
+    assignment = normalizePointsConfirmed(assignment);
     const zip = new JSZip();
     for (const [name, content] of Object.entries(await buildExportEntries(assignment))) {
       zip.file(name, content);
@@ -1160,7 +1250,10 @@ export const exportService = {
   },
 
   downloadMd: (assignment: Assignment) => {
-    const md = assignmentToMd(assignment);
+    // `assignmentToMd` normalises internally, and the .md carries the scaled
+    // values forward — this is the route whose damage shows up one cycle later,
+    // so it asks like the rest.
+    const md = assignmentToMd(normalizePointsConfirmed(assignment));
     const blob = new Blob([md], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1171,7 +1264,7 @@ export const exportService = {
   },
 
   downloadGraderDoc: async (assignment: Assignment) => {
-    const html = await generateGraderHTML(normalizePoints(assignment));
+    const html = await generateGraderHTML(normalizePointsConfirmed(assignment));
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1195,7 +1288,7 @@ export const exportService = {
    * writing area, say) that did not block emission.
    */
   downloadQrTemplate: async (assignment: Assignment) => {
-    const template = await generateTemplate(normalizePoints(assignment));
+    const template = await generateTemplate(normalizePointsConfirmed(assignment));
 
     const zip = new JSZip();
     zip.file(template.pdfFilename, template.pdf);

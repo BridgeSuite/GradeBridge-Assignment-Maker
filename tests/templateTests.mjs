@@ -1771,6 +1771,10 @@ check('the question text box always sits between the prompt row and the answer b
           isDrawing: s.isDrawing === null ? undefined : s.isDrawing,
         })),
         expected, 'the Python converter and the browser parser disagree');
+      // Both must take the point target from the file's own total — the two
+      // implementations defaulted to 100 together, and had to stop together.
+      assertEqual(spec.targetPoints, mdParser.parseMdToAssignment(fixtureMd).targetPoints,
+        'convert.py and mdParserService disagree about the point target');
       rmSync(work, { recursive: true, force: true });
     });
   }

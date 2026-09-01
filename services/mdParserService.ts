@@ -352,12 +352,33 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
   }
   if (currentProblem) problems.push(currentProblem);
 
+  // THE FILE'S OWN TOTAL IS THE TARGET.
+  //
+  // A `.md` carries already-scaled point values, so the sum of its sub-parts is
+  // the total its author intended. Adopting it makes the next export an
+  // identity rather than a silent transformation.
+  //
+  // It used to be left undefined, and `normalizePoints` then fell back to its
+  // 100 default — so a 200-point assignment listed as 200, exported as 100, and
+  // nothing on screen said why. On 2026-09-01 that halved ENG17 HW1, HW2 and
+  // HW3 three times, twice in the hands of operators who already knew about it.
+  // Only a new, empty assignment has nothing to infer from; that one still
+  // starts at 100 (see `Editor.tsx`).
+  //
+  // This does not remove rescaling: the Target box and the Rescale button are
+  // unchanged. It changes who decides by default — the file, not the constant.
+  const authoredTotal = problems
+    .flatMap(p => p.subsections)
+    .reduce((sum, s) => sum + (Number.isFinite(s.points) ? s.points : 0), 0);
+
   const now = Date.now();
   return {
     id: uuidv4(),
     courseCode: meta.courseCode,
     title: meta.title,
     inputMode: meta.inputMode,
+    // Zero is not a target. An .md with no points anywhere keeps the default.
+    ...(authoredTotal > 0 ? { targetPoints: authoredTotal } : {}),
     ...(meta.pageFormatId ? { pageFormatId: meta.pageFormatId } : {}),
     aiFeedback: meta.aiFeedback,
     preamble: meta.preamble,
