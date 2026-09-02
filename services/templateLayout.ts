@@ -355,7 +355,18 @@ export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: read
       // that it wants a solution, not a workspace.
       'Write each answer inside its printed box. Only what is inside the box is collected. Work the problem out on scratch paper first, then write into the box the solution you want read. The box is not scratch paper. It is sized for a composed answer, not for everything you tried.',
       'One line through anything you have abandoned.',
-      'Darker beats bigger. A faint pencil scans badly.',
+      // Amended 2026-09-02. It previously read "Darker beats bigger. A faint
+      // pencil scans badly." — which is a diagnosis, not an instruction: it
+      // tells a student what goes wrong and not what to do about it. Every
+      // hard-to-read capture in the calibration set is a pencil one, and
+      // cap01's crop is partly illegible to a person at full resolution.
+      //
+      // The defect is hardness, not pencil. "Use a pen" would take away the
+      // eraser, which is the wrong trade on a sheet where only the box is
+      // collected and abandoned work is cancelled by hand. A 2B photographs
+      // nearly as dark as ink and still erases, so naming the grade fixes the
+      // problem that banning the pencil would only move.
+      'Write with a soft pencil (2B or B) or a pen. Hard pencils come out faint and scan badly. Darker beats bigger.',
     ],
   },
 ];

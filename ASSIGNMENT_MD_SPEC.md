@@ -91,6 +91,72 @@ An unrecognised type tag falls back to `text`. So does a **retired** tag — one
 app once wrote but no longer authors — and the import surfaces a line naming the
 sub-part, so a file written against an older spec opens rather than failing.
 
+### What a description may contain
+
+**Despite the `.md` extension, this is not a markdown document.** It is a
+line-oriented plain-text format that borrows markdown's file extension and three of
+its constructs. Everything else you type reaches the student as the characters you
+typed.
+
+That sentence is here because three things say otherwise: the file is `.md`, the
+format is called "assignment markdown", and the button says *Import Markdown*. An
+author who infers markdown from those, and reads the rest of this spec closely, still
+ships literal asterisks to students — which is exactly what happened on 2026-09-02, to
+a generated authoring path that put `**D5-1.1.1**` at the head of every sub-part
+description and carried the asterisks into `assignment.html`, `assignment.tex`, the
+grader document and the student PDF of three assignments.
+
+A description is **escaped plain text plus three exceptions**.
+`services/mathRender.ts` (`toHtml`) escapes every prose segment. Only these are
+rendered:
+
+| Construct | Becomes | See |
+|---|---|---|
+| `$...$`, `$$...$$` | KaTeX math | §6 |
+| `![alt](url)` | an image | §11 |
+| ` ```svg ` fence | inline SVG | §11 |
+
+**No other markdown is processed.** `**bold**`, `*italic*`, `` `code` `` and
+`[link](url)` reach the student as the characters you typed. A `- item` list is not a
+list — it renders as a dash followed by text, which looks right only because of the
+next rule. (`#` is the one construct that is neither rendered nor printed; see the last
+paragraph of this section.)
+
+**The three that are rendered are not a curated subset, and there is no fourth
+coming.** A figure is lifted out before escaping because block content has to become
+a real element (§11); math goes to KaTeX because math is a feature (§6). Nobody ever
+decided that `**bold**` should not work — bold was never a feature, so there is no
+subset to finish. Three reasons it stays that way, recorded so the next author does
+not re-ask: escaping prose is a **security property**, currently simple and provable,
+and a markdown renderer trades it for typography; there are **three output paths**
+(HTML, LaTeX and the student PDF) and a construct that rendered in one and not
+another would show the grader something the student never saw; and a change to text
+rendering **can move `layout_id`**, because glyph metrics change pagination and
+printed paper is already in students' hands.
+
+**Line breaks are significant.** An authored newline is a newline and leading
+indentation is preserved on every surface the assignment is *displayed* on — the
+editor preview, the student's screen, `assignment.html`, the grader document and
+`assignment.pdf`. Every container is `white-space: pre-wrap`. Use them; do not
+flatten a multi-line step onto one line.
+
+**The one exception is `assignment.tex`.** LaTeX reads a single newline as a space,
+and the export adds no `\\` and no `\obeylines`, so a multi-line description compiles
+as one flowed paragraph. That file is for a human to read and hand-edit (§12) and no
+student or grader surface is affected — but if you compile it, this is why the lines
+ran together.
+
+**Blank lines inside a description are dropped on import**, as is the blank line
+between the description's first line and the rest; what survives is joined with single
+newlines. A hand-authored file is therefore normalised on its **first** import. §8's
+round-trip guarantee starts from the *exported* file, not from yours.
+
+**Two kinds of line are removed rather than printed.** A line starting with `>` is a
+grading block (§7), not a markdown blockquote, and never appears in a description
+wherever it sits. A line starting with `#` is dropped from a **problem** description,
+where it would be a heading, but is kept literally in a **sub-part** description — an
+asymmetry, not a rule worth relying on either way.
+
 ---
 
 ## 5. Type tags
@@ -116,6 +182,8 @@ Notes:
 ---
 
 ## 6. Math notation
+
+Math is one of the **three** constructs a description renders; everything else in it is escaped plain text, and §4 (*What a description may contain*) is the list.
 
 Descriptions and other rendered text support LaTeX via KaTeX. **One module — `services/mathRender.ts`
 — owns every conversion**, and the delimiters themselves live in `services/mathDelimiters.ts`, which
@@ -223,6 +291,7 @@ Sketch the transverse field pattern.
 ## 8. Round-trip and points
 
 - **Export .md → Import Markdown is stable**: importing an exported file and re-exporting yields the same file. A legacy electronic file that has no `**Input:**` line round-trips unchanged, and so does a file carrying figures (§11).
+- **The guarantee holds between *exported* files.** A hand-authored or generated file may be normalised once, on its first import, and that is not a defect: blank lines inside a description are dropped (§4) and a figure gains the separating blank line Export writes (§11). From the first export onward the file is stable. A workflow that generates `.md` and diffs it against an export should pre-empt the normaliser rather than read the difference as a change.
 - On export, sub-part points are **normalised** to the assignment's target total, so the numbers you write are relative weights; the exported file shows the scaled values.
 - **The file's own total is the target.** Import Markdown sets the assignment's target to the sum of the sub-part points it just read. A `.md` carries already-scaled values, so its own sum is the total its author intended, and adopting it makes the export an identity rather than a silent transformation. Only a **new, empty** assignment starts at the 100 default — it is the one case with nothing to infer from. `converter/convert.py` does the same, and writes `targetPoints` into the spec it emits.
 - **The export never silently rescales.** When the authored total and the target disagree, the export stops and asks, naming both numbers and what will happen. Declining writes nothing. The Target box and the Rescale button are unchanged: an instructor who wants a rescale still gets one, deliberately.
@@ -534,8 +603,7 @@ distributed**, so nothing was in circulation, but the mechanism was live. See "T
 whitelist" below.
 
 **And the rubric was configuring the grader.** On the same day two agents spent a cycle on a false
-alarm. two agents spent a cycle on a false alarm. An exported
-An exported `{stem}_grading_rubric.json` carried
+alarm. An exported `{stem}_grading_rubric.json` carried
 `"ai_grading_config": {"model": "claude-haiku-4-5-20251001", "temperature": 0.1, "max_tokens": 512}`.
 Both agents reasoned correctly — a 512-token ceiling on the
 smallest model in the family really would bind on a prompt that asks a grader to review a method, name
