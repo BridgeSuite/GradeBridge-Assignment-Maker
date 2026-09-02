@@ -116,11 +116,10 @@ rendered:
 | `![alt](url)` | an image | §11 |
 | ` ```svg ` fence | inline SVG | §11 |
 
-**No other markdown is processed.** `**bold**`, `*italic*`, `` `code` `` and
-`[link](url)` reach the student as the characters you typed. A `- item` list is not a
-list — it renders as a dash followed by text, which looks right only because of the
-next rule. (`#` is the one construct that is neither rendered nor printed; see the last
-paragraph of this section.)
+**No other markdown is processed.** `**bold**`, `*italic*`, `` `code` ``,
+`[link](url)` and `# heading` reach the student as the characters you typed. A
+`- item` list is not a list — it renders as a dash followed by text, which looks
+right only because of the next rule.
 
 **The three that are rendered are not a curated subset, and there is no fourth
 coming.** A figure is lifted out before escaping because block content has to become
@@ -151,11 +150,28 @@ between the description's first line and the rest; what survives is joined with 
 newlines. A hand-authored file is therefore normalised on its **first** import. §8's
 round-trip guarantee starts from the *exported* file, not from yours.
 
-**Two kinds of line are removed rather than printed.** A line starting with `>` is a
-grading block (§7), not a markdown blockquote, and never appears in a description
-wherever it sits. A line starting with `#` is dropped from a **problem** description,
-where it would be a heading, but is kept literally in a **sub-part** description — an
-asymmetry, not a rule worth relying on either way.
+**A `>` line is removed rather than printed.** It is a grading block (§7), not a
+markdown blockquote, so it leaves the description and goes to the field it names.
+
+*Corrected 2026-09-02.* This paragraph used to say that a `#` line was dropped from a
+problem description and kept in a sub-part description. That was measured and true, and
+it contradicted the promise three paragraphs above — *everything else you type reaches
+the student as the characters you typed*. **The promise was the better of the two, so
+the parser changed**: no description filter drops a line for beginning with `#` any
+more, at any of the three sites, and the import now warns, naming the part and quoting
+the line, because a heading-shaped line is nearly always a mistake even though it is
+never silently deleted. Silent content loss is worse than a stray character — a literal
+`#` is visible and gets fixed on the first preview, while a dropped line is found by a
+student who is missing a sentence.
+
+> **KNOWN DEFECT, awaiting its own change.** The `>` rule above holds for a sub-part
+> description and for a problem written in the one-line flat form (§3), but **not for
+> the description of a problem that has sub-parts**: there, a `>` line is kept and
+> printed as typed. It is not extracted into `grading_prompt` or `grader_note` either,
+> so a `> grader_note:` written under a `## Problem N:` heading becomes visible
+> assignment text and travels into `assignment_spec.json`, the student's PDF and the
+> printed sheet. **Put grading blocks under the sub-part they grade** (§7) until this
+> is fixed. Recorded 2026-09-02; no ENG17 file is affected.
 
 ---
 

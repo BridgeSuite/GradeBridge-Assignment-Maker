@@ -44,7 +44,31 @@ RETIRED_TYPE_TAGS = {
     'ai-graded:formative': 'Text',
 }
 
-RETIRED_TAG_WARNINGS = []
+# One line per thing the author should look at: a retired type tag degrading
+# to Text, and a heading-shaped line in a description. Renamed from
+# RETIRED_TAG_WARNINGS on 2026-09-02, when it stopped carrying only the one
+# kind.
+PARSE_WARNINGS = []
+
+# A line that looks like a markdown heading. Not rendered as one anywhere:
+# ASSIGNMENT_MD_SPEC.md section 4 -- a description is escaped plain text plus
+# three exceptions (math, an image, an `svg` fence), and `#` is none of them.
+# The \s matters: `#id { fill: none }` in an SVG <style> has no space after the
+# hash, so a figure is never reported as an author's mistake.
+# Mirrors HEADING_LINE_RE in services/mdParserService.ts.
+HEADING_LINE_RE = re.compile(r'^#{1,6}\s')
+
+
+def heading_line_warning(label, lines):
+    """Mirrors headingLineWarning() in services/mdParserService.ts."""
+    first = lines[0] if len(lines[0]) <= 60 else lines[0][:57] + '\u2026'
+    more = f' (and {len(lines) - 1} more)' if len(lines) > 1 else ''
+    return (
+        f'\"{label}\" has a line beginning with \"#\": {first}{more}. '
+        'A description is not a markdown document \u2014 the heading is not '
+        'rendered, and these characters print exactly as typed. '
+        'Rewrite the line or remove it.'
+    )
 
 MIN_WORDS_MAP = {
     'ai-graded:binary': 20,
@@ -115,18 +139,37 @@ def split_figures(lines):
     return units
 
 
-def build_description(body, keep_line):
+def build_description(body, keep_line, on_heading_line=None):
     """
     Body lines -> a description, with figure blocks kept verbatim and separated
     from their neighbours by a blank line — the form Export .md writes, so an
     exported file re-imports to exactly itself.
+
+    No filter drops a line for beginning with `#` (changed 2026-09-02). Two of
+    the three call sites used to and the third did not, so the same authored
+    line survived in a sub-part description and vanished from a problem
+    description, with nothing said to the author and nothing downstream able
+    to tell it had ever been there. Silent content loss is worse than a stray
+    character: a literal `#` is visible and gets fixed on the first preview,
+    while a dropped line is found by a student who is missing a sentence.
+    `on_heading_line` is how the author is told.
+
+    Only prose is inspected. A figure's own source is never reported, because
+    it is not something the author wrote as a heading.
+
+    Mirrors buildDescription() in services/mdParserService.ts.
     """
     parts = []
     for kind, lines in split_figures(body):
         if kind == 'figure':
             parts.append('\n'.join(lines))
             continue
-        kept = '\n'.join(l for l in lines if keep_line(l)).strip()
+        kept_lines = [l for l in lines if keep_line(l)]
+        if on_heading_line is not None:
+            for l in kept_lines:
+                if HEADING_LINE_RE.match(l.strip()):
+                    on_heading_line(l.strip())
+        kept = '\n'.join(kept_lines).strip()
         if kept:
             parts.append(kept)
     return '\n\n'.join(parts)
@@ -183,7 +226,7 @@ def parse_subsection_header(line):
     # bare `handwritten` leaves the mode unset — it is read as 'ai' downstream
 
     if base_type in RETIRED_TYPE_TAGS:
-        RETIRED_TAG_WARNINGS.append(
+        PARSE_WARNINGS.append(
             f'"{name}" was authored as [{base_type}], which has been retired. '
             f'It is now a plain {RETIRED_TYPE_TAGS[base_type]} part — '
             'review its points and rubric before exporting.'
@@ -455,12 +498,15 @@ def parse_md(filepath):
                 problems.append(current_problem)
             prob = parse_problem_header(header)
             if prob:
+                prob_headings = []
                 description = build_description(
                     body,
                     lambda l: bool(l.strip())
-                    and not l.strip().startswith('#')
-                    and not re.match(r'^\*\*(Due|Preamble):', l.strip())
+                    and not re.match(r'^\*\*(Due|Preamble):', l.strip()),
+                    prob_headings.append
                 )
+                if prob_headings:
+                    PARSE_WARNINGS.append(heading_line_warning(prob['name'], prob_headings))
                 current_problem = {
                     'id': str(uuid.uuid4()),
                     'name': prob['name'],
@@ -475,10 +521,15 @@ def parse_md(filepath):
             if not sub_meta:
                 continue
 
+            sub_headings = []
             description = build_description(
                 body,
-                lambda l: bool(l.strip()) and not l.strip().startswith('>')
+                lambda l: bool(l.strip()) and not l.strip().startswith('>'),
+                sub_headings.append
             )
+            if sub_headings:
+                PARSE_WARNINGS.append(heading_line_warning(
+                    f"{current_problem['name']} — {sub_meta['name']}", sub_headings))
 
             ai_grading_prompt = extract_blockquote_value('grading_prompt', body)
             grader_note = extract_blockquote_value('grader_note', body)
@@ -576,9 +627,9 @@ def print_summary(assignment):
                 label += f" / {sub.get('handwrittenGradingMode', 'ai')}"
             print(f"    - {sub['name']} ({sub['points']} pts, {label}){flag}")
     print()
-    for w in RETIRED_TAG_WARNINGS:
+    for w in PARSE_WARNINGS:
         print(f"  ⚠ {w}")
-    if RETIRED_TAG_WARNINGS:
+    if PARSE_WARNINGS:
         print()
 
 

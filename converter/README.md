@@ -36,11 +36,27 @@ same expression on both sides. The consequences are the same in both:
 - a blank line **inside** a description is dropped, and the surviving lines are joined
   with single newlines;
 - a line starting with `>` is removed from a sub-part description (it is a grading block);
-- a line starting with `#` is removed from a **problem** description and kept literally in
-  a **sub-part** description.
+- a line starting with `#` is **kept**, everywhere, and reported — `HEADING_LINE_RE` and
+  `heading_line_warning` / `headingLineWarning` are mirrored, warning text included.
 
-All three are documented in `../ASSIGNMENT_MD_SPEC.md` §4. Nothing about them changed on
-2026-09-02; the spec caught up with the code, and the code was not touched.
+All three are documented in `../ASSIGNMENT_MD_SPEC.md` §4.
+
+*Amended later on 2026-09-02.* The third bullet used to read "removed from a **problem**
+description and kept literally in a **sub-part** description". That was true of both
+parsers and it was the defect: the same authored line survived in one place and vanished
+in the other, silently. Both now keep it and both now warn. `npm test` covers the pair
+with a fixture carrying a `#` line in each position.
+
+### A divergence that is NOT fixed, recorded so nobody assumes parity
+
+**`convert.py` does not implement the flat problem form.** `## Problem 1: Title [10 pts]
+[text]` (spec §3) auto-promotes into a single `(a)` sub-part in `mdParserService.ts`;
+`parse_problem_header` here matches only `## Problem N: Title` and returns the name
+alone, so the whole bracketed tail becomes part of the problem name, no sub-part is
+built, and the assignment converts with **0 points**. Found 2026-09-02 while changing
+the description filters. No ENG17 or EEC1 file uses the flat form, so nothing in
+circulation is affected — but a `.md` written against §3 converts wrongly here and
+correctly in the app, and this file's own lockstep rule says that must not stand.
 
 They live in the same repo (since 2026-08-11) precisely so that a change to one is
 an obvious prompt to change the other. Before this they were in separate folders and

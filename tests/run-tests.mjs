@@ -25,7 +25,8 @@
 
 import { build } from 'esbuild';
 import { webcrypto, createPrivateKey, privateDecrypt, constants as cryptoConstants } from 'node:crypto';
-import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -40,9 +41,20 @@ globalThis.crypto ??= webcrypto;
 // ---------- tiny assertion harness ----------
 let passed = 0, failed = 0, skipped = 0;
 const results = [];
+// Async-aware, as templateTests.mjs already is: an `async` check returns a
+// promise, and a harness that only try/catches the CALL records a PASS before
+// the check has run, while the rejection escapes as an unhandled rejection.
+// Found 2026-09-02 — five async checks in this file had never asserted
+// anything, and two new ones passed against code known to be broken.
+const pending = [];
 const check = (name, fn) => {
-  try { fn(); passed++; results.push(`  PASS  ${name}`); }
-  catch (err) { failed++; results.push(`  FAIL  ${name}\n          ${err.message}`); }
+  const ok = () => { passed++; results.push(`  PASS  ${name}`); };
+  const bad = (err) => { failed++; results.push(`  FAIL  ${name}\n          ${err.message}`); };
+  try {
+    const out = fn();
+    if (out && typeof out.then === 'function') { pending.push(out.then(ok, bad)); return; }
+    ok();
+  } catch (err) { bad(err); }
 };
 const skip = (name, why) => { skipped++; results.push(`  SKIP  ${name} (${why})`); };
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
@@ -2041,7 +2053,173 @@ ${r.problem_statement}`);
   setRescaleConfirm(() => true);
 }
 
+// =====================================================
+// A DESCRIPTION NEVER LOSES A LINE SILENTLY
+// =====================================================
+// `mdParserService.ts` built description text at three call sites with three
+// different filters. Two dropped a line for beginning with `#` and one did not,
+// so the SAME authored line survived in a sub-part description and vanished
+// from a problem description. Nothing was said to the author and nothing
+// downstream could tell it had ever been there.
+//
+// Silent content loss is worse than a stray character: a literal `#` is visible
+// and gets fixed on the first preview, while a dropped line is found by a
+// student who is missing a sentence. It also contradicted ASSIGNMENT_MD_SPEC.md
+// §4 — *everything else you type reaches the student as the characters you
+// typed* — shipped the day before in d1fe99a. The spec was the better of the two.
+//
+// These checks fail on the pre-2026-09-02 code: the problem-description ones
+// because the line is gone, and every warning one because nothing was reported.
+{
+  const HASH_IN_PROBLEM = '## Setup for both parts';
+  const HASH_IN_SUB = '### Measured values';
+
+  const nestedMd = [
+    '# EEC1: Heading Probe', '',
+    '## Problem 1: Divider', '',
+    'The circuit is driven by 10 V.',
+    HASH_IN_PROBLEM,
+    'Both parts share it.', '',
+    '### (a) Ratio [100 pts] [text]',
+    'State the ratio.',
+    HASH_IN_SUB,
+    'Give it to two figures.', '',
+  ].join('\n');
+
+  const warnOf = (md) => { const w = []; parseMdToAssignment(md, w); return w; };
+
+  check('a "#" line in a PROBLEM description survives the import', () => {
+    const a = parseMdToAssignment(nestedMd);
+    assert(a.problems[0].description.includes(HASH_IN_PROBLEM),
+      `the problem description lost the line: ${JSON.stringify(a.problems[0].description)}`);
+    assertEqual(a.problems[0].description,
+      `The circuit is driven by 10 V.\n${HASH_IN_PROBLEM}\nBoth parts share it.`,
+      'the problem description is not the authored lines in order');
+  });
+
+  check('a "#" line in a SUB-PART description survives the import', () => {
+    const a = parseMdToAssignment(nestedMd);
+    const d = a.problems[0].subsections[0].description;
+    assert(d.includes(HASH_IN_SUB), `the sub-part description lost the line: ${JSON.stringify(d)}`);
+    assertEqual(d, `State the ratio.\n${HASH_IN_SUB}\nGive it to two figures.`,
+      'the sub-part description is not the authored lines in order');
+  });
+
+  check('both "#" lines survive to every export a reader sees', async () => {
+    const a = parseMdToAssignment(nestedMd);
+
+    const md = assignmentToMd(a);
+    assert(md.includes(HASH_IN_PROBLEM), 'Export .md dropped the problem heading line');
+    assert(md.includes(HASH_IN_SUB), 'Export .md dropped the sub-part heading line');
+
+    // ...and the exported file re-imports to itself, so the survival is stable
+    // rather than a one-off that the next round trip undoes.
+    assertEqual(assignmentToMd(parseMdToAssignment(md)), md, 'the export is not a fixed point');
+
+    const rubric = generateGradingRubric(a).rubrics.p0s0;
+    assert(rubric.problem_statement.includes(HASH_IN_PROBLEM),
+      `the grader's problem_statement lost the line: ${JSON.stringify(rubric.problem_statement)}`);
+
+    const html = await generateHTML(a);
+    assert(html.includes('## Setup for both parts'), 'assignment.html lost the line');
+    assert(toHtml(a.problems[0].description).includes('## Setup for both parts'),
+      'the rendered description lost the line');
+  });
+
+  check("both “#” lines survive into the student's own spec file", async () => {
+    const spec = await buildAssignmentSpec(parseMdToAssignment(nestedMd));
+    assert(spec.problems[0].description.includes(HASH_IN_PROBLEM),
+      'assignment_spec.json lost the problem heading line');
+    assert(spec.problems[0].subsections[0].description.includes(HASH_IN_SUB),
+      'assignment_spec.json lost the sub-part heading line');
+  });
+
+  // Losing the line was the defect; saying nothing about it was the other half.
+  check('a "#" line in a PROBLEM description warns, naming the problem', () => {
+    const w = warnOf(nestedMd);
+    const hit = w.find(m => m.includes('Divider') && m.includes(HASH_IN_PROBLEM));
+    assert(hit, `no warning named the problem and the line: ${JSON.stringify(w)}`);
+    assert(/not a markdown document/.test(hit), `the warning does not say why: ${hit}`);
+  });
+
+  check('a "#" line in a SUB-PART description warns, naming the sub-part', () => {
+    const w = warnOf(nestedMd);
+    assert(w.find(m => m.includes('Ratio') && m.includes(HASH_IN_SUB)),
+      `no warning named the sub-part and the line: ${JSON.stringify(w)}`);
+  });
+
+  check('a clean file still warns about nothing', () =>
+    assertEqual(warnOf(nestedMd.split('\n').filter(l => !l.startsWith('#') || /^#{1,2} (EEC1|Problem)/.test(l)).join('\n')),
+      [], 'a file with no heading-shaped line raised a warning'));
+
+  // The flat form builds a description twice and throws the first away. A
+  // warning off the discarded string would name the same line twice.
+  check('the flat problem form warns once, not twice', () => {
+    const flatMd = [
+      '# EEC1: Heading Probe Flat', '',
+      '## Problem 1: One-parter [100 pts] [text]', '',
+      'Answer in a sentence.',
+      HASH_IN_PROBLEM, '',
+    ].join('\n');
+    const w = warnOf(flatMd);
+    assertEqual(w.length, 1, `expected exactly one warning, got ${JSON.stringify(w)}`);
+    assert(w[0].includes(HASH_IN_PROBLEM), `the warning does not quote the line: ${w[0]}`);
+    const a = parseMdToAssignment(flatMd);
+    assert(a.problems[0].subsections[0].description.includes(HASH_IN_PROBLEM),
+      'the flat form lost the line');
+  });
+
+  // The `\s` in HEADING_LINE_RE is load-bearing: `#id { ... }` in an SVG <style>
+  // is a selector, not an author's heading, and reporting it would train the
+  // author to ignore the warning.
+  check('a "#" inside a figure is neither reported nor disturbed', () => {
+    const figMd = [
+      '# EEC1: Figure Probe', '',
+      '## Problem 1: Drawn', '',
+      '```svg',
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">',
+      '<title>Divider</title><desc>Two resistors</desc>',
+      '<style>#r1 { fill: none } #r2 { stroke: black }</style>',
+      '<rect id="r1" x="1" y="1" width="8" height="8"/>',
+      '</svg>',
+      '```', '',
+      '### (a) Ratio [100 pts] [text]',
+      'State it.', '',
+    ].join('\n');
+    assertEqual(warnOf(figMd), [], 'an SVG id selector was reported as a heading');
+    assert(parseMdToAssignment(figMd).problems[0].description.includes('#r1 { fill: none }'),
+      'the figure source was altered');
+  });
+
+  // Same format, two parsers. The filters had to change together or the local
+  // converter would keep deleting lines the browser now keeps.
+  {
+    const python = ['python', 'python3', 'py'].find(exe =>
+      spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
+    const name = 'converter/convert.py keeps the same "#" lines, and warns about them too';
+    if (!python) results.push(`  SKIP  ${name} (no Python interpreter on PATH)`);
+    else check(name, () => {
+      const work = mkdtempSync(join(tmpdir(), 'gb-heading-'));
+      const mdPath = join(work, 'HeadingProbe.md');
+      writeFileSync(mdPath, nestedMd, 'utf8');
+      const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), mdPath], { encoding: 'utf8' });
+      assert(run.status === 0, `convert.py failed: ${run.stderr || run.stdout}`);
+      const spec = JSON.parse(readFileSync(join(work, 'HeadingProbe_spec.json'), 'utf8'));
+      const ts = parseMdToAssignment(nestedMd);
+      assertEqual(spec.problems[0].description, ts.problems[0].description,
+        'convert.py and mdParserService disagree about the problem description');
+      assertEqual(spec.problems[0].subsections[0].description, ts.problems[0].subsections[0].description,
+        'convert.py and mdParserService disagree about the sub-part description');
+      assert(run.stdout.includes(HASH_IN_PROBLEM) && run.stdout.includes(HASH_IN_SUB),
+        `convert.py did not warn about both lines:\n${run.stdout}`);
+      rmSync(work, { recursive: true, force: true });
+    });
+  }
+}
+
 // ---------- report ----------
+// Every async check has to land before anything is counted.
+await Promise.all(pending);
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped\n`);
 // Windows keeps a handle on the imported bundles; a temp file left behind is

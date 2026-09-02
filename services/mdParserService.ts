@@ -159,21 +159,64 @@ function parseTemplateOptions(body: string[]): { answerLines?: number; isDrawing
 }
 
 /**
+ * A line that looks like a markdown heading. Not rendered as one anywhere:
+ * `ASSIGNMENT_MD_SPEC.md` §4 — a description is escaped plain text plus three
+ * exceptions (math, an image, an `svg` fence), and `#` is none of them.
+ *
+ * The `\s` matters. `#id { fill: none }` in an SVG `<style>` has no space after
+ * the hash and is not matched, so a figure that reaches this by some other
+ * route is not reported as an author's mistake.
+ */
+export const HEADING_LINE_RE = /^#{1,6}\s/;
+
+/** One line per description that kept a heading-shaped line, shown at import. */
+export const headingLineWarning = (label: string, lines: string[]): string => {
+  const first = lines[0].length > 60 ? `${lines[0].slice(0, 57)}…` : lines[0];
+  const more = lines.length > 1 ? ` (and ${lines.length - 1} more)` : '';
+  return `"${label}" has a line beginning with "#": ${first}${more}. A description is not a markdown ` +
+    `document — the heading is not rendered, and these characters print exactly as typed. ` +
+    `Rewrite the line or remove it.`;
+};
+
+/**
  * Body lines → a description, with figure blocks lifted out whole.
  *
  * The per-line filters below throw away blank lines, and lines that start with
- * `#` or `>` — every one of which is legitimate inside an SVG document (a CSS
- * id selector in a `<style>`, a wrapped attribute). So the figure comes out
- * first and goes back in verbatim; only the prose between figures is filtered.
+ * `>` — legitimate inside an SVG document (a wrapped attribute). So the figure
+ * comes out first and goes back in verbatim; only the prose between figures is
+ * filtered.
+ *
+ * **No filter drops a line for beginning with `#`** (changed 2026-09-02). Two
+ * of the three call sites used to, and the third did not, so the same authored
+ * line survived in a sub-part description and vanished from a problem
+ * description, with nothing said to the author and nothing downstream able to
+ * tell it had ever been there. Silent content loss is worse than a stray
+ * character: a literal `#` is visible and gets fixed on the first preview,
+ * while a dropped line is found by a student who is missing a sentence. It also
+ * contradicted `ASSIGNMENT_MD_SPEC.md` §4 — *everything else you type reaches
+ * the student as the characters you typed* — and the spec was the better of the
+ * two. `onHeadingLine` is how the author is told; losing the line was the
+ * defect, saying nothing about it was the other half.
+ *
+ * Only prose is inspected. A figure's own source is never reported, because it
+ * is not something the author wrote as a heading.
  *
  * A figure is separated from its neighbours by a blank line, which is the form
  * Export .md writes — so an exported file re-imports to exactly itself.
  */
-function buildDescription(body: string[], keepLine: (line: string) => boolean): string {
+function buildDescription(
+  body: string[],
+  keepLine: (line: string) => boolean,
+  onHeadingLine?: (line: string) => void
+): string {
   const parts: string[] = [];
   for (const seg of splitFigures(body.join('\n'))) {
     if (seg.kind === 'figure') { parts.push(seg.source); continue; }
-    const kept = seg.value.split('\n').filter(keepLine).join('\n').trim();
+    const keptLines = seg.value.split('\n').filter(keepLine);
+    if (onHeadingLine) {
+      for (const line of keptLines) if (HEADING_LINE_RE.test(line.trim())) onHeadingLine(line.trim());
+    }
+    const kept = keptLines.join('\n').trim();
     if (kept) parts.push(kept);
   }
   return parts.join('\n\n');
@@ -227,10 +270,13 @@ function noteRetiredTag(rawType: string | undefined, label: string, warnings?: s
 /**
  * Parse a GradeBridge assignment `.md` into an Assignment.
  *
- * `warnings`, if given, collects one line per thing that had to be changed to
- * load the file — currently only a retired type tag degrading to Text (see
- * `retiredTypes.ts`). The caller surfaces them to the instructor; nothing here
- * throws over one, because losing the assignment is worse than losing a type.
+ * `warnings`, if given, collects one line per thing the author should look at:
+ * a retired type tag degrading to Text (see `retiredTypes.ts`), and a
+ * heading-shaped line in a description, which is printed as typed rather than
+ * rendered (see `headingLineWarning`). The caller surfaces them to the
+ * instructor; nothing here throws over one, because losing the assignment is
+ * worse than losing a type — and, since 2026-09-02, nothing here silently
+ * discards authored text either.
  */
 export function parseMdToAssignment(content: string, warnings?: string[]): Assignment {
   const lines = content.split('\n');
@@ -280,17 +326,28 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
       if (currentProblem) problems.push(currentProblem);
       const prob = parseProblemHeader(header);
       if (prob) {
-        const description0 = buildDescription(body, l =>
-          !!l.trim() && !l.trim().startsWith('#') && !/^\*\*(Due|Preamble):/.test(l.trim())
+        // Heading-shaped lines are collected per build and reported only for
+        // the build whose result is actually kept — a flat problem throws
+        // `description0` away below, and warning about a discarded string
+        // would name the same line twice.
+        const nestedHeadings: string[] = [];
+        const description0 = buildDescription(
+          body,
+          l => !!l.trim() && !/^\*\*(Due|Preamble):/.test(l.trim()),
+          l => nestedHeadings.push(l)
         );
         currentProblem = { id: uuidv4(), name: prob.name, description: description0, subsections: [] };
 
         if (prob.points !== undefined && prob.submissionType !== undefined) {
           noteRetiredTag(prob.rawType, prob.name, warnings);
           // Flat format — auto-promote body into a single (a) subsection
-          const description = buildDescription(body, l =>
-            !!l.trim() && !l.trim().startsWith('>') && !l.trim().startsWith('#') && !/^\*\*(Due|Preamble):/.test(l.trim())
+          const flatHeadings: string[] = [];
+          const description = buildDescription(
+            body,
+            l => !!l.trim() && !l.trim().startsWith('>') && !/^\*\*(Due|Preamble):/.test(l.trim()),
+            l => flatHeadings.push(l)
           );
+          if (flatHeadings.length && warnings) warnings.push(headingLineWarning(prob.name, flatHeadings));
           const aiGradingPrompt = extractBlockquoteValue('grading_prompt', body);
           const graderNote = extractBlockquoteValue('grader_note', body);
           const minWords = MIN_WORDS_MAP[prob.submissionType];
@@ -314,6 +371,9 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
           if (isRetiredTag(prob.rawType)) {
             keepPromptAsGraderNote(currentProblem.subsections[currentProblem.subsections.length - 1]);
           }
+        } else if (nestedHeadings.length && warnings) {
+          // Nested problem: `description0` is the stem that is kept.
+          warnings.push(headingLineWarning(prob.name, nestedHeadings));
         }
       }
     } else if (type === 'subsection') {
@@ -321,7 +381,15 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
       const subMeta = parseSubsectionHeader(header);
       if (!subMeta) continue;
 
-      const description = buildDescription(body, l => !!l.trim() && !l.trim().startsWith('>'));
+      const subHeadings: string[] = [];
+      const description = buildDescription(
+        body,
+        l => !!l.trim() && !l.trim().startsWith('>'),
+        l => subHeadings.push(l)
+      );
+      if (subHeadings.length && warnings) {
+        warnings.push(headingLineWarning(`${currentProblem.name} — ${subMeta.name}`, subHeadings));
+      }
       const aiGradingPrompt = extractBlockquoteValue('grading_prompt', body);
       const graderNote = extractBlockquoteValue('grader_note', body);
 
