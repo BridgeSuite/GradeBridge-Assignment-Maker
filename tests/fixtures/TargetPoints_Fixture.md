@@ -1,11 +1,11 @@
-# ENG17: Homework 9
+# DEMO101: Homework 9
 
 **Input:** handwritten
 
 **Preamble:** Show your working and give every numerical answer with its unit.
 
 <!--
-  A 200-POINT ASSIGNMENT — the shape of the real ENG17 homeworks.
+  A 200-POINT ASSIGNMENT — the shape of the real DEMO101 homeworks.
 
   The `.md` carries already-scaled values, so its own sum is the intended total.
   `parseMdToAssignment` adopts it as `targetPoints`; before 2026-09-01 it did

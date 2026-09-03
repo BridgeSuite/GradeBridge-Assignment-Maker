@@ -1,4 +1,4 @@
-# ENG17: Homework 1
+# DEMO101: Homework 1
 
 **Input:** handwritten
 

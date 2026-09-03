@@ -1737,7 +1737,7 @@ check('the question text box always sits between the prompt row and the answer b
   // ported from, and the two are only ever right together. Compare them on one
   // fixture covering every form of the directive.
   {
-    const FIXTURE = resolve(REPO, 'tests', 'fixtures', 'ENG17_AnswerSpaceFixture.md');
+    const FIXTURE = resolve(REPO, 'tests', 'fixtures', 'AnswerSpace_Fixture.md');
     const fixtureMd = readFileSync(FIXTURE, 'utf8').replace(/\r\n/g, '\n');
     const expected = [
       { name: 'Authored line count', answerLines: 14, isDrawing: undefined },   // lines=N
@@ -1760,11 +1760,11 @@ check('the question text box always sits between the prompt row and the answer b
     if (!python) results.push(`  SKIP  ${pyCheck} (no Python interpreter on PATH)`);
     else check(pyCheck, () => {
       const work = mkdtempSync(join(tmpdir(), 'gb-convert-'));
-      const md = join(work, 'ENG17_AnswerSpaceFixture.md');
+      const md = join(work, 'AnswerSpace_Fixture.md');
       copyFileSync(FIXTURE, md);
       const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), md], { encoding: 'utf8' });
       assert(run.status === 0, `convert.py failed: ${run.stderr || run.stdout}`);
-      const spec = JSON.parse(readFileSync(join(work, 'ENG17_AnswerSpaceFixture_spec.json'), 'utf8'));
+      const spec = JSON.parse(readFileSync(join(work, 'AnswerSpace_Fixture_spec.json'), 'utf8'));
       assertEqual(
         spec.problems[0].subsections.map(s => ({
           name: s.name,

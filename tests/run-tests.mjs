@@ -984,7 +984,7 @@ if (fixture) {
 // check_math.js would report the file clean while it happened. Figures come out
 // first, everywhere, and go back at their anchor.
 {
-  const FIXTURE = resolve(REPO, 'tests', 'fixtures', 'ENG17_FigureFixture.md');
+  const FIXTURE = resolve(REPO, 'tests', 'fixtures', 'Figure_Fixture.md');
   const fixtureMd = readFileSync(FIXTURE, 'utf8').replace(/\r\n/g, '\n');
 
   // --- the splitter ---
@@ -1950,7 +1950,7 @@ ${r.problem_statement}`);
   const asked = [];
   const answering = (reply) => { asked.length = 0; setRescaleConfirm(m => { asked.push(m); return reply; }); };
 
-  const TARGET_FIXTURE = resolve(REPO, 'tests', 'fixtures', 'ENG17_TargetPointsFixture.md');
+  const TARGET_FIXTURE = resolve(REPO, 'tests', 'fixtures', 'TargetPoints_Fixture.md');
   const md = readFileSync(TARGET_FIXTURE, 'utf8');
 
   // 1. Import a 200-point .md and export WITHOUT touching the Target box.
@@ -2234,7 +2234,8 @@ ${r.problem_statement}`);
 // committed one is, and always will.
 {
   const forbidden = await import('./forbiddenNames.mjs');
-  const { FORBIDDEN_NAME_HASHES, hashName } = forbidden;
+  const { FORBIDDEN_NAME_HASHES, hashName,
+          FORBIDDEN_COURSE_HASHES, hashCourseCode } = forbidden;
 
   const trackedFiles = () => {
     const run = spawnSync('git', ['ls-files', '-z'], { encoding: 'utf8', cwd: REPO });
@@ -2300,6 +2301,67 @@ ${r.problem_statement}`);
     }
     assertEqual(problems, [],
       `a personal name is present in the repository:\n          ${problems.join('\n          ')}`);
+  });
+
+  // ---- No test fixture is named for a real course --------------------------
+  // Five fixtures were named for real courses, by five agents over three weeks,
+  // each reaching for the course it happened to be working on. The content was
+  // invented; the name was the defect. A student who finds this repository must
+  // not be able to mistake a fixture for their assignment, and a colleague's
+  // course must not appear to be published here.
+  //
+  // Course codes carry digits, so tokens here are alphanumeric runs and the
+  // hash keeps digits. Prefixes of length 4 and up are checked as well, so a
+  // code embedded in a longer identifier (a derived TemplateID, for instance)
+  // is still caught rather than hiding inside a longer token.
+  const codeTokens = (text) => String(text).split(/[^A-Za-z0-9]+/).filter(Boolean);
+
+  const forbiddenCodeIn = (text) => {
+    for (const tok of codeTokens(text)) {
+      for (let len = tok.length; len >= 4; len--) {
+        if (FORBIDDEN_COURSE_HASHES.has(hashCourseCode(tok.slice(0, len)))) return true;
+      }
+    }
+    return false;
+  };
+
+  check('no test fixture is named for a real course', () => {
+    assert(files !== null, 'git ls-files failed, so nothing was scanned');
+    const fixtures = files.filter(f => f.startsWith('tests/fixtures/'));
+    assert(fixtures.length > 0, 'no fixtures were found, so this proves nothing');
+    assert(FORBIDDEN_COURSE_HASHES.size > 0, 'the forbidden course list is empty');
+
+    const problems = [];
+    for (const file of fixtures) {
+      if (forbiddenCodeIn(file)) problems.push(`${file}: the PATH names a real course`);
+      let text;
+      try { text = readFileSync(join(REPO, file), 'utf8'); } catch { continue; }
+      const lines = text.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (forbiddenCodeIn(lines[i])) {
+          problems.push(`${file}:${i + 1}: ${lines[i].trim().slice(0, 120)}`);
+          break;
+        }
+      }
+    }
+    assertEqual(problems, [],
+      `a fixture is named for a real course:\n          ${problems.join('\n          ')}`);
+  });
+
+  check('the fixture guard would recognise a real course code if one were there', () => {
+    const INVENTED = 'QQ42X';
+    const localList = new Set([hashCourseCode(INVENTED)]);
+    const seen = (text) => codeTokens(text).some(t => {
+      for (let len = t.length; len >= 4; len--) if (localList.has(hashCourseCode(t.slice(0, len)))) return true;
+      return false;
+    });
+    assert(seen(`tests/fixtures/${INVENTED}_MathFixture.md`), 'a path occurrence was missed');
+    assert(seen(`# ${INVENTED}: Homework 3`), 'a title occurrence was missed');
+    assert(seen(INVENTED.toLowerCase()), 'a lower-case occurrence was missed');
+    assert(seen(`${INVENTED}HOM496F`), 'a code embedded in a longer identifier was missed');
+    assert(!seen('# DEMO101: Homework 3'), 'the fictional code used by the fixtures matched');
+    // Digits are kept, or every code beginning with the same letters would collide.
+    assert(hashCourseCode('QQ42X') !== hashCourseCode('QQX'), 'digits are being stripped');
   });
 
   // A guard that silently stops matching is worse than none. This proves the

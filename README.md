@@ -1,8 +1,8 @@
 # GradeBridge Assignment Maker
 
-Create structured assignments with LaTeX support and Gradescope AI-autograding integration — entirely in your browser.
+Author structured assignments with LaTeX and figures, and export the printable sheet, the student file and the grading materials your grading workflow needs — entirely in your browser.
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 **[Live App](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)** | **[Student Submission App](https://bridgesuite.github.io/GradeBridge-Student-Submission/)**
@@ -102,11 +102,11 @@ Use the two-phase CC workflow to generate `.md` files from lab manual source mat
 ### Option D — Iterate with Claude Code
 The `.md` format enables a tight CC iteration loop so you never need to manually explain changes:
 
-1. CC generates `EEC1_Lab1_Prelab.md` from your lab manual
+1. CC generates `DEMO101_Lab1_Prelab.md` from your lab manual
 2. Click **Import Markdown** → assignment opens in the editor
 3. Make changes in the UI (adjust points, tweak descriptions, edit rubrics)
 4. Click **Export .md** (top-right of editor) → downloads the updated `.md` with all changes
-5. Next CC session: *"read EEC1_Lab1_Prelab.md"* — CC sees exactly the current state, no explanation needed
+5. Next CC session: *"read DEMO101_Lab1_Prelab.md"* — CC sees exactly the current state, no explanation needed
 
 ---
 
@@ -204,7 +204,7 @@ Every rubric (except binary) must begin with a `Required elements:` list. Bands 
 ### Complete Example
 
 ```markdown
-# EEC1: Lab 1 Prelab
+# DEMO101: Lab 1 Prelab
 
 **Preamble:** Complete all problems before your scheduled lab session.
 
@@ -255,8 +255,8 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
 
 ```json
 {
-  "assignment_id": "EEC1_Lab1_Prelab",
-  "course_code": "EEC1",
+  "assignment_id": "DEMO101_Lab1_Prelab",
+  "course_code": "DEMO101",
   "assignment_title": "Lab 1 Prelab",
   "rubrics": {
     "p1s0": {
@@ -303,7 +303,60 @@ assignment carries it, and it agrees with `is_drawing` in `layout_{TemplateID}.c
 
 ## Data & Privacy
 
-- All data stored in browser `localStorage` — nothing is sent to any server
+### Student privacy
+
+**This tool collects no student-identifying information, and prints none.**
+
+- **No export path carries a name or student ID field**, in either input mode.
+  There is no such line on a handwritten sheet, on a typed sheet, or in the
+  LaTeX source. A test asserts it on the built artifact in both modes and fails
+  if one is reintroduced.
+- **The handwritten sheet tells the student not to write one**: *"Do not write
+  your name or student ID anywhere on these pages. You are identified when you
+  upload."*
+- **Identity is established by the student's authenticated upload** to their
+  institution's learning management system, under the agreement the institution
+  already holds. This tool is not part of that step and never sees the result.
+- **The student file carries no grading material.** `assignment_spec.json` is
+  built from an explicit whitelist, and a content check asserts that no grading
+  prompt, grader note or reference answer reaches any student-facing artifact,
+  by content rather than by field name.
+
+The rule was set on 2026-08-15 and was not fully applied until 2026-09-03; two
+export paths carried a name and ID line in the interval. It is now enforced by
+test rather than by documentation, which is why the test exists.
+
+### Where your data goes
+
+**Your assignments never leave your browser.** They are held in
+`localStorage`, and every export is generated locally and saved by your browser's
+own download. There is no account, no backend and no telemetry: nothing you author
+is transmitted anywhere.
+
+**The page itself is not self-contained, and you should know what it fetches.**
+Measured on 2026-09-03 by loading the built app and recording every request, a
+page load fetches, besides the app's own files:
+
+| Host | What for |
+|---|---|
+| `cdn.tailwindcss.com` | the CSS framework, loaded as a script |
+| `fonts.googleapis.com` | the webfont stylesheet |
+| `fonts.gstatic.com` | the webfont files themselves |
+
+These are third-party requests and they reveal your IP address and browser to
+those hosts on every load, as any embedded webfont or CDN script does. **They
+carry no assignment content**: a script, a stylesheet and two font files,
+requested by the page before you have opened anything. After load, no further
+request was observed while using the page.
+
+Exports are built in the browser and saved through your browser's own download.
+There is no upload step anywhere in this app, which is why your assignments
+staying local is a property of its design rather than a promise about a server.
+
+If your institution needs a page that contacts nothing at all, those three hosts
+are what would have to be vendored in. The app's own scripts and fonts already
+are, and a test keeps them that way.
+
 - **Export your JSON regularly** — data is lost if browser cache is cleared
 - **The export ZIP is instructor-only and MUST NOT be given to students.** Four files in its `instructor/` folder contain answers: `{stem}_grader_document.html`, `{stem}_grading_rubric.json`, `{stem}_authoring_backup.json` and `{stem}.md`. Students receive only the contents of `student/`. The ZIP carries a generated `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` at its root naming every file.
 - **`{stem}_authoring_backup.json` (in `instructor/`) is the file that restores an assignment completely** — the whole authoring object, unencrypted, including the grading prompts, grader notes, answer-space settings, the point target and the course public key. It is what Import JSON should be given. `assignment_spec.json` restores only what a student needs, and Import Markdown misses `targetPoints`, `coursePublicKey` and `config`; both now say so on import rather than losing your work silently.
@@ -320,15 +373,22 @@ key issued for your course — SPKI PEM, starting with
 `-----BEGIN PUBLIC KEY-----` — and it is carried in the exported
 `assignment_spec.json` as `coursePublicKey`.
 
-| Field | Student submission JSON |
-|---|---|
-| left empty | `gb1:` shared-key encoding, includes the student's name — the existing default |
-| key set | `gb2:` public-key envelope, **de-identified**: name, email, and SID are stripped |
+Setting a key selects the hardened `gb2` envelope for submissions; leaving it
+empty keeps the existing `gb1` default. Under `gb2` a per-submission AES key is
+wrapped with your course key, so only the autograder's matching private key can
+open a submission.
 
-Under `gb2` a per-submission AES key is wrapped with your course key, so only
-the autograder's matching private key can open a submission. The PDF and all
-filenames still carry the student's name; identity comes from Gradescope's
-authenticated submitter metadata.
+**What a submission actually contains is not specified here.** This app does not
+build submissions, and a second copy of another app's contract drifts the moment
+that contract moves. The payload, its encodings and its filenames are specified
+in the Student Submission app's
+[`AUTOGRADER_ZIP_SPEC.md`](https://github.com/BridgeSuite/GradeBridge-Student-Submission/blob/main/AUTOGRADER_ZIP_SPEC.md),
+**which governs**. This page previously restated that contract, went stale when
+it changed, and described the student's name as travelling in places it no
+longer does.
+
+Identity comes from the student's authenticated upload to their institution's
+LMS.
 
 The field validates on blur and reports the key size. It refuses PKCS#1 keys
 (`BEGIN RSA PUBLIC KEY`) and — emphatically — anything containing a private

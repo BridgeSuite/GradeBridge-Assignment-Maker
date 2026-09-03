@@ -20,7 +20,7 @@ against the same WebCrypto the browser uses.
   round-trip through `.md` export, `.md` import and `grading_rubric.json`, and a
   pre-handwritten electronic `.md` still round-trips byte-for-byte.
 - **Math rendering** (§7) — the regression suite for the recurring
-  `<<MATH_BLOCK_N>>` leak. Over `fixtures/EEC1_MathFixture.md` it asserts that no
+  `<<MATH_BLOCK_N>>` leak. Over `fixtures/Math_Fixture.md` it asserts that no
   output contains a placeholder token in any form, that `.tex` keeps `$...$` /
   `$$...$$` verbatim while escaping only the surrounding prose, that
   `assignment.html` and the grader document carry real KaTeX output, no MathJax
@@ -33,7 +33,7 @@ against the same WebCrypto the browser uses.
   is not checked out alongside) and greps the tree for a second copy of the
   regex. The Student app runs the same check from its side, in
   `tests/math-delimiter-tests.mjs`.
-- **Figures** (§11) — over `fixtures/ENG17_FigureFixture.md`. The split is exact
+- **Figures** (§11) — over `fixtures/Figure_Fixture.md`. The split is exact
   (every form reassembles byte-for-byte); a ` ```svg ` block never reaches
   `splitMath`, so a `$` in the drawing's own text is not read as a delimiter
   while math beside it still renders; the block survives the parser's line
@@ -337,7 +337,7 @@ ENG17 homeworks; the numbers are in
 `docs/session/COMPLETION_AM_ANSWER_BOX_2026-08-31.md`.
 
 `> template:` parsing is compared **against `converter/convert.py`** over
-`fixtures/ENG17_AnswerSpaceFixture.md`, which covers `lines=N`, an absent
+`fixtures/AnswerSpace_Fixture.md`, which covers `lines=N`, an absent
 directive, `lines` with `sketch`, and a legacy `space=full`. The check runs the
 real converter in a temp directory (SKIP if no Python is on PATH) — the two
 parsers are only ever right together.
@@ -397,7 +397,7 @@ default. The key saves to localStorage, survives a reload into the editor, and
 re-validates on load without needing another blur.
 
 Math rendering was exercised on 2026-08-15 (Chrome, `npm run dev`) by importing
-`fixtures/EEC1_MathFixture.md` and generating every output:
+`fixtures/Math_Fixture.md` and generating every output:
 
 - `assignment.pdf` / `template.pdf` — fractions, roots, sub/superscripts, Greek
   and the display equation all typeset correctly; escaped set braces survive;
@@ -408,7 +408,7 @@ Math rendering was exercised on 2026-08-15 (Chrome, `npm run dev`) by importing
   placeholder token, no `«»` guillemets, all math typeset natively.
 
 The QR template was exercised on 2026-08-15 (Chrome, `npm run dev`) from
-`fixtures/EEC130B_Handwritten_HW3.md` — 5 parts over 3 pages, generated in 37 ms:
+`fixtures/Handwritten_HW_Fixture.md` — 5 parts over 3 pages, generated in 37 ms:
 
 - All three pages carry four corner marks and the QR; the header line reads
   "GradeBridge {id} page k of N" and is the **only** text above y = 25 mm on any

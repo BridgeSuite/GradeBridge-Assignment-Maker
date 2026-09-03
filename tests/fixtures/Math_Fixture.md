@@ -1,4 +1,4 @@
-# EEC1: Math Rendering Fixture
+# DEMO101: Math Rendering Fixture
 
 **Preamble:** Bring a calculator; the divider network uses $6\,\Omega$ resistors and a $\mu$F capacitor.
 

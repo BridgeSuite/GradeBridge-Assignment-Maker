@@ -75,3 +75,45 @@ export const FORBIDDEN_NAME_HASHES = new Set([
   'fc52fabe94c0e037',
   'fdc97875a4c7d086',
 ]);
+
+// =====================================================
+// Course codes that must not name a test fixture
+// =====================================================
+// Added 2026-09-03 by the landing-page work order. Same class of problem as the
+// names above, same file, same reason for hashing.
+//
+// Five fixtures were named for real courses. Five agents over three weeks each
+// needed a realistic input, reached for the course it was working on, and named
+// the file after it. No rule said not to and nothing would have caught it, which
+// is why this exists: the rule and the guard, not just the five files.
+//
+// The content was measured and is NOT the real assignments. These are invented
+// problems that were wearing a real course's name. The name was the defect.
+//
+// TWO THINGS THIS PROTECTS
+//   A student who finds this repository must not be able to mistake a fixture
+//   for their own assignment, and a colleague's course must not appear to be
+//   published here.
+//
+// SCOPE: fixtures only. Real course codes appear legitimately elsewhere in this
+// repository, including in checks that read the real course files by name and
+// would break if renamed. See the completion note; widening this is a separate
+// decision, not a silent one.
+
+/**
+ * Course codes carry digits, so they cannot use `hashName`, which strips
+ * everything that is not a letter, which would collapse two codes sharing a
+ * letter stem onto the same hash. This keeps letters and digits.
+ */
+export const hashCourseCode = (code) => {
+  const normalised = String(code).toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!normalised) return '';
+  return createHash('sha256').update(normalised).digest('hex').slice(0, 16);
+};
+
+/** One entry per forbidden course code. No comments, no meaningful ordering. */
+export const FORBIDDEN_COURSE_HASHES = new Set([
+  '54c3568400778b4e',
+  'be958fb09e1ffd1d',
+  'd27dcfa053aa6656',
+]);

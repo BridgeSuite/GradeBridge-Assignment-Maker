@@ -1,4 +1,4 @@
-# EEC130B: Homework 3
+# DEMO101: Homework 3
 
 **Input:** handwritten
 

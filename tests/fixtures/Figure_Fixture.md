@@ -1,4 +1,4 @@
-# ENG17: Homework 1
+# DEMO101: Homework 1
 
 **Preamble:** Each circuit is drawn once and referred to by its problem number.
 
