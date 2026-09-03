@@ -429,7 +429,13 @@ never because a box was made narrow.
 **A question that cannot fit a page is refused, not shrunk.** The generator emits nothing and names the
 part and the overflow; splitting the problem is the author's call and nobody else can make it.
 
-**There is no name, student ID or date field, deliberately.** Identity comes from Gradescope authenticating the upload, so a blank for it is redundant; students are told not to write their name on the pages, so a labelled blank is a mixed message; a filled-in name is exactly the PII the band gate exists to keep out; and grading is meant to be blind to identity. Appendix C of the page-format spec says the same — because the app authenticates the student, there is no identity page.
+**There is no name, student ID or date field anywhere in what this app produces, deliberately.** This is not a property of the handwritten sheet alone. It holds on every export path and in both input modes.
+
+The app is a **de-identified processing step**. Identity comes from the authenticated upload, which is the identity of record, so a blank for it is redundant; students are told not to write their name on the pages, so a labelled blank is a mixed message; a filled-in name is exactly the PII the band gate exists to keep out; and grading is meant to be blind to identity, which a blank labelled "Student Name" invites the student to defeat with a pen. Appendix C of the page-format spec says the same: because the app authenticates the student, there is no identity page.
+
+*Enforced, not merely stated.* `npm test` builds the export in **each input mode** and asserts that no `student/` entry, and not `instructor/assignment.tex`, carries a name, student ID or date field. It reads the **built artifact**, extracted PDF text included, rather than the source. It matches a labelled blank rather than the words themselves, so the standing instruction telling students not to write a name is not mistaken for a field, and a test holds that distinction in both directions.
+
+*History, so this is not re-decided.* `CORRECTION_AM_QR_TEMPLATE_2026-08-15.md` section 1 ordered the removal. It was applied to the handwritten template and to nothing else, and the guard written with it grepped the template source, so the typed-mode student PDF and the LaTeX export kept their identity line for three weeks with the policy documented in three places. Both were removed on 2026-09-03 and the guard was replaced with the one described above.
 
 ### Page 1 is the instructions page
 

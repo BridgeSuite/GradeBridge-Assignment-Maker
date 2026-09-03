@@ -255,8 +255,32 @@ const PX_PER_MM = 96 / 25.4;
 const RASTER_SCALE = 3;          // ~288 dpi
 const PAGE_BOTTOM_MARGIN = 20;   // mm
 const DESC_PREVIEW_LINES = 2;    // problem description repeats on every page — keep it short
-const NAME_ID_LINE = 'Student Name: ______________________________   Student ID: __________________';
 const TOP: { baseline: 'top' } = { baseline: 'top' };
+
+// NO NAME, STUDENT ID OR DATE FIELD IS PRINTED, ON ANY PATH.
+//
+// Ordered by CORRECTION_AM_QR_TEMPLATE_2026-08-15.md section 1, applied then to
+// the handwritten template only, and completed here on the PDF and LaTeX exports
+// by WORKORDER_AM_NO_IDENTITY_FIELDS_2026-09-03.md. A `NAME_ID_LINE` constant and
+// a `nameIdLine()` used to be drawn at the top of every page of the typed-mode
+// student PDF, and generateLaTeX carried a "Student Information" block.
+//
+// Three reasons, all still true, stated here so the next person to want a name
+// line finds the decision rather than re-making it:
+//
+//   1. This app is a de-identified processing step. Identity comes from the
+//      authenticated upload, which is the identity of record. Nothing produced
+//      here needs to ask who the student is.
+//   2. A filled-in name is exactly the PII the pipeline exists to keep out of
+//      the artifacts it scans and grades.
+//   3. Grading is meant to be blind to identity, and a blank labelled "Student
+//      Name" invites the student to defeat that with a pen.
+//
+// The policy is stated in ASSIGNMENT_MD_SPEC.md section 10, and enforced by
+// "no export in either input mode carries a name or student ID field" in
+// tests/templateTests.mjs, which asserts on the BUILT ARTIFACT in both modes.
+// The 2026-08-15 guard grepped the template source only, which is how the two
+// paths above drifted for three weeks with the policy documented in three places.
 
 interface RichStyle {
   fontPt: number;
@@ -358,21 +382,16 @@ const generatePDFContent = async (doc: jsPDF, assignment: Assignment, isTemplate
   const margin = 20;
   const contentWidth = pageWidth - (margin * 2);
 
-  const nameIdLine = () => {
-    doc.setFont('times', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(0);
-    doc.text(NAME_ID_LINE, margin, 15, TOP);
-  };
+  // No identity line is drawn here or on any later page. See the note beside
+  // TOP, above: the removed line sat at y = 15 and content has always started at
+  // y = 30, so nothing moved when it went.
   const newPage: PageBreak = () => {
     doc.addPage();
-    nameIdLine();
     return 30;
   };
 
   // --- COVER PAGE ---
 
-  nameIdLine();
   let y = 30;
 
   doc.setFont('times', 'bold');
@@ -404,7 +423,6 @@ const generatePDFContent = async (doc: jsPDF, assignment: Assignment, isTemplate
 
       for (let i = 0; i < pageCount; i++) {
         doc.addPage(); // STRICT PAGE BREAK FOR EVERY ITEM
-        nameIdLine();
         y = 30;
 
         // Header: Problem info (Repeated on every page for clarity)
@@ -596,11 +614,6 @@ export const generateLaTeX = (assignment: Assignment): string => {
 \\end{center}
 
 \\vspace{1em}
-
-% ---- Student Information ----
-\\noindent\\textbf{Student Name:} \\underline{\\hspace{6cm}} \\hfill \\textbf{Student ID:} \\underline{\\hspace{4cm}}
-
-\\vspace{1.5em}
 
 `;
 

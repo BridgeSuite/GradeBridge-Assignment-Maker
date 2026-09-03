@@ -2023,6 +2023,31 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
   }
 }
 
+// Text a reader can get out of a PDF, shared by the guards below.
+//
+// jsPDF draws authored text with real text operators when there is no DOM
+// (renderTextToCanvas returns null and the caller falls back to toPdfText),
+// which is what makes this readable here. In a browser the same text is
+// rasterised into an image, still perfectly visible to the student but not
+// extractable, so for the content guard this is a proxy and the spec and CSV
+// strands carry the weight. For the identity guard it is the primary strand:
+// the line it looks for was drawn by doc.text(), never rasterised.
+const pdfExtractedText = (buf) => {
+  const bytes = buf.toString('latin1');
+  let out = '';
+  for (const m of bytes.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
+    const raw = Buffer.from(m[1], 'latin1');
+    let txt;
+    try { txt = inflateSync(raw).toString('latin1'); } catch { txt = raw.toString('latin1'); }
+    if (!txt.includes('Tj') && !txt.includes('TJ')) continue;
+    for (const s of txt.matchAll(/\(((?:\\.|[^\\()])*)\)\s*T[jJ]/g)) {
+      out += ' ' + s[1].replace(/\\([0-7]{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)))
+                      .replace(/\\(.)/g, '$1');
+    }
+  }
+  return out;
+};
+
 // ---- The answer key is kept out by CONTENT, not by field name --------------
 // The 2026-08-31 whitelist lists which FIELDS may reach a student. It closed the
 // door `aiGradingPrompt` walked through. It cannot close this one: a grading
@@ -2108,28 +2133,6 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
   const NORM = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const wordsOf = (s) => NORM(s).split(' ').filter(Boolean);
 
-  // Text a reader can get out of a PDF. The template draws authored text with
-  // real text operators when there is no DOM (renderTextToCanvas returns null
-  // and the caller falls back to toPdfText), which is what makes this readable
-  // here. In a browser the same text is rasterised into an image — still
-  // perfectly visible to the student, just not extractable — so this strand is
-  // a proxy, and the spec and CSV strands below are the load-bearing ones.
-  const pdfText = (buf) => {
-    const bytes = buf.toString('latin1');
-    let out = '';
-    for (const m of bytes.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
-      const raw = Buffer.from(m[1], 'latin1');
-      let txt;
-      try { txt = inflateSync(raw).toString('latin1'); } catch { txt = raw.toString('latin1'); }
-      if (!txt.includes('Tj') && !txt.includes('TJ')) continue;
-      for (const s of txt.matchAll(/\(((?:\\.|[^\\()])*)\)\s*T[jJ]/g)) {
-        out += ' ' + s[1].replace(/\\([0-7]{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)))
-                        .replace(/\\(.)/g, '$1');
-      }
-    }
-    return out;
-  };
-
   // Everything a student can receive, as one normalised haystack.
   const studentHaystack = async (assignment) => {
     const entries = await exportSvcForInstr.buildExportEntries(assignment);
@@ -2139,7 +2142,7 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
       if (typeof content === 'string') { strands.push(content); continue; }
       if (!content || typeof content.arrayBuffer !== 'function') continue;
       const buf = Buffer.from(await content.arrayBuffer());
-      strands.push(path.endsWith('.pdf') ? pdfText(buf) : buf.toString('utf8'));
+      strands.push(path.endsWith('.pdf') ? pdfExtractedText(buf) : buf.toString('utf8'));
     }
     // The spec as the student's browser decodes it, not as an opaque envelope.
     strands.push(JSON.stringify(await exportSvcForInstr.buildAssignmentSpec(assignment)));
@@ -2409,6 +2412,106 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
         `HW${n}: grading material reached a student-facing artifact`);
     });
   }
+}
+
+
+// ---- No export, in either input mode, carries a name or student ID field ---
+// CORRECTION_AM_QR_TEMPLATE_2026-08-15.md section 1 removed the name / student
+// ID / date line. It was applied to the handwritten template and to nothing
+// else, and the guard written with it grepped the TEMPLATE SOURCE, so the PDF
+// export and the LaTeX export kept theirs for three weeks with the policy
+// documented in three places. WORKORDER_AM_NO_IDENTITY_FIELDS_2026-09-03.md
+// completes the removal; this replaces the grep.
+//
+// Two properties, both of them the lesson rather than the deletion:
+//
+//   1. It asserts on the BUILT ARTIFACT, not on a source file. A grep over
+//      source cannot see what jsPDF actually drew.
+//   2. It runs in BOTH input modes. A single-mode fixture is exactly the hole
+//      being closed: the handwritten path passed the whole time.
+//
+// The patterns match a FIELD, meaning a label with somewhere to write, not the
+// words themselves. That distinction is load-bearing: page 1 of every
+// handwritten sheet legitimately prints "Do not write your name or student ID
+// anywhere on these pages", and a guard that fired on it would be deleted by the
+// first person it inconvenienced.
+{
+  const IDENTITY_FIELD_PATTERNS = [
+    // "Student Name:", "Student ID:", "Student Number:" as a labelled field.
+    [/student\s*name\s*:/i, 'a "Student Name:" field'],
+    [/student\s*(id|i\.d\.|number)\s*:/i, 'a "Student ID:" field'],
+    // Any label followed by somewhere to write it: underscores, or a LaTeX rule.
+    [/\b(name|id|date|section)\s*:\s*_{3,}/i, 'a labelled fill-in blank'],
+    [/\b(name|id|date|section)\s*:\s*\}?\s*\\underline/i, 'a labelled LaTeX rule'],
+    // A bare run of underscores long enough to be a writing line.
+    [/_{10,}/, 'a fill-in rule'],
+  ];
+
+  const identityFields = (text) => IDENTITY_FIELD_PATTERNS
+    .filter(([re]) => re.test(text))
+    .map(([re, what]) => `${what} (${re.source})`);
+
+  // Every artifact this guard covers, by path, so a failure names the file.
+  // student/ is everything a student receives; instructor/assignment.tex is
+  // included because it exists to be compiled, and what it compiles is a paper
+  // the same policy governs.
+  const guardedTexts = async (assignment) => {
+    const entries = await exportSvcForInstr.buildExportEntries(assignment);
+    const out = [];
+    for (const [path, content] of Object.entries(entries)) {
+      const guarded = path.startsWith('student/') || path.endsWith('instructor/assignment.tex');
+      if (!guarded) continue;
+      if (typeof content === 'string') { out.push([path, content]); continue; }
+      if (!content || typeof content.arrayBuffer !== 'function') continue;
+      const buf = Buffer.from(await content.arrayBuffer());
+      out.push([path, path.endsWith('.pdf') ? pdfExtractedText(buf) : buf.toString('utf8')]);
+    }
+    return out;
+  };
+
+  // Typed mode: the path that still had the line. Several problems and an image
+  // part, so the per-item `doc.addPage()` loop runs, and a long preamble so the
+  // `newPage()` overflow path runs too. Both used to redraw the line.
+  const typedFixture = makeAssignment([
+    [part('Node equations', 20, { submissionType: 'Text' }),
+     part('Working', 20, { submissionType: 'Text' })],
+    [part('Photograph of the board', 30, { submissionType: 'Image', maxImages: 3 })],
+    [part('Explanation', 30, { submissionType: 'AI Graded: Short' })],
+  ], {
+    inputMode: 'electronic',
+    preamble: ('Complete every part and show your working. ').repeat(40),
+  });
+
+  // Handwritten mode: already correct, and asserted so it stays that way.
+  const handwrittenFixture = makeAssignment([
+    [part('Cutoff frequency', 50), part('Field sketch', 50, { isDrawing: true })],
+  ], { inputMode: 'handwritten' });
+
+  for (const [mode, fixture] of [['typed', typedFixture], ['handwritten', handwrittenFixture]]) {
+    check(`${mode} mode: no export carries a name or student ID field`, async () => {
+      const texts = await guardedTexts(fixture);
+      assert(texts.length > 0, `${mode}: nothing was guarded, so this proves nothing`);
+      assert(texts.some(([p]) => p.endsWith('.pdf')),
+        `${mode}: no PDF among the guarded artifacts`);
+      const found = texts.flatMap(([path, text]) =>
+        identityFields(text).map(what => `${path} carries ${what}`));
+      assertEqual(found, [], `${mode}: an identity field reached an exported artifact`);
+    });
+  }
+
+  // The distinction the patterns rest on. If this ever fails, the patterns have
+  // become word-matchers and will be deleted by whoever they block next.
+  check('the guard reads a field, not the instruction that forbids one', () => {
+    assertEqual(identityFields(
+      'Do not write your name or student ID anywhere on these pages. '
+      + 'You are identified when you upload.'), [],
+      'the standing instruction is being read as an identity field');
+    assert(identityFields('Student Name: ____________  Student ID: __________').length > 0,
+      'the guard does not recognise the line it exists to keep out');
+    assert(identityFields(
+      '\\noindent\\textbf{Student Name:} \\underline{\\hspace{6cm}}').length > 0,
+      'the guard does not recognise the LaTeX form of that line');
+  });
 }
 
 
