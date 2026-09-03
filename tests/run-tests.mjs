@@ -2233,9 +2233,11 @@ ${r.problem_statement}`);
 // untracked scratch file is not in the repository and must not trip this; a
 // committed one is, and always will.
 {
-  const forbidden = await import('./forbiddenNames.mjs');
-  const { FORBIDDEN_NAME_HASHES, hashName,
-          FORBIDDEN_COURSE_HASHES, hashCourseCode } = forbidden;
+  // Two files, because `forbiddenNames.mjs` is held byte-identical to the
+  // Student Submission repository's copy and the course-code guard has no
+  // counterpart there. See the header of `forbiddenCourses.mjs`.
+  const { FORBIDDEN_NAME_HASHES, hashName } = await import('./forbiddenNames.mjs');
+  const { FORBIDDEN_COURSE_HASHES, hashCourseCode } = await import('./forbiddenCourses.mjs');
 
   const trackedFiles = () => {
     const run = spawnSync('git', ['ls-files', '-z'], { encoding: 'utf8', cwd: REPO });

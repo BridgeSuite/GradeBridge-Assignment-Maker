@@ -1,0 +1,58 @@
+# =====================================================
+# The suite, run where the person who forgot cannot reach it
+# =====================================================
+# Until 2026-09-03 every check in this repository ran only when somebody typed
+# `npm test`. There was no CI and no hook, so the privacy guards — no personal
+# name, no absolute path, no image metadata, no tracked process record — were
+# enforced by habit.
+#
+# WHAT THIS IS, AND WHAT IT IS NOT
+#
+#   This is the enforcement half. The `pre-push` hook in `.githooks/` is the
+#   other half and it is NOT enforcement: it does not survive a clone, and
+#   `git push --no-verify` skips it. This runs on the server, on every push and
+#   every pull request, and cannot be skipped from a developer's machine.
+#
+#   **It catches a mistake AFTER the push, not before it.** By the time this job
+#   turns red, the commit is on GitHub and, if the repository is public, it has
+#   been fetchable by anyone and may already be indexed. For a name, a path or a
+#   photograph's metadata that is not a near miss — publication has happened and
+#   the fix is a history rewrite plus whatever disclosure that deserves.
+#
+#   So do not read a green tick as proof that nothing was ever published. Read
+#   it as proof that nothing is published *now*. The control that actually
+#   prevents disclosure is upstream of both: not writing the name, the path or
+#   the process record into the repository in the first place.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # No lockfile is tracked (see .gitignore), so `npm ci` cannot run and
+      # there is nothing to cache. `package.json` pins the versions that matter
+      # exactly — tailwindcss and both @fontsource packages — which is what
+      # makes the build reproducible without one.
+      - run: npm install
+
+      # tsc, then the full suite: run-tests, templateTests, bundle-tests,
+      # no-personal-names, no-process-records.
+      #
+      # The ENG17 checks inside templateTests read course material that lives
+      # outside this repository and are absent here, so they report SKIP rather
+      # than failing. That is deliberate — see tests/templateTests.mjs — and it
+      # means a green run here does NOT cover them. They are covered locally,
+      # where the files are.
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build

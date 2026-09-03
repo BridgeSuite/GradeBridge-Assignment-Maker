@@ -1461,7 +1461,13 @@ check('item 4: authored text with Greek and math is not silently garbled', async
   const g = await gen.generateTemplate(greek);
   const bytes = Buffer.from(await g.pdf.arrayBuffer()).toString('latin1');
   const strings = bytes.match(/\(((?:\\.|[^\\()])*)\)\s*Tj/g) || [];
-  const utf16 = strings.filter(s => / /.test(s));
+  // The NUL is written as an ESCAPE and must stay one. It was a raw NUL byte
+  // in this source until 2026-09-03, and a single NUL is git's own test for
+  // "binary": it made this 143 KB file invisible to the absolute-path scan
+  // in tests/no-personal-names.mjs and dropped it to the weaker floor in the
+  // name scan. The regex matches identically either way; the file's
+  // scannability does not.
+  const utf16 = strings.filter(s => /\u0000/.test(s));
   assertEqual(utf16, [], 'a string was re-encoded as UTF-16BE and will render as mojibake');
   assert(!/\\delta|\\Omega|\\frac/.test(bytes), 'raw LaTeX was written onto the template');
 });

@@ -1,0 +1,34 @@
+#!/bin/sh
+# =====================================================
+# Fast local feedback before a push. NOT enforcement.
+# =====================================================
+# This is the half of the 2026-09-03 guard that runs on your machine, and it is
+# worth being exact about how little it guarantees:
+#
+#   * It does not survive a clone. Hooks are not tracked content — this file is
+#     tracked, but git will not run it until somebody points git at it:
+#
+#         git config core.hooksPath .githooks
+#
+#     A fresh clone runs no hook at all until that line is typed. That single
+#     manual step is the reason this cannot be the enforcement.
+#
+#   * `git push --no-verify` skips it, silently and by design.
+#
+# The enforcement is `.github/workflows/test.yml`, which runs on the server
+# where the person who forgot cannot reach it. This exists so you find out in
+# the seconds before a push rather than the minutes after one — which for a
+# personal name, an absolute path or a photograph's metadata is the difference
+# between a local fix and a history rewrite.
+#
+# To skip it deliberately, use --no-verify and know that CI will still see it.
+
+set -e
+
+printf '\n[pre-push] tsc\n'
+npx tsc --noEmit
+
+printf '\n[pre-push] npm test\n'
+npm test
+
+printf '\n[pre-push] ok\n'
