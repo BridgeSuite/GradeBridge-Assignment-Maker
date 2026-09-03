@@ -35,7 +35,9 @@ same expression on both sides. The consequences are the same in both:
 
 - a blank line **inside** a description is dropped, and the surviving lines are joined
   with single newlines;
-- a line starting with `>` is removed from a sub-part description (it is a grading block);
+- a line starting with `>` is removed from a description and routed to the field it
+  names — from a sub-part, and, since 2026-09-03, from a problem heading too, where
+  nothing reads one and keeping it printed it to the student;
 - a line starting with `#` is **kept**, everywhere, and reported — `HEADING_LINE_RE` and
   `heading_line_warning` / `headingLineWarning` are mirrored, warning text included.
 

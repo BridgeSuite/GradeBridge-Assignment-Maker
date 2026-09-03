@@ -31,6 +31,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { inflateSync } from 'node:zlib';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -2022,6 +2023,242 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
   }
 }
 
+// ---- The answer key is kept out by CONTENT, not by field name --------------
+// The 2026-08-31 whitelist lists which FIELDS may reach a student. It closed the
+// door `aiGradingPrompt` walked through. It cannot close this one: a grading
+// block left in a problem stem is in `description`, which is on the list and
+// must be. **A whitelist of fields cannot see an answer key smuggled into an
+// allowed field as prose.** So the guard below asserts content, and it is meant
+// to catch routes nobody has thought of yet — not only the one predicate fixed
+// on 2026-09-03.
+//
+// Three assertions, deliberately different in kind, because a leak can be
+// partial and a partial leak defeats any one of them alone:
+//
+//   1. MARKERS      — the structural vocabulary of a grading block. Zero
+//                     tolerance, no threshold to tune. "grader_note:" cannot
+//                     legitimately appear in something a student reads.
+//   2. WHOLE STRING — a complete grading prompt or grader note, verbatim. Zero
+//                     tolerance; a whole rubric is never a question.
+//   3. BULK OVERLAP — the longest run of a grading string's words appearing
+//                     contiguously in student text.
+//
+// Only #3 needs a number, and the number is measured rather than guessed.
+// Grading prompts legitimately quote the circuit they grade, so SOME overlap is
+// correct and a naive check fires on it. Measured over the real ENG17 homeworks
+// on 2026-09-03, the longest LEGITIMATE contiguous overlap is:
+//
+//     HW1   6 words  "and each is joined to the"
+//     HW2   7 words  "the right hand side of the rectangle"
+//     HW3  10 words  "hangs from the output node with its far end unconnected"
+//
+// The bar is 16 — six words of headroom over the worst real case. If a future
+// assignment trips it legitimately, re-measure (the probe is described in
+// docs/session/COMPLETION_AM_KEY_DISCLOSURE_2026-09-03.md) and raise it with the
+// new number recorded here. Do not delete the check, and do not raise it without
+// looking at what fired.
+{
+  const mdParser = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParserKey.mjs');
+  // Same default and same override as the join checks above.
+  const HWK = process.env.ENG17_HWK_DIR
+    ? resolve(process.env.ENG17_HWK_DIR)
+    : resolve(REPO, '..', '..', '..', 'Knoesen', 'ENG17-Assignments', 'New HWKs');
+
+  const MAX_OVERLAP_WORDS = 16;
+
+  // Structural vocabulary. Lowercase; matched against normalised text.
+  const GRADING_MARKERS = [
+    'grading_prompt', 'grader_note', 'award full marks', 'award partial credit',
+    'award no credit', 'required elements', 'what to judge', 'answer key',
+  ];
+
+  const NORM = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const wordsOf = (s) => NORM(s).split(' ').filter(Boolean);
+
+  // Text a reader can get out of a PDF. The template draws authored text with
+  // real text operators when there is no DOM (renderTextToCanvas returns null
+  // and the caller falls back to toPdfText), which is what makes this readable
+  // here. In a browser the same text is rasterised into an image — still
+  // perfectly visible to the student, just not extractable — so this strand is
+  // a proxy, and the spec and CSV strands below are the load-bearing ones.
+  const pdfText = (buf) => {
+    const bytes = buf.toString('latin1');
+    let out = '';
+    for (const m of bytes.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)) {
+      const raw = Buffer.from(m[1], 'latin1');
+      let txt;
+      try { txt = inflateSync(raw).toString('latin1'); } catch { txt = raw.toString('latin1'); }
+      if (!txt.includes('Tj') && !txt.includes('TJ')) continue;
+      for (const s of txt.matchAll(/\(((?:\\.|[^\\()])*)\)\s*T[jJ]/g)) {
+        out += ' ' + s[1].replace(/\\([0-7]{3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)))
+                        .replace(/\\(.)/g, '$1');
+      }
+    }
+    return out;
+  };
+
+  // Everything a student can receive, as one normalised haystack.
+  const studentHaystack = async (assignment) => {
+    const entries = await exportSvcForInstr.buildExportEntries(assignment);
+    const strands = [];
+    for (const [path, content] of Object.entries(entries)) {
+      if (!path.startsWith('student/')) continue;      // instructor/ is allowed the key
+      if (typeof content === 'string') { strands.push(content); continue; }
+      if (!content || typeof content.arrayBuffer !== 'function') continue;
+      const buf = Buffer.from(await content.arrayBuffer());
+      strands.push(path.endsWith('.pdf') ? pdfText(buf) : buf.toString('utf8'));
+    }
+    // The spec as the student's browser decodes it, not as an opaque envelope.
+    strands.push(JSON.stringify(await exportSvcForInstr.buildAssignmentSpec(assignment)));
+    return { text: ` ${NORM(strands.join(' \n '))} `, paths: Object.keys(entries) };
+  };
+
+  const gradingStrings = (a) => (a.problems || []).flatMap(p =>
+    (p.subsections || []).flatMap(s =>
+      [s.aiGradingPrompt, s.graderNote].filter(v => typeof v === 'string' && v.trim())));
+
+  // The three assertions. Returns a list of problems, empty when clean.
+  const disclosures = (haystack, grading) => {
+    const found = [];
+    for (const marker of GRADING_MARKERS) {
+      if (haystack.includes(marker)) found.push(`marker "${marker}" appears in student-facing text`);
+    }
+    for (const g of grading) {
+      const n = NORM(g);
+      if (n && haystack.includes(` ${n} `)) {
+        found.push(`a whole grading string appears verbatim: "${g.slice(0, 70)}…"`);
+        continue;
+      }
+      const w = wordsOf(g);
+      for (let i = 0; i + MAX_OVERLAP_WORDS <= w.length; i++) {
+        const run = w.slice(i, i + MAX_OVERLAP_WORDS).join(' ');
+        if (haystack.includes(` ${run} `)) {
+          found.push(`${MAX_OVERLAP_WORDS} consecutive words of a grading string appear: "${run}"`);
+          break;
+        }
+      }
+    }
+    return found;
+  };
+
+  // ---- The constructed fixture: the exact route this work order closes ------
+  // A grading block written against a problem heading that HAS sub-parts. It is
+  // read by nothing there, so before 2026-09-03 it was neither routed nor
+  // dropped — it was printed, into `description`, which is on the whitelist.
+  const LEAK_NOTE = 'The intended answer is 1.2 V, reached by superposition with the 5 V source shorted.';
+  const LEAK_PROMPT = 'REFERENCE: Required elements: (1) the node voltage is 1.2 V; (2) the current divides '
+    + '3 to 1 between the parallel branches. Award full marks for both elements with working shown. '
+    + 'Award no credit for a bare number with no method. WHAT TO JUDGE: the method, not the arithmetic.';
+
+  const leakMd = [
+    '# ENG17: Key Disclosure Fixture', '',
+    '**Input:** handwritten', '',
+    '## Problem 1: Divider with two sources', '',
+    'The circuit below is driven by a 5 V source and a 2 mA source.',
+    `> grader_note: ${LEAK_NOTE}`,
+    `> grading_prompt: ${LEAK_PROMPT}`, '',
+    '### (a) Node voltage [100 pts] [handwritten]',
+    'Find the node voltage. Show your working.', '',
+    '> grader_note: Expect 1.2 V.', '',
+  ].join('\n');
+
+  // Part 1, the predicate: the block is out of the stem entirely.
+  check('a grading block on a problem heading is dropped from the stem', () => {
+    assertEqual(mdParser.parseMdToAssignment(leakMd).problems[0].description,
+      'The circuit below is driven by a 5 V source and a 2 mA source.',
+      'the grading block is still in the problem description');
+  });
+
+  // Part 2, the guard that generalises. Kept SEPARATE from the predicate check
+  // on purpose: with the predicate removed this must fail on its own, and it
+  // cannot demonstrate that if a predicate assertion throws first.
+  check('no grading material from that fixture reaches any student artifact', async () => {
+    const a = mdParser.parseMdToAssignment(leakMd);
+    const { text } = await studentHaystack(a);
+    assertEqual(disclosures(text, [...gradingStrings(a), LEAK_NOTE, LEAK_PROMPT]), [],
+      'grading material reached a student-facing artifact');
+  });
+
+  check('the author is told, and told where the block belongs', () => {
+    const w = [];
+    mdParser.parseMdToAssignment(leakMd, w);
+    const hit = w.find(m => m.includes('Divider with two sources') && m.includes('grader_note'));
+    assert(hit, `no warning named the problem and the block: ${JSON.stringify(w)}`);
+    assert(/### \(a\)/.test(hit), `the warning does not say where it belongs: ${hit}`);
+    // It is a disclosure, so the warning says the text was kept from the
+    // student rather than merely "removed".
+    assert(/student/.test(hit), `the warning does not say who was protected: ${hit}`);
+  });
+
+  // A guard nobody has watched fail is a guard that may not run at all.
+  //
+  // Case 1: the whole block, as the parser produced it before 2026-09-03.
+  check('the content guard fires when a stem carries the whole rubric', async () => {
+    const leaked = mdParser.parseMdToAssignment(leakMd);
+    leaked.problems[0].description +=
+      `\n> grader_note: ${LEAK_NOTE}\n> grading_prompt: ${LEAK_PROMPT}`;
+    const { text } = await studentHaystack(leaked);
+    const found = disclosures(text, [...gradingStrings(leaked), LEAK_NOTE, LEAK_PROMPT]);
+    assert(found.some(f => f.startsWith('marker')), `no marker fired: ${JSON.stringify(found)}`);
+    assert(found.some(f => f.startsWith('a whole grading string')),
+      `no whole-string match fired: ${JSON.stringify(found)}`);
+  });
+
+  // Case 2 is the one that says why this guard is worth having. An author
+  // pastes a chunk of the rubric into a stem as ORDINARY PROSE — no `>`, so the
+  // predicate cannot see it; no marker vocabulary, so strand 1 cannot; not the
+  // whole string, so strand 2 cannot. Only the bulk-overlap strand is left, and
+  // this is the shape of the routes nobody has thought of yet.
+  const PARTIAL = '(1) the node voltage is 1.2 V; (2) the current divides 3 to 1 '
+    + 'between the parallel branches.';
+
+  check('the fixture stays honest: the partial leak really is rubric text', () => {
+    assert(LEAK_PROMPT.includes(PARTIAL), 'PARTIAL is no longer a substring of LEAK_PROMPT');
+    const n = NORM(PARTIAL);
+    assert(!GRADING_MARKERS.some(m => n.includes(m)), 'PARTIAL carries marker vocabulary');
+    assert(wordsOf(PARTIAL).length >= MAX_OVERLAP_WORDS,
+      `PARTIAL is ${wordsOf(PARTIAL).length} words, under the ${MAX_OVERLAP_WORDS}-word bar`);
+  });
+
+  check('the content guard fires on a partial leak with no marker and no `>`', async () => {
+    const leaked = mdParser.parseMdToAssignment(leakMd);
+    leaked.problems[0].description += `\n${PARTIAL}`;
+    const { text } = await studentHaystack(leaked);
+    const found = disclosures(text, [...gradingStrings(leaked), LEAK_NOTE, LEAK_PROMPT]);
+    assert(found.some(f => f.startsWith(`${MAX_OVERLAP_WORDS} consecutive`)),
+      `the bulk-overlap strand did not fire: ${JSON.stringify(found)}`);
+    assert(!found.some(f => f.startsWith('marker')),
+      `a marker fired, so this case is not testing what it claims: ${JSON.stringify(found)}`);
+    assert(!found.some(f => f.startsWith('a whole grading string')),
+      `a whole string matched, so this case is not testing what it claims: ${JSON.stringify(found)}`);
+  });
+
+  // ---- The real homeworks --------------------------------------------------
+  for (const n of [1, 2, 3]) {
+    const name = `ENG17 HW${n}: no grading material in any student-facing artifact`;
+    const mdPath = join(HWK, `HWK${n}`, `ENG17_HW${n}_assignment.md`);
+    if (!existsSync(mdPath)) { results.push(`  SKIP  ${name} (not at ${mdPath})`); continue; }
+    check(name, async () => {
+      const a = mdParser.parseMdToAssignment(readFileSync(mdPath, 'utf8'));
+      const grading = gradingStrings(a);
+      assert(grading.length > 0, `HW${n} has no grading strings — the check would prove nothing`);
+      const { text, paths } = await studentHaystack(a);
+      assert(paths.some(p => p.startsWith('student/')), `HW${n} produced no student/ entries`);
+      assertEqual(disclosures(text, grading), [],
+        `HW${n}: grading material reached a student-facing artifact`);
+    });
+  }
+}
+
+
+// Every async check has to land before anything is counted. `pending` has
+// existed since the harness was made async-aware, but was never awaited:
+// async checks settled only by accident, when a LATER top-level await in
+// this file happened to flush the microtask queue. A check registered after
+// the last top-level await never reported at all — which is what happened to
+// the content guard below, and is the same hole found in run-tests.mjs on
+// 2026-09-02 wearing a different hat.
+await Promise.all(pending);
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 try { rmSync(outDir, { recursive: true, force: true }); } catch { /* Windows keeps handles */ }

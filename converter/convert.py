@@ -70,6 +70,25 @@ def heading_line_warning(label, lines):
         'Rewrite the line or remove it.'
     )
 
+
+def problem_blockquote_warning(label, lines):
+    """
+    Mirrors problemBlockquoteWarning() in services/mdParserService.ts.
+
+    A disclosure, not a formatting slip. A grading block under a problem
+    heading is read by nothing, so keeping it PRINTED it, and `description`
+    is on the student-spec whitelist.
+    """
+    first = lines[0] if len(lines[0]) <= 60 else lines[0][:57] + '\u2026'
+    more = f' (and {len(lines) - 1} more)' if len(lines) > 1 else ''
+    return (
+        f'\"{label}\" has a grading block on the problem itself: {first}{more}. '
+        'A problem heading carries no grading fields, so this was dropped rather '
+        'than printed to the student \u2014 it used to be printed. Move it under '
+        'the sub-part it grades ("### (a) ..."), where "> grading_prompt:" and '
+        '"> grader_note:" are read.'
+    )
+
 MIN_WORDS_MAP = {
     'ai-graded:binary': 20,
     'ai-graded:short':  50,
@@ -499,14 +518,31 @@ def parse_md(filepath):
             prob = parse_problem_header(header)
             if prob:
                 prob_headings = []
+                prob_blockquotes = []
+
+                def _keep_problem_line(l, _bq=prob_blockquotes):
+                    t = l.strip()
+                    if not t:
+                        return False
+                    # A grading block belongs to the sub-part it grades.
+                    # Nothing reads one on a problem heading, so keeping it
+                    # did not route it anywhere -- it PRINTED it, into a
+                    # field that is on the student-spec whitelist. Dropped
+                    # since 2026-09-03, and reported.
+                    if t.startswith('>'):
+                        _bq.append(t)
+                        return False
+                    return not re.match(r'^\*\*(Due|Preamble):', t)
+
                 description = build_description(
                     body,
-                    lambda l: bool(l.strip())
-                    and not re.match(r'^\*\*(Due|Preamble):', l.strip()),
+                    _keep_problem_line,
                     prob_headings.append
                 )
                 if prob_headings:
                     PARSE_WARNINGS.append(heading_line_warning(prob['name'], prob_headings))
+                if prob_blockquotes:
+                    PARSE_WARNINGS.append(problem_blockquote_warning(prob['name'], prob_blockquotes))
                 current_problem = {
                     'id': str(uuid.uuid4()),
                     'name': prob['name'],

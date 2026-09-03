@@ -179,6 +179,24 @@ export const headingLineWarning = (label: string, lines: string[]): string => {
 };
 
 /**
+ * One line per problem whose own body carried a grading block, shown at import.
+ *
+ * This is a **disclosure**, not a formatting slip, which is why it is worded as
+ * one. A grading block under a `## Problem N:` heading with sub-parts used to be
+ * neither routed to a field nor dropped: it was printed, and `description` is on
+ * the student-spec whitelist, so a `> grader_note:` written there travelled into
+ * `assignment_spec.json`, the student's PDF and the printed sheet.
+ */
+export const problemBlockquoteWarning = (label: string, lines: string[]): string => {
+  const first = lines[0].length > 60 ? `${lines[0].slice(0, 57)}…` : lines[0];
+  const more = lines.length > 1 ? ` (and ${lines.length - 1} more)` : '';
+  return `"${label}" has a grading block on the problem itself: ${first}${more}. A problem heading ` +
+    `carries no grading fields, so this was dropped rather than printed to the student — it used to ` +
+    `be printed. Move it under the sub-part it grades ("### (a) …"), where "> grading_prompt:" and ` +
+    `"> grader_note:" are read.`;
+};
+
+/**
  * Body lines → a description, with figure blocks lifted out whole.
  *
  * The per-line filters below throw away blank lines, and lines that start with
@@ -326,14 +344,28 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
       if (currentProblem) problems.push(currentProblem);
       const prob = parseProblemHeader(header);
       if (prob) {
-        // Heading-shaped lines are collected per build and reported only for
-        // the build whose result is actually kept — a flat problem throws
-        // `description0` away below, and warning about a discarded string
-        // would name the same line twice.
+        // Heading-shaped lines and dropped grading blocks are collected per
+        // build and reported only for the build whose result is actually kept —
+        // a flat problem throws `description0` away below, and warning about a
+        // discarded string would name the same line twice.
         const nestedHeadings: string[] = [];
+        const nestedBlockquotes: string[] = [];
         const description0 = buildDescription(
           body,
-          l => !!l.trim() && !/^\*\*(Due|Preamble):/.test(l.trim()),
+          l => {
+            const t = l.trim();
+            if (!t) return false;
+            // A grading block belongs to the sub-part it grades. On a problem
+            // that HAS sub-parts nothing reads one here — so keeping it did not
+            // route it anywhere, it PRINTED it. `description` is on the student
+            // spec whitelist, so a `> grader_note:` written against a problem
+            // heading reached assignment_spec.json, the student's PDF and the
+            // printed sheet. Dropped since 2026-09-03, and reported, because a
+            // directive that vanishes without a word is how an author loses a
+            // rubric and never learns.
+            if (t.startsWith('>')) { nestedBlockquotes.push(t); return false; }
+            return !/^\*\*(Due|Preamble):/.test(t);
+          },
           l => nestedHeadings.push(l)
         );
         currentProblem = { id: uuidv4(), name: prob.name, description: description0, subsections: [] };
@@ -371,9 +403,13 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
           if (isRetiredTag(prob.rawType)) {
             keepPromptAsGraderNote(currentProblem.subsections[currentProblem.subsections.length - 1]);
           }
-        } else if (nestedHeadings.length && warnings) {
-          // Nested problem: `description0` is the stem that is kept.
-          warnings.push(headingLineWarning(prob.name, nestedHeadings));
+        } else if (warnings) {
+          // Nested problem: `description0` is the stem that is kept, so this is
+          // the build whose findings are the author's to act on. The flat form
+          // is deliberately silent about blockquotes — there they ARE read,
+          // by `extractBlockquoteValue` below.
+          if (nestedHeadings.length) warnings.push(headingLineWarning(prob.name, nestedHeadings));
+          if (nestedBlockquotes.length) warnings.push(problemBlockquoteWarning(prob.name, nestedBlockquotes));
         }
       }
     } else if (type === 'subsection') {

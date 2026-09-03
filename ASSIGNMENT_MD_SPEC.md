@@ -164,14 +164,29 @@ never silently deleted. Silent content loss is worse than a stray character — 
 `#` is visible and gets fixed on the first preview, while a dropped line is found by a
 student who is missing a sentence.
 
-> **KNOWN DEFECT, awaiting its own change.** The `>` rule above holds for a sub-part
-> description and for a problem written in the one-line flat form (§3), but **not for
-> the description of a problem that has sub-parts**: there, a `>` line is kept and
-> printed as typed. It is not extracted into `grading_prompt` or `grader_note` either,
-> so a `> grader_note:` written under a `## Problem N:` heading becomes visible
-> assignment text and travels into `assignment_spec.json`, the student's PDF and the
-> printed sheet. **Put grading blocks under the sub-part they grade** (§7) until this
-> is fixed. Recorded 2026-09-02; no ENG17 file is affected.
+**A grading block belongs to the sub-part it grades.** A problem heading carries no
+grading fields, so `> grading_prompt:` and `> grader_note:` are read only under a
+`### (a) …` heading (§7). Write one against a `## Problem N:` heading and it is dropped
+and the import says so, naming the problem and where the block belongs.
+
+*Fixed 2026-09-03; recorded here because the failure is worth remembering.* Until that
+date the problem-description site did not drop `>` lines while both other sites did.
+On a problem with sub-parts nothing read one there, so the block was **neither routed
+nor dropped — it was printed**, into `description`, which is on the student-spec
+whitelist (§12). A `> grader_note:` written one heading too high therefore travelled
+into `assignment_spec.json`, the student's PDF and the printed sheet. No ENG17 file
+was affected and nothing was ever exposed.
+
+**Why this one mattered more than a predicate.** The 2026-08-31 whitelist lists which
+*fields* may reach a student, and it closed the door `aiGradingPrompt` walked through.
+It could not close this one, by construction: the text was not in `graderNote`, it was
+in `description`, which is on the list and must be. **A whitelist of fields cannot see
+an answer key smuggled into an allowed field as prose.** So the protection moved from
+the schema to the content: `npm test` now asserts that no grading prompt or grader note
+reaches **any** student-facing artifact — the spec, the student PDF's extracted text,
+the layout CSV and every `student/` entry in the export — by marker vocabulary, by whole
+string, and by bulk word overlap. That guard does not know about `>` and does not need
+to; it closes every route of this shape, including the ones nobody has thought of yet.
 
 ---
 
@@ -671,6 +686,35 @@ byte-for-byte what it was.
 The list lives in `services/exportService.ts` as `STUDENT_SPEC_FIELDS`, and the test suite compares it
 against `GradeBridge-Student-Submission/types.ts`, which is where "what the student app reads" is
 actually defined. The two cannot drift silently.
+
+### And the whitelist is not enough on its own
+
+**A whitelist of fields cannot see an answer key smuggled into an allowed field as prose.**
+
+Read the table above again: `description` is on it, at both levels, and has to be — it is the
+question. On 2026-09-02 a second route was found into the same room. A `> grader_note:` written
+against a `## Problem N:` heading rather than a `### (a)` heading was read by nothing, so it was
+neither routed to a field nor dropped: it was **printed**, into `description`, and travelled to the
+student with the field list fully intact and objecting to nothing. The predicate was fixed on
+2026-09-03 (§4) and no assignment was ever affected — but that is one route, and the reason it is
+written up here is that the schema could not have caught it and cannot catch the next one.
+
+So there is a second guard, and it works on **content**. `npm test` collects every `aiGradingPrompt`
+and `graderNote` in an assignment and asserts that none of them reaches any student-facing artifact —
+`assignment_spec.json`, the student PDF's extracted text, `layout_*.csv`, and every `student/` entry
+in the export ZIP — three ways:
+
+| Strand | Catches | Tolerance |
+|---|---|---|
+| marker vocabulary (`grader_note`, `REFERENCE`, `Award full marks`, …) | the structural signature of a grading block | zero |
+| whole grading string, verbatim | a directive pasted wholesale | zero |
+| bulk word overlap | a partial paste carrying no marker at all | a measured bar — see the test |
+
+It runs over the real ENG17 homeworks and over a fixture built to leak. **The third strand is the one
+that earns its keep**: it catches rubric text pasted into a stem as ordinary prose, with no `>` for a
+predicate to see and no marker vocabulary for the first strand to find. Grading prompts legitimately
+quote the circuit they grade, so the bar is set from measurement rather than taste; the number and the
+measurement are recorded beside the check in `tests/templateTests.mjs`.
 
 **Nothing is lost by this.** Grading material reaches the grader by its proper route,
 `{stem}_grading_rubric.json`, which stays with the instructor and goes to the autograder — this changed
