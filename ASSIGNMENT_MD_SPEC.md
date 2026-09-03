@@ -185,8 +185,9 @@ an answer key smuggled into an allowed field as prose.** So the protection moved
 the schema to the content: `npm test` now asserts that no grading prompt or grader note
 reaches **any** student-facing artifact — the spec, the student PDF's extracted text,
 the layout CSV and every `student/` entry in the export — by marker vocabulary, by whole
-string, and by bulk word overlap. That guard does not know about `>` and does not need
-to; it closes every route of this shape, including the ones nobody has thought of yet.
+string, by bulk word overlap, and by the `REFERENCE:` clause alone at a tighter bar. That
+guard does not know about `>` and does not need to; it closes every route of this shape,
+including the ones nobody has thought of yet.
 
 ---
 
@@ -702,19 +703,37 @@ written up here is that the schema could not have caught it and cannot catch the
 So there is a second guard, and it works on **content**. `npm test` collects every `aiGradingPrompt`
 and `graderNote` in an assignment and asserts that none of them reaches any student-facing artifact —
 `assignment_spec.json`, the student PDF's extracted text, `layout_*.csv`, and every `student/` entry
-in the export ZIP — three ways:
+in the export ZIP — four ways:
 
 | Strand | Catches | Tolerance |
 |---|---|---|
-| marker vocabulary (`grader_note`, `REFERENCE`, `Award full marks`, …) | the structural signature of a grading block | zero |
+| marker vocabulary (`grader_note`, `Award full marks`, …) | the structural signature of a grading block | zero |
 | whole grading string, verbatim | a directive pasted wholesale | zero |
-| bulk word overlap | a partial paste carrying no marker at all | a measured bar — see the test |
+| bulk word overlap | a large slab pasted with no marker in it | a measured bar |
+| `REFERENCE:` clause overlap | one pasted sentence — the line that says what the answer is | a tighter measured bar |
 
-It runs over the real ENG17 homeworks and over a fixture built to leak. **The third strand is the one
-that earns its keep**: it catches rubric text pasted into a stem as ordinary prose, with no `>` for a
-predicate to see and no marker vocabulary for the first strand to find. Grading prompts legitimately
-quote the circuit they grade, so the bar is set from measurement rather than taste; the number and the
-measurement are recorded beside the check in `tests/templateTests.mjs`.
+It runs over the real ENG17 homeworks and over fixtures built to leak, and each of the last two has a
+test that watches it fail: remove the strand and the fixture's leak goes undetected.
+
+**Neither bar is chosen; both are measured**, because grading prompts legitimately quote the circuit
+they grade and a bar set by taste would fire on that. The measurements, and how to re-derive them, are
+recorded beside the checks in `tests/templateTests.mjs`. If a real assignment ever trips one, report
+the phrase rather than raising the bar.
+
+**Why the fourth strand exists.** The third was built for a slab of prompt. The likelier authoring
+mistake is smaller: an author reaches for the one line that says what the answer is, not the paragraph
+around it. That sentence is shorter than the third strand's bar and carries no marker vocabulary, so
+it was the one sentence no strand could see. It is caught at a tighter bar because a `REFERENCE:`
+clause is structurally the part of a prompt that the stem does *not* say — measured across the real
+homeworks its legitimate overlap with student text is half that of a whole prompt. A grading string
+with no `REFERENCE:` clause is not scanned at the tighter bar at all; the third strand covers it, and
+applying the tighter one would fire on legitimate prose.
+
+**Where this guard stops, stated so the gap is known rather than discovered.** It catches pasted
+*text*, at two scales. It does not catch a **transcribed number**: `Answer: 4.6 A` is three words, no
+overlap rule at any bar reaches it, and one that did would fire on every stem that legitimately prints
+a component value. Detecting that needs a different kind of check, and nothing measured so far
+supports building one.
 
 **Nothing is lost by this.** Grading material reaches the grader by its proper route,
 `{stem}_grading_rubric.json`, which stays with the instructor and goes to the autograder — this changed

@@ -2066,6 +2066,39 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
 
   const MAX_OVERLAP_WORDS = 16;
 
+  // Strand 4's bar, measured the same way and on the same assignments. A
+  // REFERENCE: clause is the part of a prompt that says what the answer IS, and
+  // it is the line an author is likeliest to reach for — one sentence, not the
+  // paragraph around it. That sentence is shorter than 16 normalised words, so
+  // strand 3 cannot see it, and it carries no marker vocabulary, so strand 1
+  // cannot either.
+  //
+  // Longest LEGITIMATE contiguous overlap of a reference clause with student
+  // text, measured 2026-09-03 over the real ENG17 homeworks:
+  //
+  //     HW1  5 words   HW2  5 words   HW3  5 words
+  //
+  // Five, three times, and the consistency is structural rather than lucky: a
+  // prompt overlaps the stem where it restates the circuit, and a reference
+  // clause is the part the stem deliberately does not say. The bar is 9 — four
+  // words of headroom. Re-derive it exactly as for MAX_OVERLAP_WORDS (see
+  // docs/session/COMPLETION_AM_REFERENCE_STRAND_2026-09-03.md); if a real
+  // assignment ever trips it, report the phrase rather than raising the bar.
+  const MAX_REFERENCE_OVERLAP_WORDS = 9;
+
+  // WHERE THIS GUARD STOPS — recorded so the gap is known, not discovered.
+  // It catches pasted TEXT, at two scales. It does not catch a transcribed
+  // NUMBER: `Answer: 4.6 A` is three words, no overlap rule at any bar reaches
+  // it, and one that did would fire on every stem that legitimately prints a
+  // component value. That needs a different kind of check, and nothing measured
+  // so far supports building one.
+  //
+  // Note also that `REFERENCE` is deliberately NOT in GRADING_MARKERS. "the
+  // reference node", "the reference rail" and "re-reference the node voltages"
+  // are ordinary prose in every nodal-analysis problem in this course; a marker
+  // list crude enough to include it false-positives on all three homeworks.
+  // Strand 4 reaches the reference clause by structure instead.
+
   // Structural vocabulary. Lowercase; matched against normalised text.
   const GRADING_MARKERS = [
     'grading_prompt', 'grader_note', 'award full marks', 'award partial credit',
@@ -2113,27 +2146,70 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
     return { text: ` ${NORM(strands.join(' \n '))} `, paths: Object.keys(entries) };
   };
 
+  // Labelled, so a finding can name the problem it came from.
   const gradingStrings = (a) => (a.problems || []).flatMap(p =>
     (p.subsections || []).flatMap(s =>
-      [s.aiGradingPrompt, s.graderNote].filter(v => typeof v === 'string' && v.trim())));
+      [s.aiGradingPrompt, s.graderNote]
+        .filter(v => typeof v === 'string' && v.trim())
+        .map(text => ({ label: `${p.name} — ${s.name}`, text }))));
 
-  // The three assertions. Returns a list of problems, empty when clean.
+  // A REFERENCE: clause runs to the next ALL-CAPS section heading, or to the end
+  // of the prompt. Measured over HW1–HW5: 41 of 123 grading strings carry one,
+  // and the headings that end them are REFERENCE, WHAT TO JUDGE, FEEDBACK,
+  // KNOWN FAILURE MODES…, WHAT REACHES YOU and a tail of one-offs. Cutting early
+  // on an emphatic phrase is the safe direction — a shorter clause can only
+  // match less — so the pattern is deliberately eager rather than a fixed list
+  // that would go stale the first time an author invents a heading.
+  const NEXT_ALLCAPS_HEADING = /\b[A-Z][A-Z0-9]{2,}(?:[ '\/-][A-Z0-9]+)*\s*:/;
+  const referenceClauses = (s) => {
+    const out = [];
+    for (const m of String(s).matchAll(/REFERENCE\s*:/g)) {
+      const rest = String(s).slice(m.index + m[0].length);
+      const next = rest.match(NEXT_ALLCAPS_HEADING);
+      const clause = (next ? rest.slice(0, next.index) : rest).trim();
+      if (clause) out.push(clause);
+    }
+    return out;
+  };
+
+  // Longest contiguous run of `needle`'s words that appears in `haystack`,
+  // at or above `min`. Null when nothing that long is shared.
+  const longestSharedRun = (haystack, needle, min) => {
+    const w = wordsOf(needle);
+    for (let i = 0; i + min <= w.length; i++) {
+      const run = w.slice(i, i + min).join(' ');
+      if (haystack.includes(` ${run} `)) return run;
+    }
+    return null;
+  };
+
+  // The four assertions. Returns a list of findings, empty when clean.
+  // `grading` is [{ label, text }].
   const disclosures = (haystack, grading) => {
     const found = [];
     for (const marker of GRADING_MARKERS) {
       if (haystack.includes(marker)) found.push(`marker "${marker}" appears in student-facing text`);
     }
-    for (const g of grading) {
-      const n = NORM(g);
+    for (const { label, text } of grading) {
+      const n = NORM(text);
       if (n && haystack.includes(` ${n} `)) {
-        found.push(`a whole grading string appears verbatim: "${g.slice(0, 70)}…"`);
+        found.push(`a whole grading string appears verbatim in "${label}": "${text.slice(0, 70)}…"`);
         continue;
       }
-      const w = wordsOf(g);
-      for (let i = 0; i + MAX_OVERLAP_WORDS <= w.length; i++) {
-        const run = w.slice(i, i + MAX_OVERLAP_WORDS).join(' ');
-        if (haystack.includes(` ${run} `)) {
-          found.push(`${MAX_OVERLAP_WORDS} consecutive words of a grading string appear: "${run}"`);
+      const run = longestSharedRun(haystack, text, MAX_OVERLAP_WORDS);
+      if (run) {
+        found.push(`${MAX_OVERLAP_WORDS} consecutive words of a grading string appear in "${label}": "${run}"`);
+        continue;
+      }
+      // Strand 4. Only for strings that HAVE a reference clause — it must never
+      // fall back to scanning the whole prompt at this tighter bar, which would
+      // fire on HW3's legitimate 10-word overlap. The 16-word strand above
+      // already covers the whole prompt and keeps covering it.
+      for (const clause of referenceClauses(text)) {
+        const refRun = longestSharedRun(haystack, clause, MAX_REFERENCE_OVERLAP_WORDS);
+        if (refRun) {
+          found.push(`${MAX_REFERENCE_OVERLAP_WORDS} consecutive words of a REFERENCE clause `
+            + `appear in "${label}": "${refRun}"`);
           break;
         }
       }
@@ -2149,6 +2225,24 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
   const LEAK_PROMPT = 'REFERENCE: Required elements: (1) the node voltage is 1.2 V; (2) the current divides '
     + '3 to 1 between the parallel branches. Award full marks for both elements with working shown. '
     + 'Award no credit for a bare number with no method. WHAT TO JUDGE: the method, not the arithmetic.';
+
+  // Strand 4's own fixture. A prompt whose REFERENCE: clause says what the
+  // answer IS — the one line an author reaches for when they want to remind
+  // themselves, and the one line no other strand can see.
+  const REF_PROMPT = 'Review the working as an experienced grader would. '
+    + 'REFERENCE: the branch current is 4.6 A, obtained by superposition with the 5 V source shorted, '
+    + 'and the 3 A contribution comes from the current source alone. '
+    + 'WHAT TO JUDGE: the method, not the arithmetic.';
+
+  // The slice an author would paste. Deliberately between the two bars: long
+  // enough for strand 4, too short for strand 3, and carrying no marker.
+  const REF_PASTE = 'the branch current is 4.6 A, obtained by superposition';
+
+  const FIXTURE_BLOCKS = [
+    { label: 'fixture', text: LEAK_NOTE },
+    { label: 'fixture', text: LEAK_PROMPT },
+    { label: 'fixture', text: REF_PROMPT },
+  ];
 
   const leakMd = [
     '# ENG17: Key Disclosure Fixture', '',
@@ -2175,7 +2269,7 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
   check('no grading material from that fixture reaches any student artifact', async () => {
     const a = mdParser.parseMdToAssignment(leakMd);
     const { text } = await studentHaystack(a);
-    assertEqual(disclosures(text, [...gradingStrings(a), LEAK_NOTE, LEAK_PROMPT]), [],
+    assertEqual(disclosures(text, [...gradingStrings(a), ...FIXTURE_BLOCKS]), [],
       'grading material reached a student-facing artifact');
   });
 
@@ -2198,7 +2292,7 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
     leaked.problems[0].description +=
       `\n> grader_note: ${LEAK_NOTE}\n> grading_prompt: ${LEAK_PROMPT}`;
     const { text } = await studentHaystack(leaked);
-    const found = disclosures(text, [...gradingStrings(leaked), LEAK_NOTE, LEAK_PROMPT]);
+    const found = disclosures(text, [...gradingStrings(leaked), ...FIXTURE_BLOCKS]);
     assert(found.some(f => f.startsWith('marker')), `no marker fired: ${JSON.stringify(found)}`);
     assert(found.some(f => f.startsWith('a whole grading string')),
       `no whole-string match fired: ${JSON.stringify(found)}`);
@@ -2224,13 +2318,80 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
     const leaked = mdParser.parseMdToAssignment(leakMd);
     leaked.problems[0].description += `\n${PARTIAL}`;
     const { text } = await studentHaystack(leaked);
-    const found = disclosures(text, [...gradingStrings(leaked), LEAK_NOTE, LEAK_PROMPT]);
+    const found = disclosures(text, [...gradingStrings(leaked), ...FIXTURE_BLOCKS]);
     assert(found.some(f => f.startsWith(`${MAX_OVERLAP_WORDS} consecutive`)),
       `the bulk-overlap strand did not fire: ${JSON.stringify(found)}`);
     assert(!found.some(f => f.startsWith('marker')),
       `a marker fired, so this case is not testing what it claims: ${JSON.stringify(found)}`);
     assert(!found.some(f => f.startsWith('a whole grading string')),
       `a whole string matched, so this case is not testing what it claims: ${JSON.stringify(found)}`);
+  });
+
+  // ---- Strand 4: the pasted answer, not the pasted prompt -------------------
+  // Strand 3 was built for a slab of prompt. The likelier authoring mistake is
+  // smaller: the author reaches for the one line that says what the answer is.
+  // That line is under 16 normalised words, so strand 3 cannot see it, and it
+  // carries no marker vocabulary, so strand 1 cannot either.
+
+  check('the fixture stays honest: the reference paste sits between the two bars', () => {
+    const clauses = referenceClauses(REF_PROMPT);
+    assertEqual(clauses.length, 1, 'the fixture prompt no longer yields exactly one REFERENCE clause');
+    assert(!clauses[0].includes('WHAT TO JUDGE'), 'the clause did not stop at the next heading');
+    assert(clauses[0].includes(REF_PASTE), 'REF_PASTE is no longer inside the REFERENCE clause');
+
+    const len = wordsOf(REF_PASTE).length;
+    assert(len >= MAX_REFERENCE_OVERLAP_WORDS,
+      `REF_PASTE is ${len} words, under strand 4's bar of ${MAX_REFERENCE_OVERLAP_WORDS}`);
+    // The point of the fixture: strand 3 provably cannot reach it. Without this
+    // the demonstration could rot into something the old strand already caught.
+    assert(len < MAX_OVERLAP_WORDS,
+      `REF_PASTE is ${len} words, at or over strand 3's bar of ${MAX_OVERLAP_WORDS} — `
+      + 'the old strand would catch it and this proves nothing');
+    assert(!GRADING_MARKERS.some(m => NORM(REF_PASTE).includes(m)),
+      'REF_PASTE carries marker vocabulary, so strand 1 would catch it');
+    assert(NORM(REF_PASTE) !== NORM(REF_PROMPT), 'REF_PASTE is the whole grading string');
+  });
+
+  check('the content guard fires on a pasted REFERENCE clause', async () => {
+    const leaked = mdParser.parseMdToAssignment(leakMd);
+    leaked.problems[0].subsections[0].aiGradingPrompt = REF_PROMPT;
+    // Pasted as ordinary prose into the stem: no `>` for the predicate to see.
+    leaked.problems[0].description += `\n${REF_PASTE}`;
+
+    const { text } = await studentHaystack(leaked);
+    const found = disclosures(text, [...gradingStrings(leaked), ...FIXTURE_BLOCKS]);
+
+    const ref = found.filter(f => f.includes('REFERENCE clause'));
+    assert(ref.length > 0, `strand 4 did not fire: ${JSON.stringify(found)}`);
+    assert(ref.some(f => f.includes('Divider with two sources')),
+      `the finding does not name the problem: ${JSON.stringify(ref)}`);
+    assert(ref.some(f => f.includes('the branch current is')),
+      `the finding does not quote the run: ${JSON.stringify(ref)}`);
+
+    // And the other three genuinely cannot see it, which is why this exists.
+    assert(!found.some(f => f.startsWith('marker')),
+      `a marker fired, so this case is not testing what it claims: ${JSON.stringify(found)}`);
+    assert(!found.some(f => f.includes('a whole grading string')),
+      `a whole string matched, so this case is not testing what it claims: ${JSON.stringify(found)}`);
+    assert(!found.some(f => f.startsWith(`${MAX_OVERLAP_WORDS} consecutive words of a grading string`)),
+      `strand 3 fired, so strand 4 is not load-bearing here: ${JSON.stringify(found)}`);
+  });
+
+  // A prompt with no REFERENCE: clause must not be scanned at the tighter bar —
+  // that would fire on HW3's legitimate 10-word overlap. 82 of the 123 real
+  // grading strings have no clause, so this is the common case, not an edge one.
+  check('a grading string with no REFERENCE clause is not scanned at the tighter bar', () => {
+    const plain = 'Award full marks for a correct method. The circuit below is driven by a 5 V '
+      + 'source and a 2 mA source and the student must find the node voltage from it.';
+    assertEqual(referenceClauses(plain), [], 'a clause was found where there is none');
+    // 25 words of it sit in the "student text" below, well over strand 4's bar
+    // of 9 and under strand 3's of 16 for any single run — only the absence of a
+    // clause keeps this quiet.
+    const hay = ` ${NORM('The circuit below is driven by a 5 V source and a 2 mA source and the student '
+      + 'must find the node voltage from it.')} `;
+    assertEqual(disclosures(hay, [{ label: 'no-clause', text: plain }])
+      .filter(f => f.includes('REFERENCE clause')), [],
+      'the tighter bar was applied to a prompt with no REFERENCE clause');
   });
 
   // ---- The real homeworks --------------------------------------------------
