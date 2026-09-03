@@ -2217,6 +2217,114 @@ ${r.problem_statement}`);
   }
 }
 
+// =====================================================
+// NO PERSONAL NAME ENTERS THIS REPOSITORY
+// =====================================================
+// This repository is going public. It screened clean on 2026-09-03 and this
+// keeps it that way. The list and the rule live in tests/forbiddenNames.mjs;
+// what follows is the scan.
+//
+// Why a test and not care: on 2026-08-15 the name and student ID line was
+// ordered removed. It was removed from the handwritten template path and
+// survived on two others until 2026-09-03, with the policy documented in three
+// places the whole time. Documented policy did not hold. A test would have.
+//
+// It scans TRACKED files, from `git ls-files`, not the working directory. An
+// untracked scratch file is not in the repository and must not trip this; a
+// committed one is, and always will.
+{
+  const forbidden = await import('./forbiddenNames.mjs');
+  const { FORBIDDEN_NAME_HASHES, hashName } = forbidden;
+
+  const trackedFiles = () => {
+    const run = spawnSync('git', ['ls-files', '-z'], { encoding: 'utf8', cwd: REPO });
+    if (run.status !== 0) return null;
+    return run.stdout.split('\0').filter(Boolean);
+  };
+
+  // Every word-like run, with camelCase split so `basherBrief` yields two
+  // tokens, and digits and punctuation treated as separators so a path like
+  // `SOMEONE_BRIEF_2026-08-18.md` yields the name on its own.
+  const tokens = (text) => String(text)
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .split(/[^A-Za-z]+/)
+    .filter(Boolean);
+
+  /** Findings for one blob of text, as {token, line} with 1-based lines. */
+  const scanText = (text) => {
+    const found = [];
+    const lines = String(text).split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      for (const tok of tokens(lines[i])) {
+        if (FORBIDDEN_NAME_HASHES.has(hashName(tok))) {
+          found.push({ line: i + 1, text: lines[i] });
+          break;   // one finding per line is enough to act on
+        }
+      }
+    }
+    return found;
+  };
+
+  const files = trackedFiles();
+
+  // The scan is only as good as its coverage, so the coverage is asserted too.
+  check('the name guard sees every tracked file', () => {
+    assert(files !== null, 'git ls-files failed, so nothing was scanned');
+    assert(files.length > 0, 'git ls-files returned nothing');
+    // No file is excluded from the scan. The list itself holds hashes rather
+    // than names precisely so that it needs no exemption: an exempted file is
+    // where the next name would live.
+    assert(FORBIDDEN_NAME_HASHES.size > 0, 'the forbidden-name list is empty');
+  });
+
+  check('no tracked file contains a personal name', () => {
+    assert(files !== null, 'git ls-files failed, so nothing was scanned');
+    const problems = [];
+    for (const file of files) {
+      // The path itself is part of the repository.
+      for (const tok of tokens(file)) {
+        if (FORBIDDEN_NAME_HASHES.has(hashName(tok))) {
+          problems.push(`${file}: the PATH contains a personal name`);
+          break;
+        }
+      }
+      let raw;
+      try { raw = readFileSync(join(REPO, file)); } catch { continue; }
+      const text = raw.toString('utf8');
+      const binary = raw.includes(0);
+      for (const hit of scanText(text)) {
+        problems.push(binary
+          ? `${file}: a personal name appears in this binary file`
+          : `${file}:${hit.line}: ${hit.text.trim().slice(0, 120)}`);
+      }
+    }
+    assertEqual(problems, [],
+      `a personal name is present in the repository:\n          ${problems.join('\n          ')}`);
+  });
+
+  // A guard that silently stops matching is worse than none. This proves the
+  // tokeniser, the normaliser and the hash agree with each other, using an
+  // invented name so the proof does not itself put one in the repository.
+  check('the name guard would recognise a name if one were there', () => {
+    const INVENTED = 'Zylquorth';
+    const localList = new Set([hashName(INVENTED)]);
+    const seen = (text) => tokens(text).some(t => localList.has(hashName(t)));
+
+    assert(seen(`const author = '${INVENTED}';`), 'a plain occurrence was missed');
+    assert(seen(INVENTED.toUpperCase()), 'an upper-case occurrence was missed');
+    assert(seen(`docs/${INVENTED.toLowerCase()}_brief_2026-08-18.md`), 'a path occurrence was missed');
+    assert(seen(`// see ${INVENTED}Brief for details`), 'a camelCase occurrence was missed');
+    assert(seen(`* ${INVENTED}-Smith`), 'a hyphenated occurrence was missed');
+    assert(!seen('const author = "somebody else";'), 'an unrelated string matched');
+
+    // Accents fold, so a name cannot be smuggled past by writing it properly.
+    assert(hashName('Zylquörth') === hashName('Zylquorth'), 'accents did not fold');
+    // And the real list is reachable through the same function.
+    assert(hashName('') === '', 'the empty token is not neutral');
+  });
+}
+
+
 // ---------- report ----------
 // Every async check has to land before anything is counted.
 await Promise.all(pending);
