@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -36,10 +38,35 @@ const dataUriAssets = (): Plugin => {
   };
 };
 
+/**
+ * The SIL Open Font Licence for each self-hosted typeface, copied into the
+ * build from the installed package.
+ *
+ * The deployed site distributes the Inter and Merriweather binaries, and OFL 1.1
+ * requires its notice to travel with them. Read from node_modules at build time
+ * rather than committed as a copy, so the notice cannot drift away from the
+ * version actually shipped.
+ */
+const fontLicences = (): Plugin => {
+  const FACES = [
+    { pkg: '@fontsource/inter', out: 'fonts/Inter-OFL.txt' },
+    { pkg: '@fontsource/merriweather', out: 'fonts/Merriweather-OFL.txt' },
+  ];
+  return {
+    name: 'gb-font-licences',
+    async generateBundle() {
+      for (const { pkg, out } of FACES) {
+        const dir = dirname(fileURLToPath(import.meta.resolve(`${pkg}/package.json`)));
+        this.emitFile({ type: 'asset', fileName: out, source: await readFile(join(dir, 'LICENSE'), 'utf8') });
+      }
+    },
+  };
+};
+
 // https://vitejs.dev/config/
 export default defineConfig({
   base: '/GradeBridge-Assignment-Maker/',
-  plugins: [dataUriAssets(), react()],
+  plugins: [dataUriAssets(), fontLicences(), react()],
   server: {
     port: 3000,
   },

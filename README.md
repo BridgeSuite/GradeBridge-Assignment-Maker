@@ -333,9 +333,15 @@ test rather than by documentation, which is why the test exists.
 own download. There is no account, no backend and no telemetry: nothing you author
 is transmitted anywhere.
 
-**The page itself is not self-contained, and you should know what it fetches.**
-Measured on 2026-09-03 by loading the built app and recording every request, a
-page load fetches, besides the app's own files:
+**The page contacts nothing but the server it was served from.** Measured on
+2026-09-03 by loading the built app and recording every request
+(`performance.getEntriesByType('resource')`), the list of third-party origins
+fetched at page load, and after exercising the dashboard, the editor and the
+preview, is **empty**. Everything the page needs — the CSS framework, both
+typefaces, the maths renderer — is compiled or embedded into the app's own files
+and served from the same origin.
+
+Until 2026-09-03 that was not true. A page load fetched three third-party hosts:
 
 | Host | What for |
 |---|---|
@@ -343,19 +349,20 @@ page load fetches, besides the app's own files:
 | `fonts.googleapis.com` | the webfont stylesheet |
 | `fonts.gstatic.com` | the webfont files themselves |
 
-These are third-party requests and they reveal your IP address and browser to
-those hosts on every load, as any embedded webfont or CDN script does. **They
-carry no assignment content**: a script, a stylesheet and two font files,
-requested by the page before you have opened anything. After load, no further
-request was observed while using the page.
+They carried no assignment content, but each load revealed the instructor's IP
+address and browser to Cloudflare and Google, and the first served executable
+JavaScript with full page privileges and no Subresource Integrity attribute.
+Tailwind is now compiled at build time and Inter and Merriweather are served from
+this site, under their SIL Open Font Licences (`fonts/Inter-OFL.txt` and
+`fonts/Merriweather-OFL.txt`). The appearance did not change.
 
 Exports are built in the browser and saved through your browser's own download.
 There is no upload step anywhere in this app, which is why your assignments
 staying local is a property of its design rather than a promise about a server.
 
-If your institution needs a page that contacts nothing at all, those three hosts
-are what would have to be vendored in. The app's own scripts and fonts already
-are, and a test keeps them that way.
+This is enforced by test rather than by documentation: the build is checked for
+any host in a fetch position — in the HTML, in the stylesheet, or in any emitted
+script — and for the three origins above by name.
 
 - **Export your JSON regularly** — data is lost if browser cache is cleared
 - **The export ZIP is instructor-only and MUST NOT be given to students.** Four files in its `instructor/` folder contain answers: `{stem}_grader_document.html`, `{stem}_grading_rubric.json`, `{stem}_authoring_backup.json` and `{stem}.md`. Students receive only the contents of `student/`. The ZIP carries a generated `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` at its root naming every file.

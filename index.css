@@ -1,0 +1,7 @@
+/*
+ * The Tailwind entry. Compiled by PostCSS at build time and emitted same-origin
+ * by Vite; nothing here is fetched from a CDN. See tailwind.config.js.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
