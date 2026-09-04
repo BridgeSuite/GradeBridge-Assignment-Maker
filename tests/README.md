@@ -360,6 +360,21 @@ while the shipped HTML quietly went back to fetching fonts. It checks the fonts
 are a lazy chunk (not in the entry bundle), that all 20 faces are really
 embedded, and that no MathJax or KaTeX CDN reference survives anywhere.
 
+**It also holds the no-third-party-origin property**, added when Tailwind and the
+two typefaces were vendored. Six checks over what the build actually emits: no
+host in a fetch position in `index.html`, in the stylesheet, or in any emitted
+script; the three origins the vendoring removed named and refused outright;
+Tailwind present as compiled CSS with no runtime compiler; and both typefaces
+emitted same-origin with their OFL notices.
+
+They judge **by position, not presence** — a host in a licence header or an XML
+namespace is inert, and jsPDF ships one such string. Two subtleties are recorded
+in the file because each would otherwise get the guard deleted: a host inside a
+`data:` URI assigned to `.src` is not a fetch, and the minifier rewrites
+`@import url('…')` to `@import"…"`, so a pattern expecting either form misses the
+one thing that check exists to catch. A seventh check asserts there is something
+to scan before any of them runs.
+
 `exportService.ts` imports jspdf / jszip / file-saver at module scope. The main
 load stubs all three; the math suite loads it a second time with a real jsPDF
 (which does run under Node) so it can inspect an actual PDF, stubbing only

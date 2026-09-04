@@ -2,7 +2,8 @@
 
 Author structured assignments with LaTeX and figures, and export the printable sheet, the student file and the grading materials your grading workflow needs — entirely in your browser.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+Assignments come in two **input modes**. In **electronic** mode the student types answers and uploads images in the Student Submission app. In **handwritten** mode the app generates a printable QR-registered sheet: the student prints it, writes on it by hand, photographs the pages, and the Submission app crops each answer region from the photographs. One assignment is one mode — you choose it in the editor, and it decides which question types are available and what the export contains.
+
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 **[Live App](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)** | **[Student Submission App](https://bridgesuite.github.io/GradeBridge-Student-Submission/)**
@@ -11,33 +12,53 @@ Author structured assignments with LaTeX and figures, and export the printable s
 
 ## The Apps
 
-GradeBridge apps share an encryption contract and a Gradescope-Docker autograder pattern. This app handles lab reports, mini-projects, and homework with mixed text, image, and AI-graded responses.
+GradeBridge apps share an encryption contract and a Gradescope-Docker autograder pattern. This app handles lab reports, mini-projects and homework — typed, image-based and AI-graded responses in electronic mode, and printed-and-photographed work in handwritten mode.
 
 | App | Who uses it | What it does |
 |---|---|---|
 | **Assignment Maker** (this app) | Instructor | Create assignments, configure grading, export ZIP |
 | **[Student Submission](https://github.com/BridgeSuite/GradeBridge-Student-Submission)** | Student | Load assignment, fill answers, download submission files |
 
-**Export ZIP contains six files:**
+### What the export ZIP contains
 
-| File | Purpose |
-|---|---|
-| `assignment_spec.json` | Students load this into the Submission app |
-| `assignment.pdf` | Student-facing assignment handout |
-| `template.pdf` | Gradescope upload template |
-| `assignment.html` | Web-viewable version |
-| `assignment.tex` | Editable LaTeX source |
-| `{Course}_{Title}_grading_rubric.json` | **Private — upload to Gradescope autograder** |
+**The ZIP is for you. It MUST NOT be given to students** — four files in
+`instructor/` contain the answer key. Hand out the contents of `student/`, and
+nothing else. The archive is laid out so that is easy to do correctly, and it
+carries a generated notice at the root naming every file.
+
+`{stem}` below is `{CourseCode}_{Title}`, with spaces replaced by underscores.
+
+| Entry | Mode | What it is |
+|---|---|---|
+| `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` | both | Generated at export time from the actual entry list; names every file and who it is for |
+| `student/assignment_spec.json` | both | The file students load into the Submission app. **Encoded** (`gb1:` envelope) and built from a whitelist, so it carries no grading prompt, grader note or answer key |
+| `student/assignment.pdf` | both | Electronic: the handout. **Handwritten: the sheet itself** — the QR-registered pages the student prints and writes on |
+| `student/layout_{TemplateID}.csv` | **handwritten only** | The map the Submission app crops answers by. **It must travel with the PDF.** The printed QR carries a hash of this map, and the app refuses to crop if the two disagree — so give students both files, and do not rename either |
+| `instructor/{stem}_authoring_backup.json` | both | **The backup that restores everything.** Unencrypted, the whole authoring object. This is what `Import JSON` should be given |
+| `instructor/{stem}.md` | both | The authored source, for the `.md` round trip |
+| `instructor/{stem}_grading_rubric.json` | both | **Private — for the Gradescope autograder** |
+| `instructor/{stem}_grader_document.html` | both | **Private — rubrics and answer keys**, for you and your TAs |
+| `instructor/assignment.html` | both | Readable copy |
+| `instructor/assignment.tex` | both | Editable LaTeX source |
+| `instructor/template.pdf` | **electronic only** | The boxed answer-region sheet for setting up the Gradescope outline. That is an instructor task, so it is not in `student/`. A handwritten assignment does not produce one — its `student/assignment.pdf` already *is* the answer surface, and a second boxed PDF only invites printing the wrong one |
+
+Ten entries in either mode. Built by `buildExportEntries` in
+`services/exportService.ts`; `ASSIGNMENT_MD_SPEC.md` §13 is the contract.
 
 ---
 
 ## Submission Types and Grading Modes
 
-Each subsection has a **Type** selector and a **Grading** selector. The two branch based on medium:
+Each subsection has a **Type** selector and a **Grading** selector. The two branch based on medium.
 
-### Text questions
+**Which types are available depends on the assignment's input mode.** An electronic
+assignment uses Text, Image and Text + Image; a handwritten one uses Handwritten
+for every part. The editor enforces this, and switching an existing assignment
+between modes converts its parts.
 
-`Type: [Text] [Image] [Text + Image]  |  Grading: [Human] | AI: [Binary] [Short] [Medium] [Long] [Formative]`
+### Text questions *(electronic)*
+
+`Type: [Text] [Image] [Text + Image]  |  Grading: [Human] | AI: [Binary] [Short] [Medium] [Long]`
 
 | Grading selection | What it means | Autograded? |
 |---|---|---|
@@ -46,9 +67,8 @@ Each subsection has a **Type** selector and a **Grading** selector. The two bran
 | **AI: Short** | Student answers a focused concept question; AI grades | Yes — 3 bands, 50 word min |
 | **AI: Medium** | Student explains a mechanism or relationship; AI grades | Yes — 4 bands, 100 word min |
 | **AI: Long** | Student analyses trade-offs or synthesises across concepts; AI grades | Yes — 5 bands, 150 word min |
-| **AI: Formative** | Student writes a report section; AI returns per-element status (Addressed / Partial / Missing) and a section summary — no numeric score is surfaced | Advisory only — no grade emitted |
 
-### Image questions
+### Image questions *(electronic)*
 
 `Type: [Text] [Image] [Text + Image]  pages: __  |  Grading: [Human Inspection] [AI Inspection]`
 
@@ -59,11 +79,44 @@ Each subsection has a **Type** selector and a **Grading** selector. The two bran
 
 Set the number of image pages allowed with the **pages** field (e.g. 6 for a quiz transcript).
 
-### Text + Image questions
+### Text + Image questions *(electronic)*
 
 `Type: [Text] [Image] [Text + Image]  image pages: __  |  Grading: [Human]`
 
 Student submits both a written answer and one or more supporting images in a single subsection slot. Always human-graded — the TA reviews both the text response and the uploaded image(s) in the PDF. Set the maximum number of image pages with the **image pages** field.
+
+### Handwritten questions
+
+`Type: [Handwritten]  |  Grading: [AI] [Human]`
+
+The whole assignment is printed and answered on paper. The app generates a
+QR-registered sheet; the student prints it at 100%, writes in the bordered answer
+box under each part, photographs the pages, and the Submission app uses the QR
+codes and corner marks to find each box and crop it.
+
+| Grading selection | What it means | Autograded? |
+|---|---|---|
+| **AI** | The crop is transcribed (OCR) and then AI-graded against the part's `grading_prompt` | Yes |
+| **Human** | The TA grades from the crop; no OCR | No |
+
+Two things are set per part rather than per assignment:
+
+- **How much room the student gets.** Each part reserves a number of writing
+  lines. A part that asks for more room than a page can give moves to a page that
+  can hold it — page count flexes, and question text is never shrunk to fit.
+- **Whether the answer is a drawing.** A sketch part reserves the same space with
+  no ruled lines, and declares itself as a figure rather than as writing so the
+  grading system does not send a circuit diagram to a text transcriber.
+
+Both are written in the `.md` with a `> template:` line — see
+[Submission Type Tags](#submission-type-tags) below.
+
+**Page 1 is always an instructions page**, carrying the standing instructions and
+your preamble and no questions; problems begin on page 2. It is not cropped and
+is not graded. The full page format is in `ASSIGNMENT_MD_SPEC.md` §10.
+
+**There is no name, student ID or date field on the sheet**, deliberately — see
+[Data & Privacy](#student-privacy).
 
 ---
 
@@ -96,17 +149,20 @@ The target is saved with the assignment and applied automatically at ZIP export 
 3. The app parses the file instantly and opens it in the editor
 4. Review, fine-tune, and export
 
-### Option C — Generate with Claude Code (recommended)
-Use the two-phase CC workflow to generate `.md` files from lab manual source material. See `CCAssignmentMaker/CC_PROMPT.md` for the ready-to-use prompt.
+### Option C — Generate and iterate with Claude Code
+The `.md` format is plain text, so an assistant can write one from your lab
+manual and read back whatever you changed afterwards. Point it at
+[Markdown Assignment Format](#markdown-assignment-format) below and at
+`ASSIGNMENT_MD_SPEC.md`, which is the authoritative format contract and is
+written to be handed to a tool.
 
-### Option D — Iterate with Claude Code
-The `.md` format enables a tight CC iteration loop so you never need to manually explain changes:
+The loop, which means you never have to explain your edits in prose:
 
-1. CC generates `DEMO101_Lab1_Prelab.md` from your lab manual
+1. The assistant generates `DEMO101_Lab1_Prelab.md` from your lab manual
 2. Click **Import Markdown** → assignment opens in the editor
 3. Make changes in the UI (adjust points, tweak descriptions, edit rubrics)
 4. Click **Export .md** (top-right of editor) → downloads the updated `.md` with all changes
-5. Next CC session: *"read DEMO101_Lab1_Prelab.md"* — CC sees exactly the current state, no explanation needed
+5. Next session: *"read DEMO101_Lab1_Prelab.md"* — it sees exactly the current state, no explanation needed
 
 ---
 
@@ -156,6 +212,47 @@ The parser auto-promotes a flat problem into a single `(a)` subsection on import
 | `[ai-graded:short]` | Short free-text, AI graded | 50 word min; 3 grading bands |
 | `[ai-graded:medium]` | Medium free-text, AI graded | 100 word min; 4 grading bands |
 | `[ai-graded:long]` | Long free-text, AI graded | 150 word min; 5 grading bands |
+| `[handwritten]` | Handwritten answer, OCR then AI graded | Handwritten assignments only |
+| `[handwritten:human]` | Handwritten answer, TA grades from the crop | Handwritten assignments only |
+
+The first seven are for **electronic** assignments; the two `handwritten` tags
+are for **handwritten** ones. A handwritten assignment declares itself with a
+`**Input:** handwritten` line under the title — absent means electronic.
+
+**Handwritten parts take no image count.** Pages are an assignment-level pool,
+not a per-part count, so `[handwritten:3]` is not a thing.
+
+### The `> template:` line *(handwritten only)*
+
+One optional line per handwritten sub-part, controlling the printed sheet:
+
+```markdown
+### (a) Derive the cutoff frequency [12 pts] [handwritten]
+State your assumptions and show the algebra.
+
+> template: lines=14
+> grading_prompt: Required elements: (1) ...; (2) ...
+
+### (b) Sketch the field pattern [8 pts] [handwritten:human]
+Label the direction and the relative magnitude.
+
+> template: sketch
+> grader_note: Look for ...
+```
+
+| Option | Effect |
+|---|---|
+| `lines=N` | Reserve **N** writing lines for this answer. The lines printed are exactly the region the layout map crops, so this is the space the grader sees. Absent means 6 |
+| `sketch` | A drawing region: the same reserved space, left blank with no rules, and declared as `answer_modality: "figure"` in the rubric |
+
+Both are optional and order-free — `> template: sketch` alone is valid, and so is
+`> template: lines=20, sketch`. A part that asks for more lines than fit beneath
+its own problem stem is moved to a page that can give them rather than being
+silently shortened.
+
+Which grading block a handwritten part takes follows its tag: `[handwritten]` is
+AI-graded and takes `> grading_prompt:`; `[handwritten:human]` takes
+`> grader_note:`.
 
 ### Math notation (LaTeX)
 
@@ -278,9 +375,8 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
 ```
 
 **The rubric never carries a model name, a temperature or a token budget.** The Assignment Maker
-describes the work; the grading system decides how to grade it and allocates its own resources. An
-`ai_grading_config` block appeared here until 2026-08-31; nothing ever read it, and a test now fails
-if any exported artifact grows one back. See `ASSIGNMENT_MD_SPEC.md` §12.
+describes the work; the grading system decides how to grade it and allocates its own resources. A
+test fails if any exported artifact grows one. See `ASSIGNMENT_MD_SPEC.md` §12.
 
 `grading_type` values:
 
@@ -322,10 +418,6 @@ assignment carries it, and it agrees with `is_drawing` in `layout_{TemplateID}.c
   prompt, grader note or reference answer reaches any student-facing artifact,
   by content rather than by field name.
 
-The rule was set on 2026-08-15 and was not fully applied until 2026-09-03; two
-export paths carried a name and ID line in the interval. It is now enforced by
-test rather than by documentation, which is why the test exists.
-
 ### Where your data goes
 
 **Your assignments never leave your browser.** They are held in
@@ -333,36 +425,21 @@ test rather than by documentation, which is why the test exists.
 own download. There is no account, no backend and no telemetry: nothing you author
 is transmitted anywhere.
 
-**The page contacts nothing but the server it was served from.** Measured on
-2026-09-03 by loading the built app and recording every request
-(`performance.getEntriesByType('resource')`), the list of third-party origins
-fetched at page load, and after exercising the dashboard, the editor and the
-preview, is **empty**. Everything the page needs — the CSS framework, both
-typefaces, the maths renderer — is compiled or embedded into the app's own files
-and served from the same origin.
-
-Until 2026-09-03 that was not true. A page load fetched three third-party hosts:
-
-| Host | What for |
-|---|---|
-| `cdn.tailwindcss.com` | the CSS framework, loaded as a script |
-| `fonts.googleapis.com` | the webfont stylesheet |
-| `fonts.gstatic.com` | the webfont files themselves |
-
-They carried no assignment content, but each load revealed the instructor's IP
-address and browser to Cloudflare and Google, and the first served executable
-JavaScript with full page privileges and no Subresource Integrity attribute.
-Tailwind is now compiled at build time and Inter and Merriweather are served from
-this site, under their SIL Open Font Licences (`fonts/Inter-OFL.txt` and
-`fonts/Merriweather-OFL.txt`). The appearance did not change.
+**The page contacts nothing but the server it was served from.** Not the CSS
+framework, not the typefaces, not the maths renderer — all of them are compiled
+or embedded into the app's own files and served from the same origin. Loading the
+built app and recording every request, the list of third-party origins fetched at
+page load, and after exercising the dashboard, the editor and the preview, is
+**empty**.
 
 Exports are built in the browser and saved through your browser's own download.
 There is no upload step anywhere in this app, which is why your assignments
 staying local is a property of its design rather than a promise about a server.
 
-This is enforced by test rather than by documentation: the build is checked for
-any host in a fetch position — in the HTML, in the stylesheet, or in any emitted
-script — and for the three origins above by name.
+A test asserts it, on the built output rather than on the source: any host in a
+fetch position — in the HTML, in the stylesheet, or in any emitted script — fails
+the suite. Inter and Merriweather are served from this site under their SIL Open
+Font Licences, which the build emits alongside them.
 
 - **Export your JSON regularly** — data is lost if browser cache is cleared
 - **The export ZIP is instructor-only and MUST NOT be given to students.** Four files in its `instructor/` folder contain answers: `{stem}_grader_document.html`, `{stem}_grading_rubric.json`, `{stem}_authoring_backup.json` and `{stem}.md`. Students receive only the contents of `student/`. The ZIP carries a generated `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` at its root naming every file.
@@ -413,11 +490,18 @@ Leaving the field empty keeps today's behaviour exactly.
 git clone https://github.com/BridgeSuite/GradeBridge-Assignment-Maker.git
 cd GradeBridge-Assignment-Maker
 npm install
+git config core.hooksPath .githooks   # runs tsc and the suite before a push
+
 npm run dev       # → http://localhost:3000/GradeBridge-Assignment-Maker/
 npm run build     # production build
-npm run test      # course public key / spec export suite — see tests/README.md
+npm run test      # the full suite — see tests/README.md
 npm run deploy    # deploy to GitHub Pages (SSH remote required)
 ```
+
+`npm test` runs five suites in one command: the app's own tests, the page-format
+template tests, a real production build inspected for what it emits, and two
+scans of the repository itself (no personal name, absolute path or image
+metadata; no tracked session document). CI runs the same thing on every push.
 
 **Tech stack:** React 18 · TypeScript · Vite · Tailwind CSS · KaTeX · jsPDF · JSZip · Lucide
 
@@ -428,7 +512,7 @@ npm run deploy    # deploy to GitHub Pages (SSH remote required)
 | Issue | Solution |
 |---|---|
 | Import Markdown fails | Check heading levels (`#`, `##`, `###`) and tag format (`[N pts] [type]`). Both flat and subsection formats are supported — see Markdown Format above |
-| LaTeX not rendering | Refresh page; KaTeX loads from CDN |
+| LaTeX not rendering | Check the expression: every `$` must be paired, and an inline `$...$` may not contain a `$`. KaTeX is bundled into the app, so this is never a network problem — invalid LaTeX is flagged in place rather than dropped |
 | PDF generation slow | Large images slow down PDF generation — reduce image count or size |
 | Lost work | Export JSON backup regularly; localStorage is cleared with browser cache |
 | Deploy returns 403 | SSH remote required — run `git remote set-url origin git@github.com:BridgeSuite/GradeBridge-Assignment-Maker.git` |
