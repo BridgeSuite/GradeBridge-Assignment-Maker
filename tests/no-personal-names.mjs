@@ -618,6 +618,15 @@ const READINGS = ['utf8', 'latin1'];
  * number alone.
  */
 const locate = (decodings, tokens) => {
+  // A STRING here is a caller bug, and it fails open rather than closed: the
+  // spread splits it into characters, so a seven-letter token becomes an
+  // alternation of seven single letters and matches almost every line. The guard still fires — it just points at the
+  // wrong ones, which is worse than not firing, because the reader goes to the
+  // named line, finds nothing, and stops believing the output. This happened:
+  // check 4 was left passing one token at a time when this signature changed.
+  if (typeof tokens === 'string') {
+    throw new TypeError('locate() takes an iterable of tokens, not one token — passing a string spreads it into single characters');
+  }
   const re = new RegExp([...tokens].join('|'), 'i');
   const seen = new Map();
   for (const decoded of decodings) {
@@ -635,7 +644,88 @@ const locate = (decodings, tokens) => {
   return [...seen.values()];
 };
 
+/**
+ * Report every place a file's hits appear, once each.
+ *
+ * **One call site for `locate()`, deliberately.** There used to be two — checks
+ * 3 and 4 — and when `locate` changed from taking one token to taking the set,
+ * check 3 was updated and check 4 was not. Check 4 went on passing a single
+ * string, which spread into a character alternation and named three wrong lines
+ * for a finding on a fourth. Nothing caught it, because the reporting path only
+ * runs when something is already wrong and the tree was clean. Two call sites
+ * for one contract is what allowed that; there is now one.
+ */
+const reportHits = (what, path, decodings, hits) => {
+  const at = locate(decodings, hits);
+  if (at.length === 0) {
+    fail(`${what} appears in ${path} (not on any line — binary?)`);
+    return;
+  }
+  for (const { line, n } of at) {
+    fail(`${what} in ${path}:${n + 1}\n          ${show(line)}`);
+  }
+};
+
 const show = (line) => (line.length > 140 ? `${line.slice(0, 140)}…` : line).trim();
+
+// ---- the reporting path exercises itself, on content built here ------------
+// **This is X-1 applied to the code that reports a finding rather than to the
+// code that looks for one.** `locate()` only runs when something is already
+// wrong, so on a clean tree — which is every run that matters — it never
+// executes. A green suite says nothing whatever about whether it works.
+//
+// It did not. Checks 3 and 4 both called it; when its signature changed from one
+// token to a set of them, check 3 was updated and check 4 was not, and check 4
+// went on passing a single string. Spread, a string becomes its characters, so
+// the alternation matched nearly every line and the guard reported three wrong
+// line numbers for a finding on a fourth. It still failed the build, which is
+// why nothing noticed: **it fired correctly and pointed at the wrong place**,
+// and that is worse than not firing, because a reader who goes to the named
+// line and finds nothing stops believing the output.
+//
+// Found by planting a real finding on a throwaway branch to prove CI goes red.
+// That should not be what finds it, so this runs on every green tree.
+{
+  const SAMPLE = [
+    'alpha line, nothing here',
+    'second line, still nothing',
+    'third line mentions Zylquorth once',
+    'fourth line is clean',
+    'fifth line mentions ZYLQUORTH and Zylquorth twice',
+  ].join('\n');
+
+  // TWO decodings of the same content, which is what a text file really is:
+  // utf8 and latin1 both yield it, so every line matches twice and the dedupe
+  // is what stops each finding being printed twice. One decoding here would
+  // leave that untested — it did, and a mutation walked through it.
+  const at = locate([SAMPLE, SAMPLE], new Set(['Zylquorth', 'ZYLQUORTH']));
+  const got = at.map((h) => h.n + 1);
+
+  // Exactly the two lines that carry it, in order, once each — not once per
+  // token and not once per decoding.
+  if (JSON.stringify(got) !== JSON.stringify([3, 5])) {
+    fail(`locate() reported lines ${JSON.stringify(got)} for a finding on lines ` +
+      `[3,5] — the reporting path is wrong, so every finding it prints names ` +
+      `the wrong place`);
+  }
+
+  // The shape that caused the defect must now be refused rather than silently
+  // producing a character alternation.
+  let refused = false;
+  try { locate([SAMPLE], 'Zylquorth'); } catch { refused = true; }
+  if (!refused) {
+    fail('locate() accepted a bare token string — spread, it becomes a ' +
+      'character alternation that matches almost any line');
+  }
+
+  // And the cap holds, so a finding in a large file cannot flood the output.
+  const many = Array.from({ length: 20 }, () => 'Zylquorth').join('\n');
+  if (locate([many], new Set(['Zylquorth'])).length !== 3) {
+    fail('locate() no longer caps at three places');
+  }
+  console.log('     self-check — the reporting path names the right lines, refuses a ' +
+    'bare token, and caps at three');
+}
 
 let scanned = 0, excusedHits = 0;
 for (const [path, buf] of contents) {
@@ -654,13 +744,7 @@ for (const [path, buf] of contents) {
   if (hits.size === 0) continue;
   if (EXCUSED.has(path)) { excusedHits += hits.size; continue; }
 
-  const at = locate(decodings, hits);
-  if (at.length === 0) {
-    fail(`a forbidden name appears in ${path} (not on any line — binary?)`);
-  }
-  for (const { line, n } of at) {
-    fail(`a forbidden name in ${path}:${n + 1}\n          ${show(line)}`);
-  }
+  reportHits('a forbidden name', path, decodings, hits);
 }
 
 // =====================================================
@@ -722,17 +806,7 @@ const FORBIDDEN_PRODUCT_HASHES = new Set([
     }
     if (hits.size === 0) continue;
     hitFiles++;
-    for (const token of hits) {
-      const at = locate(decodings, token);
-      if (at.length === 0) {
-        fail(`a forbidden product name appears in ${path} (not on any line — binary?)`);
-        continue;
-      }
-      for (const { line, n } of at) {
-        fail(`a forbidden product name in ${path}:${n + 1}
-          ${show(line)}`);
-      }
-    }
+    reportHits('a forbidden product name', path, decodings, hits);
   }
   if (FORBIDDEN_PRODUCT_HASHES.size === 0) {
     fail('the forbidden-product list is empty — check 4 would compare every token ' +
