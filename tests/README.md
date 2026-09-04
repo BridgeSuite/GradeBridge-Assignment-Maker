@@ -1,8 +1,11 @@
 # Assignment Maker tests
 
-`npm test` runs `run-tests.mjs`. Plain Node (>= 18), no test framework: it
-transpiles the source with the esbuild that ships inside Vite and runs it
-against the same WebCrypto the browser uses.
+`npm test` runs, in order, `run-tests.mjs`, `templateTests.mjs`,
+`bundle-tests.mjs`, `no-personal-names.mjs` and `no-process-records.mjs`. Plain
+Node (>= 18), no test framework: it transpiles the source with the esbuild that
+ships inside Vite and runs it against the same WebCrypto the browser uses. The
+last two read the repository itself rather than the app, and are described at
+the end.
 
 - **`validateCoursePublicKey()`** — the fixture key reports 2048-bit; 2048 and
   4096 pass clean; an off-contract 3072-bit key warns but is not hard-blocked;
@@ -357,6 +360,21 @@ while the shipped HTML quietly went back to fetching fonts. It checks the fonts
 are a lazy chunk (not in the entry bundle), that all 20 faces are really
 embedded, and that no MathJax or KaTeX CDN reference survives anywhere.
 
+**It also holds the no-third-party-origin property**, added when Tailwind and the
+two typefaces were vendored. Six checks over what the build actually emits: no
+host in a fetch position in `index.html`, in the stylesheet, or in any emitted
+script; the three origins the vendoring removed named and refused outright;
+Tailwind present as compiled CSS with no runtime compiler; and both typefaces
+emitted same-origin with their OFL notices.
+
+They judge **by position, not presence** — a host in a licence header or an XML
+namespace is inert, and jsPDF ships one such string. Two subtleties are recorded
+in the file because each would otherwise get the guard deleted: a host inside a
+`data:` URI assigned to `.src` is not a fetch, and the minifier rewrites
+`@import url('…')` to `@import"…"`, so a pattern expecting either form misses the
+one thing that check exists to catch. A seventh check asserts there is something
+to scan before any of them runs.
+
 `exportService.ts` imports jspdf / jszip / file-saver at module scope. The main
 load stubs all three; the math suite loads it a second time with a real jsPDF
 (which does run under Node) so it can inspect an actual PDF, stubbing only
@@ -366,6 +384,99 @@ file-saver. The runner also teaches esbuild the `?raw` import that
 The PDF's math **rasteriser** needs a browser and so is not covered here — Node
 exercises the plain-text fallback. It was verified in Chrome against the same
 fixture (see "UI verification" below).
+
+## `tests/no-personal-names.mjs`
+
+Three scans over every tracked file, one process, one exit code. **Ported from
+the Student Submission repository on 2026-09-03 and meant to stay comparable
+with it — change both or neither.**
+
+1. **No absolute path.** A drive letter (with a lookbehind, which is the whole
+   difference between this and a pattern that fires on every URL scheme), a
+   user-home or home-directory path segment, and the same directory named as a
+   *quoted component* — which is how `join('C', …)` spells an absolute path with
+   no separator in it. This repository had none; the check exists so that stays
+   true. Two lines are excused by exact `path:line`, both the same
+   LaTeX-escaping fixture string.
+
+   Which files count as text is decided by **extension, not by content**. It was
+   the NUL-byte test until 2026-09-03, and one raw NUL inside a regex made 143 KB
+   of `templateTests.mjs` invisible to this check with nothing said. Anything not
+   of a known binary type is now scanned regardless, and a file skipped or
+   carrying a NUL is **named in the output**.
+2. **No metadata in a tracked image.** Structural, no name list. JPEG: any APPn
+   or COM fails, except a 34-byte orientation-only Exif. PNG: an *allowlist* of
+   rendering chunks, so a provenance manifest fails without anyone having had to
+   predict its chunk type — the check was written after a tracked logo turned out
+   to be carrying 16 KB of C2PA in a `caBX` chunk, which no banned-types list
+   would have named.
+
+   **There is no tracked image in this repository, so the scan itself runs over
+   nothing — and it says so on every run.** What proves the parsers still work is
+   nine fixtures built in memory and tracked nowhere: clean and dirty PNGs, clean
+   and dirty JPEGs, and **both sides of the orientation exception** — one IFD0
+   entry passes, one tag wider is refused, and so is a one-entry Exif with
+   trailing bytes. That last case exists because a mutation loosening the 34-byte
+   pin survived without it.
+3. **No personal name**, as a whole token, against the hashed list in
+   `forbiddenNames.mjs`. Two readings per file (utf8 for accented names, latin1
+   for names inside binaries) and a run-length floor applied *after*
+   normalisation. A finding is reported once, not once per reading.
+4. **No product name.** A separate hashed list, because the rule is different:
+   the personal-name list is about people, this is a former brand that must not
+   appear anywhere in a public tree. Paths are checked as well as contents — the
+   thing that triggered it was a *filename*.
+
+Checks 1 and 2 need no name list, and that is the point: a shortened name got
+past check 3 for as long as it existed, while a structural rule cannot be got
+past by choosing a different spelling.
+
+`tests/forbiddenNames.mjs` is held **byte-identical** to that repository's copy.
+The course-code guard lives in `tests/forbiddenCourses.mjs` instead, because it
+has no counterpart there and would otherwise make byte-identity impossible.
+
+## `tests/no-process-records.mjs`
+
+Fails if a work order, handoff, completion record, correction or report is
+tracked, at any depth. `docs/session/README.md` has said they are untracked
+since 2026-08-17 and `.gitignore` has covered them — but **`.gitignore` is not a
+guard**: `git add -f` walks past it, which is how nineteen of them came to be
+tracked here before 2026-09-03. Matching is by filename prefix, never by
+content, because the contracts legitimately quote work orders at length.
+`docs/session/README.md` is the one tracked file in that folder and is allowed
+by name.
+
+Written from the rule rather than ported: the work order permitted reading two
+files from the other repository and this was not one of them, so the two copies
+are **not known to agree**.
+
+## Running the guards without being asked
+
+`.github/workflows/tests.yml` runs `tsc`, `npm test` and `npm run build` on every
+push and pull request; `.githooks/pre-push` runs `tsc` and `npm test` before a
+push. **They are not the same kind of thing.** The hook is fast local feedback
+and is not enforcement — it does not run in a fresh clone until somebody types
+`git config core.hooksPath .githooks`, and `--no-verify` skips it. CI is the
+enforcement, because it runs where the person who forgot cannot reach it — but
+it catches a mistake *after* the push, so a green tick means nothing is
+published now, not that nothing ever was.
+
+The ENG17 checks report SKIP in CI, where the course files are absent. A green
+CI run does not cover them.
+
+## A check that scanned nothing says so
+
+Three findings in the week of 2026-09-03 shared one shape: a single NUL byte hid
+143 KB of source from check 1; a probe compared a dozen names against an empty
+set; check 2 scanned nothing in a repository with no images. **All three were
+green, and green and correct look identical from outside.**
+
+So every set these checks compare against is counted out loud on every run — the
+number of text files, patterns and excused lines, the size of each hashed list,
+the fixtures exercised — and an empty one fails rather than passing. The
+bundle tests assert there is something to scan before scanning it. The existing
+`SKIP` lines, which name the absent file, were already this pattern; this
+generalises it.
 
 ## The fixture
 

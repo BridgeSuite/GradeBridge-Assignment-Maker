@@ -39,6 +39,10 @@
 //   accidental commit plus casual reading and search indexing of a public repo.
 //   Against that it works, and the alternative publishes the names outright.
 //
+//   For the same reason there are no comments beside the hashes. A note saying
+//   which pseudonym, role, device or institution a hash belongs to would turn
+//   this file into the lookup table it exists to avoid.
+//
 // HOW TO ADD A NAME
 //
 //   node -e "import('./tests/forbiddenNames.mjs').then(m => console.log(m.hashName('<the name>')))"
@@ -46,6 +50,33 @@
 //   Add the printed hash below, with no comment saying whose it is. Add each
 //   form separately: the guard matches whole tokens, so "sam" does not cover
 //   "samuel" and a surname does not cover a given name.
+//
+// WHAT THIS LIST CANNOT DO, AND WHAT ACTUALLY WORKS
+//
+//   It matches whole tokens against hashes of names somebody has already
+//   written down here. **It cannot detect an arbitrary abbreviation of a name
+//   it has never seen.** A capture set keyed on the first three letters of a
+//   colleague's given name passed this guard for as long as it existed, in
+//   thirteen data rows, in two shipped source comments and in a contract
+//   document, because the shortened form is not the name and nothing hashed to
+//   it. Adding that fragment on 2026-09-03 is what refuses it from now on, and
+//   that is all adding a fragment ever does: it closes one hole after somebody
+//   noticed it. Do not read the list as a detector.
+//
+//   The same day, two more of exactly that shape were found on a second capture
+//   set — and they were found by reading the `.gitignore` that documented them,
+//   not by any scan. Three fragments have now been added after the fact and
+//   none of the three was caught. That is the measurement; read the list
+//   accordingly.
+//
+//   The control that works is upstream of this file: **a capture set, a
+//   fixture, a folder or a test identifier must not be named after a person in
+//   the first place.** Name it for what it is — the device class, the defect,
+//   the page. Then there is no fragment to abbreviate and nothing for this list
+//   to have missed.
+//
+// The same list, produced the same way, is used by the Assignment Maker
+// repository. Keep the two in step.
 
 import { createHash } from 'node:crypto';
 
@@ -54,13 +85,22 @@ import { createHash } from 'node:crypto';
  * letter dropped, so `Jean-Luc`, `jean luc` and `JeanLuc` all hash alike.
  * Truncated to 16 hex characters: 64 bits is far past collision range for a
  * list this size, and a short string keeps the list readable as a list.
+ *
+ * `normaliseName` is exported separately because **the length of the normalised
+ * form is the only length that means anything here.** A scanner that measures a
+ * token before normalising is measuring characters this function is about to
+ * throw away: a four-letter run whose first character folds to nothing hashes
+ * as three, so a floor applied to the raw run does not hold. See the run-length
+ * note in `tests/no-personal-names.mjs`.
  */
+export const normaliseName = (name) => String(name)
+  .normalize('NFD')
+  .replace(/[̀-ͯ]/g, '')
+  .toLowerCase()
+  .replace(/[^a-z]/g, '');
+
 export const hashName = (name) => {
-  const normalised = String(name)
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z]/g, '');
+  const normalised = normaliseName(name);
   if (!normalised) return '';
   return createHash('sha256').update(normalised).digest('hex').slice(0, 16);
 };
@@ -68,52 +108,13 @@ export const hashName = (name) => {
 /** One entry per forbidden name. No comments, no ordering that carries meaning. */
 export const FORBIDDEN_NAME_HASHES = new Set([
   '2f8a0c01f668bca7',
+  '5ca1b7b104433c8e',
+  '780a23528c754a50',
+  'ba0850ca04c64d0c',
   '386a85d8c88778b0',
   '710c3906ca8b54f8',
   'd9a31550033ee07d',
   'fc053e14afa732e2',
   'fc52fabe94c0e037',
   'fdc97875a4c7d086',
-]);
-
-// =====================================================
-// Course codes that must not name a test fixture
-// =====================================================
-// Added 2026-09-03 by the landing-page work order. Same class of problem as the
-// names above, same file, same reason for hashing.
-//
-// Five fixtures were named for real courses. Five agents over three weeks each
-// needed a realistic input, reached for the course it was working on, and named
-// the file after it. No rule said not to and nothing would have caught it, which
-// is why this exists: the rule and the guard, not just the five files.
-//
-// The content was measured and is NOT the real assignments. These are invented
-// problems that were wearing a real course's name. The name was the defect.
-//
-// TWO THINGS THIS PROTECTS
-//   A student who finds this repository must not be able to mistake a fixture
-//   for their own assignment, and a colleague's course must not appear to be
-//   published here.
-//
-// SCOPE: fixtures only. Real course codes appear legitimately elsewhere in this
-// repository, including in checks that read the real course files by name and
-// would break if renamed. See the completion note; widening this is a separate
-// decision, not a silent one.
-
-/**
- * Course codes carry digits, so they cannot use `hashName`, which strips
- * everything that is not a letter, which would collapse two codes sharing a
- * letter stem onto the same hash. This keeps letters and digits.
- */
-export const hashCourseCode = (code) => {
-  const normalised = String(code).toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!normalised) return '';
-  return createHash('sha256').update(normalised).digest('hex').slice(0, 16);
-};
-
-/** One entry per forbidden course code. No comments, no meaningful ordering. */
-export const FORBIDDEN_COURSE_HASHES = new Set([
-  '54c3568400778b4e',
-  'be958fb09e1ffd1d',
-  'd27dcfa053aa6656',
 ]);

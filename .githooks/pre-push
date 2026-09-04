@@ -1,0 +1,52 @@
+#!/bin/sh
+# =====================================================
+# Fast local feedback before a push. NOT enforcement.
+# =====================================================
+# This is the half of the 2026-09-03 guard that runs on your machine, and it is
+# worth being exact about how little it guarantees:
+#
+#   * It does not survive a clone. Hooks are not tracked content — this file is
+#     tracked, but git will not run it until somebody points git at it:
+#
+#         git config core.hooksPath .githooks
+#
+#     A fresh clone runs no hook at all until that line is typed. That single
+#     manual step is the reason this cannot be the enforcement.
+#
+#   * `git push --no-verify` skips it, silently and by design.
+#
+# The enforcement is `.github/workflows/tests.yml`, which runs on the server
+# where the person who forgot cannot reach it. This exists so you find out in
+# the seconds before a push rather than the minutes after one — which for a
+# personal name, an absolute path or a photograph's metadata is the difference
+# between a local fix and a history rewrite.
+#
+# To skip it deliberately, use --no-verify and know that CI will still see it.
+#
+# HOW MUCH IT RUNS, AND THE RULE FOR CHANGING THAT
+#
+#   The whole suite, because here it takes about seventeen seconds. **The
+#   governing constraint is the clock, not the coverage**: a hook slow enough to
+#   be resented is a hook that gets `--no-verify`d out of habit, and then it
+#   protects nothing at all.
+#
+#   So the rule is — run everything while everything is fast; when it stops
+#   being fast, drop to the disclosure guards alone (`no-personal-names.mjs` and
+#   `no-process-records.mjs`), because those are the ones whose findings a push
+#   makes irreversible. Everything else CI will redo anyway.
+#
+# THIS FILE IS CANONICAL for both repositories (supplement 2, item C). The
+# Student Submission copy adopts it and adjusts the two commands below under
+# exactly the rule above: its suite runs registration and capture work measured
+# in minutes, so it runs the two guards rather than `npm test`. That is the rule
+# being applied, not a divergence from it.
+
+set -e
+
+printf '\n[pre-push] tsc\n'
+npx tsc --noEmit
+
+printf '\n[pre-push] npm test\n'
+npm test
+
+printf '\n[pre-push] ok\n'

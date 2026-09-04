@@ -98,27 +98,38 @@ We love hearing ideas for improving the assignment creation experience! Before s
    npm install
    ```
 
-3. **Create a branch**
+3. **Install the pre-push hook**
+   ```bash
+   git config core.hooksPath .githooks
+   ```
+
+   Git will not run the hook until you do this — a fresh clone runs no hook at
+   all. It runs `tsc` and `npm test` before a push, so you find out in the
+   seconds before rather than the minutes after. **It is not the enforcement**:
+   `git push --no-verify` skips it and it does not travel with a clone. CI is
+   the enforcement (`.github/workflows/tests.yml`).
+
+4. **Create a branch**
    ```bash
    git checkout -b feature/your-feature-name
    # or
    git checkout -b fix/bug-description
    ```
 
-4. **Make your changes**
+5. **Make your changes**
    - Write clean, readable code
    - Follow existing code patterns
    - Add comments for complex logic
    - Update documentation if needed
 
-5. **Test your changes**
+6. **Test your changes**
    ```bash
    npm run dev      # Test in development mode
    npm run build    # Ensure it builds
    npm run preview  # Test the production build
    ```
 
-6. **Commit your changes**
+7. **Commit your changes**
    ```bash
    git add .
    git commit -m "Brief description of changes"
@@ -129,7 +140,7 @@ We love hearing ideas for improving the assignment creation experience! Before s
    - `Fix: PDF generation with LaTeX equations`
    - `Update: README with new export options`
 
-7. **Push and create a Pull Request**
+8. **Push and create a Pull Request**
    ```bash
    git push origin feature/your-feature-name
    ```
@@ -238,11 +249,37 @@ Before submitting a PR, test:
 
 ### Automated Testing
 
-While we don't currently have a comprehensive test suite, contributions of tests are welcome:
+```bash
+npx tsc --noEmit
+npm test
+npm run build
+```
 
-- Unit tests for export services
-- Integration tests for PDF generation
-- Tests for JSON format validation
+`npm test` runs five suites in one command — `run-tests.mjs`,
+`templateTests.mjs`, `bundle-tests.mjs`, `no-personal-names.mjs` and
+`no-process-records.mjs`. Plain Node, no framework. `tests/README.md` says what
+each one covers and, more usefully, *why* each check exists — most of them were
+written after something got through.
+
+The last two read the repository rather than the app, and a PR will be refused
+if either fails:
+
+- **`no-personal-names.mjs`** — no personal name, no absolute path into
+  somebody's machine, and no metadata in a tracked image. If it fires on a name,
+  the fix is to remove the name from your file, **never** to remove it from
+  `tests/forbiddenNames.mjs`. That list is what is forbidden, not what is
+  permitted.
+- **`no-process-records.mjs`** — session documents (`WORKORDER_*`, `HANDOFF_*`,
+  `COMPLETION_*`, `CORRECTION_*`, `REPORT_*`) belong in `docs/session/` and are
+  not tracked. `.gitignore` already covers them; this catches `git add -f`.
+
+Both run in CI on every push and pull request. **CI catches a mistake after the
+push, not before it** — for a name or a path that is publication, not a near
+miss, so the control that actually works is not writing it down in the first
+place.
+
+New tests are welcome, particularly around export services, PDF generation and
+JSON format validation.
 
 ## Documentation
 

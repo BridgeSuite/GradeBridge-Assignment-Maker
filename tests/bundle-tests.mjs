@@ -92,6 +92,20 @@ check('no MathJax and no KaTeX CDN reference survives anywhere in the build', ()
 const html = readFileSync(join(outDir, 'index.html'), 'utf8');
 const cssFile = files.find(f => /^index-.*\.css$/.test(f));
 const jsFiles = files.filter(f => /\.js$/.test(f));
+
+// X-1: a scan over an empty set passes without looking at anything, and green
+// then means "not run" while looking exactly like "clean". Three findings in
+// the week of 2026-09-03 had that shape. So the sets these checks iterate are
+// asserted non-empty first, and their sizes are printed, before any of them is
+// allowed to report success.
+check('there is something to scan at all', () => {
+  assert(files.length > 0, 'the build emitted no assets');
+  assert(!!cssFile, 'no stylesheet was emitted, so the CSS checks would scan nothing');
+  assert(jsFiles.length > 0, 'no script was emitted, so the script scan would scan nothing');
+  assert(html.length > 0, 'index.html is empty');
+  console.log(`        scanning ${files.length} assets: ${jsFiles.length} script(s), ` +
+    `1 stylesheet, index.html`);
+});
 const isRemote = (u) => /^(?:https?:)?\/\//i.test(u);
 
 check('index.html names no host in any fetch position', () => {
@@ -142,8 +156,11 @@ check('the three origins this build removed appear nowhere in it', () => {
   // Presence, not position, and deliberately so: these three have no legitimate
   // reason to be named anywhere in the output, so the cheapest guard is total.
   const FORBIDDEN = ['cdn.tailwindcss.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
+  const scannable = files.filter(f => /\.(js|css|html)$/.test(f));
+  assert(scannable.length > 0, 'no js, css or html asset was emitted — this check ' +
+    'would pass by scanning nothing');
   const offenders = [];
-  for (const f of files.filter(f => /\.(js|css|html)$/.test(f))) {
+  for (const f of scannable) {
     const body = read(f);
     for (const host of FORBIDDEN) if (body.includes(host)) offenders.push(`${host} in ${f}`);
   }
