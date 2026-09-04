@@ -23,17 +23,38 @@
 #   it as proof that nothing is published *now*. The control that actually
 #   prevents disclosure is upstream of both: not writing the name, the path or
 #   the process record into the repository in the first place.
+#
+# THIS FILE IS CANONICAL for both repositories (supplement 2, item C). The
+# Student Submission copy adopts it and adjusts exactly one thing: it has a
+# tracked lockfile, so its install step is `npm ci` where this one is
+# `npm install`. Any other difference is drift.
 name: tests
 
 on:
   push:
   pull_request:
 
+# A second push to the same branch makes the first run's answer stale, and a
+# stale green tick is worse than no tick.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only. This job inspects the tree; it has no business writing to it.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The guards read `git ls-files`, which needs the working tree and
+          # nothing else, so a shallow fetch is enough. They scan the tree as it
+          # stands, never its history — history is a separate, authorised
+          # question and not this job's business.
+          fetch-depth: 1
 
       - uses: actions/setup-node@v4
         with:

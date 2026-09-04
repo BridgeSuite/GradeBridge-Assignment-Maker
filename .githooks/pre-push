@@ -22,6 +22,24 @@
 # between a local fix and a history rewrite.
 #
 # To skip it deliberately, use --no-verify and know that CI will still see it.
+#
+# HOW MUCH IT RUNS, AND THE RULE FOR CHANGING THAT
+#
+#   The whole suite, because here it takes about seventeen seconds. **The
+#   governing constraint is the clock, not the coverage**: a hook slow enough to
+#   be resented is a hook that gets `--no-verify`d out of habit, and then it
+#   protects nothing at all.
+#
+#   So the rule is — run everything while everything is fast; when it stops
+#   being fast, drop to the disclosure guards alone (`no-personal-names.mjs` and
+#   `no-process-records.mjs`), because those are the ones whose findings a push
+#   makes irreversible. Everything else CI will redo anyway.
+#
+# THIS FILE IS CANONICAL for both repositories (supplement 2, item C). The
+# Student Submission copy adopts it and adjusts the two commands below under
+# exactly the rule above: its suite runs registration and capture work measured
+# in minutes, so it runs the two guards rather than `npm test`. That is the rule
+# being applied, not a divergence from it.
 
 set -e
 

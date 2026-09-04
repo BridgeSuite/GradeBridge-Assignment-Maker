@@ -1,13 +1,15 @@
 // =====================================================
 // Nothing tracked points at a person or a machine
 // =====================================================
-// Three scans over every tracked file, one process, one exit code:
+// Four scans over every tracked file, one process, one exit code:
 //
 //   1. no absolute path — no drive letter, no user-home or home-directory
 //      path segment, no such directory named as a quoted path component
 //   2. no metadata in a tracked image — no EXIF beyond an orientation flag in a
 //      JPEG, no text or provenance chunk in a PNG
 //   3. no personal name, as a whole token, against a hashed list
+//   4. no product name — a separate hashed list, checked in paths as well as
+//      contents, because what triggered that rule was a filename
 //
 // The rule behind check 3, why it exists, and why the list is hashed rather
 // than written out are all in `tests/forbiddenNames.mjs` — as is the honest
@@ -44,7 +46,7 @@
 // image rather than seventeen.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FORBIDDEN_NAME_HASHES, hashName, normaliseName } from './forbiddenNames.mjs';
 
@@ -155,19 +157,56 @@ const EXCUSED_LINES = new Map([
 ]);
 
 /**
- * Text, for the purposes of check 1.
+ * Text, for the purposes of checks 1 and 3 — decided by EXTENSION, not content.
  *
- * A NUL byte anywhere is git's own test and it is the right one here: a
- * photograph's compressed scan data will sooner or later contain a home-
- * directory segment by chance, and failing on that would teach the next person
- * to disable this check rather than read it.
+ * **It was the NUL-byte test until 2026-09-03, and that was a silent hole.**
+ * A single NUL is git's own definition of binary, and one raw NUL written
+ * inside a regex in `tests/templateTests.mjs` took 143 KB of test source out of
+ * check 1 completely, and dropped it to the weaker floor in check 3. Nothing was
+ * printed. A mutation planting an absolute path in that file passed, and it was
+ * not a bad mutation.
+ *
+ * The reason for the NUL test was sound — a photograph's compressed scan will
+ * eventually contain a home-directory segment by chance, and a check that fires
+ * on that gets switched off. But the property wanted is "this file is a
+ * photograph", and the extension says so directly, where content only implies
+ * it.
+ *
+ * **The list is of BINARY types, not textual ones, so the default is to scan.**
+ * A source or data extension nobody thought of is read as text and checked;
+ * under the opposite arrangement it would be skipped in silence, which is the
+ * failure being fixed.
+ *
+ * Nothing is skipped quietly either way: every file treated as binary, and every
+ * text file carrying a NUL, is named in the output below.
  */
-const isText = (buf) => !buf.includes(0);
+const BINARY_EXTENSIONS = new Set([
+  // images
+  'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'ico', 'tif', 'tiff', 'avif', 'heic', 'heif',
+  // fonts
+  'woff', 'woff2', 'ttf', 'otf', 'eot',
+  // documents and archives
+  'pdf', 'zip', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'jar',
+  // media
+  'mp3', 'mp4', 'm4a', 'mov', 'avi', 'webm', 'wav', 'ogg',
+  // compiled and binary data
+  'wasm', 'exe', 'dll', 'so', 'dylib', 'class', 'pyc', 'bin', 'db', 'sqlite', 'sqlite3',
+]);
+
+const extensionOf = (path) => {
+  const name = basename(path);
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+};
+
+const isText = (path) => !BINARY_EXTENSIONS.has(extensionOf(path));
 
 {
   let scanned = 0;
+  const skipped = [], withNul = [];
   for (const [path, buf] of contents) {
-    if (!isText(buf)) continue;
+    if (!isText(path)) { skipped.push(path); continue; }
+    if (buf.includes(0)) withNul.push(path);
     scanned++;
     const lines = buf.toString('utf8').split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
@@ -181,6 +220,17 @@ const isText = (buf) => !buf.includes(0);
     }
   }
   console.log(`  1. no absolute path — ${scanned} text files`);
+  // Never silently. A file this check did not read is named, so a guard that
+  // has gone quiet says so instead of passing.
+  for (const path of skipped) {
+    console.log(`  note  ${path} not scanned as text — extension .${extensionOf(path)} is a binary type`);
+  }
+  // Scanned anyway, but a NUL in something claiming to be source is worth
+  // seeing: it is what made this check silent before 2026-09-03.
+  for (const path of withNul) {
+    console.log(`  note  ${path} contains a NUL byte and was scanned as text anyway ` +
+      `— write it as an escape (see tests/templateTests.mjs)`);
+  }
 }
 
 // An exemption for a line that has moved protects nothing and hides the next
@@ -371,11 +421,50 @@ const tokensOf = (text, min) => {
  */
 const READINGS = ['utf8', 'latin1'];
 
+/**
+ * Up to three PLACES, deduplicated — not up to three places per token.
+ *
+ * Two things each used to multiply one finding into several, and both are the
+ * same mistake: reporting per cause rather than per location.
+ *
+ *   Both decodings are searched, because a token found in one may not appear
+ *   literally in the other — but for a text file utf8 and latin1 are the same
+ *   string, so everything was printed twice.
+ *
+ *   And several distinct tokens can hash to one forbidden entry: a name, the
+ *   same name accented, the same name upper-cased. One line carrying all three
+ *   was printed three times.
+ *
+ * **A guard that turns one finding into three teaches whoever reads its output
+ * to discount it**, which is the opposite of what a guard is for. So every
+ * matching token is searched for at once and the results are keyed on the line
+ * number alone.
+ */
+const locate = (decodings, tokens) => {
+  const re = new RegExp([...tokens].join('|'), 'i');
+  const seen = new Map();
+  for (const decoded of decodings) {
+    const lines = decoded.split(/\r?\n/);
+    for (let n = 0; n < lines.length; n++) {
+      if (!re.test(lines[n])) continue;
+      // Keyed on the LINE NUMBER alone. Keying on the text as well looks
+      // safer and is not: the two decodings render an accented line
+      // differently, so the same line of the same file came back as two
+      // findings — which is the whole defect this is fixing, one level down.
+      if (!seen.has(n)) seen.set(n, { line: lines[n], n });
+      if (seen.size >= 3) return [...seen.values()];
+    }
+  }
+  return [...seen.values()];
+};
+
+const show = (line) => (line.length > 140 ? `${line.slice(0, 140)}…` : line).trim();
+
 let scanned = 0, excusedHits = 0;
 for (const [path, buf] of contents) {
   scanned++;
 
-  const min = isText(buf) ? 3 : 4;
+  const min = isText(path) ? 3 : 4;
   const hits = new Set();
   const decodings = [];
   for (const encoding of READINGS) {
@@ -388,24 +477,87 @@ for (const [path, buf] of contents) {
   if (hits.size === 0) continue;
   if (EXCUSED.has(path)) { excusedHits += hits.size; continue; }
 
-  // Locate each hit so the failure names a line, not just a file. Both
-  // decodings are searched: a token found in one may not appear literally
-  // in the other.
-  for (const token of hits) {
-    const re = new RegExp(token, "i");
-    const at = decodings
-      .flatMap((d) => d.split(/\r?\n/).map((line, n) => ({ line, n })))
-      .filter(({ line }) => re.test(line))
-      .slice(0, 3);
-    if (at.length === 0) {
-      fail(`a forbidden name appears in ${path} (not on any line — binary?)`);
-      continue;
+  const at = locate(decodings, hits);
+  if (at.length === 0) {
+    fail(`a forbidden name appears in ${path} (not on any line — binary?)`);
+  }
+  for (const { line, n } of at) {
+    fail(`a forbidden name in ${path}:${n + 1}\n          ${show(line)}`);
+  }
+}
+
+// =====================================================
+// 4. No product name
+// =====================================================
+// A SEPARATE LIST FROM THE NAMES, DELIBERATELY.
+//
+//   `forbiddenNames.mjs` is about people, and its whole justification — that
+//   nobody consents to being published by working on a project — does not apply
+//   to a brand. Mixing them would make one list mean two things and invite the
+//   next person to reason about a name using an argument that was written for a
+//   product. Same mechanism, same hash function, different list and different
+//   reason.
+//
+// WHY IT IS HASHED ANYWAY
+//
+//   Not privacy. The instruction is that neither repository contains anything
+//   about the former product name, and a guard that spells it out in order to
+//   forbid it is a repository that contains it. Same trap as a path scanner
+//   holding a path, and the same answer.
+//
+// WHY PATHS AS WELL AS CONTENTS
+//
+//   Check 3 reads file contents. What triggered this rule was a FILENAME — a
+//   tracked logo, referenced by nothing, whose name was the only thing about it
+//   that mattered. A content-only scan would have passed it every time.
+//
+//   The file is deleted. Its metadata was stripped first, under an order that
+//   assumed it had to stay; that work was not wasted, since the strip is what
+//   established the manifest named no person. But the file itself is gone, and
+//   this is what stops it or its name coming back.
+//
+// The name is in past commit messages and in blob history. That is a rewrite,
+// it is Andre's decision, and it is explicitly not this guard's business.
+const FORBIDDEN_PRODUCT_HASHES = new Set([
+  '1c653d25d68fb2ad',
+]);
+
+{
+  let hitFiles = 0;
+  for (const [path, buf] of contents) {
+    const min = isText(path) ? 3 : 4;
+
+    // The path first, because that is the shape this rule was written for.
+    for (const token of tokensOf(path, min)) {
+      if (!FORBIDDEN_PRODUCT_HASHES.has(hashName(token))) continue;
+      fail(`a forbidden product name in the PATH ${path} — the filename is the ` +
+        `reference; renaming it is not enough if the file is not needed`);
+      hitFiles++;
+      break;
     }
-    for (const { line, n } of at) {
-      const shown = line.length > 140 ? `${line.slice(0, 140)}…` : line;
-      fail(`a forbidden name in ${path}:${n + 1}\n          ${shown.trim()}`);
+
+    const decodings = READINGS.map((encoding) => buf.toString(encoding));
+    const hits = new Set();
+    for (const decoded of decodings) {
+      for (const token of tokensOf(decoded, min)) {
+        if (FORBIDDEN_PRODUCT_HASHES.has(hashName(token))) hits.add(token);
+      }
+    }
+    if (hits.size === 0) continue;
+    hitFiles++;
+    for (const token of hits) {
+      const at = locate(decodings, token);
+      if (at.length === 0) {
+        fail(`a forbidden product name appears in ${path} (not on any line — binary?)`);
+        continue;
+      }
+      for (const { line, n } of at) {
+        fail(`a forbidden product name in ${path}:${n + 1}
+          ${show(line)}`);
+      }
     }
   }
+  console.log(`  4. no product names${hitFiles ? ` — ${hitFiles} file(s) with findings` : ''}`);
 }
 
 // An exemption for a file that has gone protects nothing and hides the next

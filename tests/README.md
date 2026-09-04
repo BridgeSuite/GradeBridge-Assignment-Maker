@@ -380,18 +380,30 @@ with it — change both or neither.**
    difference between this and a pattern that fires on every URL scheme), a
    user-home or home-directory path segment, and the same directory named as a
    *quoted component* — which is how `join('C', …)` spells an absolute path with
-   no separator in it. Text files only, by the NUL-byte test. This repository
-   had none; the check exists so that stays true. Two lines are excused by exact
-   `path:line`, both the same LaTeX-escaping fixture string.
+   no separator in it. This repository had none; the check exists so that stays
+   true. Two lines are excused by exact `path:line`, both the same
+   LaTeX-escaping fixture string.
+
+   Which files count as text is decided by **extension, not by content**. It was
+   the NUL-byte test until 2026-09-03, and one raw NUL inside a regex made 143 KB
+   of `templateTests.mjs` invisible to this check with nothing said. Anything not
+   of a known binary type is now scanned regardless, and a file skipped or
+   carrying a NUL is **named in the output**.
 2. **No metadata in a tracked image.** Structural, no name list. JPEG: any APPn
    or COM fails, except a 34-byte orientation-only Exif. PNG: an *allowlist* of
-   rendering chunks, because `tEXt` and `eXIf` are the ones anybody thinks of
-   and the logo here was carrying `caBX` — 16 KB of C2PA provenance nobody would
-   have written a rule for.
+   rendering chunks, so a provenance manifest fails without anyone having had to
+   predict its chunk type — the check was written after a tracked logo turned out
+   to be carrying 16 KB of C2PA in a `caBX` chunk, which no banned-types list
+   would have named. **There is no tracked image in this repository today**, so
+   the check currently scans nothing; it is here for the next one added.
 3. **No personal name**, as a whole token, against the hashed list in
    `forbiddenNames.mjs`. Two readings per file (utf8 for accented names, latin1
    for names inside binaries) and a run-length floor applied *after*
-   normalisation.
+   normalisation. A finding is reported once, not once per reading.
+4. **No product name.** A separate hashed list, because the rule is different:
+   the personal-name list is about people, this is a former brand that must not
+   appear anywhere in a public tree. Paths are checked as well as contents — the
+   thing that triggered it was a *filename*.
 
 Checks 1 and 2 need no name list, and that is the point: a shortened name got
 past check 3 for as long as it existed, while a structural rule cannot be got
