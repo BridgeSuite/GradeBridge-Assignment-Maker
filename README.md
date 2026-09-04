@@ -522,8 +522,7 @@ metadata; no tracked session document). CI runs the same thing on every push.
 ## Links
 
 - **Live App:** [bridgesuite.github.io/GradeBridge-Assignment-Maker](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)
-- **Student App (production):** [bridgesuite.github.io/GradeBridge-Student-Submission](https://bridgesuite.github.io/GradeBridge-Student-Submission/)
-- **Student App (beta):** [aknoesen.github.io/GradeBridge-Student-Submission-Beta](https://aknoesen.github.io/GradeBridge-Student-Submission-Beta/)
+- **Student App:** [bridgesuite.github.io/GradeBridge-Student-Submission](https://bridgesuite.github.io/GradeBridge-Student-Submission/)
 - **Issues:** [GitHub Issues](https://github.com/BridgeSuite/GradeBridge-Assignment-Maker/issues)
 
 ---
