@@ -24,9 +24,19 @@
 #   prevents disclosure is upstream of both: not writing the name, the path or
 #   the process record into the repository in the first place.
 #
-# THIS FILE IS CANONICAL for both repositories (supplement 2, item C). The
-# Student Submission copy adopts it and adjusts exactly one thing: it has a
-# tracked lockfile, so its install step is `npm ci` where this one is
+# THIS FILE IS CANONICAL for both repositories (supplement 2, item C), and so is
+# its FILENAME: `.github/workflows/tests.yml`, in both. It was `test.yml` here
+# and `guards.yml` there, which is one job under two names in the first place a
+# person looks — the same drift the reconciliation exists to stop.
+#
+# `tests` rather than `guards` because the job runs the whole suite plus `tsc`
+# and the build, not only the disclosure guards, and somebody whose build broke
+# would not think to look in a file called `guards`. The filename matches the
+# `name:` below deliberately, so the tab in the Actions UI and the file on disk
+# agree.
+#
+# The Student Submission copy adopts this and adjusts exactly one thing: it has
+# a tracked lockfile, so its install step is `npm ci` where this one is
 # `npm install`. Any other difference is drift.
 name: tests
 

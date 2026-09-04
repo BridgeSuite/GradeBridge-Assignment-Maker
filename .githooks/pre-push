@@ -15,7 +15,7 @@
 #
 #   * `git push --no-verify` skips it, silently and by design.
 #
-# The enforcement is `.github/workflows/test.yml`, which runs on the server
+# The enforcement is `.github/workflows/tests.yml`, which runs on the server
 # where the person who forgot cannot reach it. This exists so you find out in
 # the seconds before a push rather than the minutes after one — which for a
 # personal name, an absolute path or a photograph's metadata is the difference

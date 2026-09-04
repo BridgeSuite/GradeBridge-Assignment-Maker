@@ -394,8 +394,15 @@ with it — change both or neither.**
    rendering chunks, so a provenance manifest fails without anyone having had to
    predict its chunk type — the check was written after a tracked logo turned out
    to be carrying 16 KB of C2PA in a `caBX` chunk, which no banned-types list
-   would have named. **There is no tracked image in this repository today**, so
-   the check currently scans nothing; it is here for the next one added.
+   would have named.
+
+   **There is no tracked image in this repository, so the scan itself runs over
+   nothing — and it says so on every run.** What proves the parsers still work is
+   nine fixtures built in memory and tracked nowhere: clean and dirty PNGs, clean
+   and dirty JPEGs, and **both sides of the orientation exception** — one IFD0
+   entry passes, one tag wider is refused, and so is a one-entry Exif with
+   trailing bytes. That last case exists because a mutation loosening the 34-byte
+   pin survived without it.
 3. **No personal name**, as a whole token, against the hashed list in
    `forbiddenNames.mjs`. Two readings per file (utf8 for accented names, latin1
    for names inside binaries) and a run-length floor applied *after*
@@ -430,7 +437,7 @@ are **not known to agree**.
 
 ## Running the guards without being asked
 
-`.github/workflows/test.yml` runs `tsc`, `npm test` and `npm run build` on every
+`.github/workflows/tests.yml` runs `tsc`, `npm test` and `npm run build` on every
 push and pull request; `.githooks/pre-push` runs `tsc` and `npm test` before a
 push. **They are not the same kind of thing.** The hook is fast local feedback
 and is not enforcement — it does not run in a fresh clone until somebody types
@@ -441,6 +448,20 @@ published now, not that nothing ever was.
 
 The ENG17 checks report SKIP in CI, where the course files are absent. A green
 CI run does not cover them.
+
+## A check that scanned nothing says so
+
+Three findings in the week of 2026-09-03 shared one shape: a single NUL byte hid
+143 KB of source from check 1; a probe compared a dozen names against an empty
+set; check 2 scanned nothing in a repository with no images. **All three were
+green, and green and correct look identical from outside.**
+
+So every set these checks compare against is counted out loud on every run — the
+number of text files, patterns and excused lines, the size of each hashed list,
+the fixtures exercised — and an empty one fails rather than passing. The
+bundle tests assert there is something to scan before scanning it. The existing
+`SKIP` lines, which name the absent file, were already this pattern; this
+generalises it.
 
 ## The fixture
 

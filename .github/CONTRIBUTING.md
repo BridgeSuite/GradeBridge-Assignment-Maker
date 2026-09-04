@@ -107,7 +107,7 @@ We love hearing ideas for improving the assignment creation experience! Before s
    all. It runs `tsc` and `npm test` before a push, so you find out in the
    seconds before rather than the minutes after. **It is not the enforcement**:
    `git push --no-verify` skips it and it does not travel with a clone. CI is
-   the enforcement (`.github/workflows/test.yml`).
+   the enforcement (`.github/workflows/tests.yml`).
 
 4. **Create a branch**
    ```bash
@@ -116,20 +116,20 @@ We love hearing ideas for improving the assignment creation experience! Before s
    git checkout -b fix/bug-description
    ```
 
-4. **Make your changes**
+5. **Make your changes**
    - Write clean, readable code
    - Follow existing code patterns
    - Add comments for complex logic
    - Update documentation if needed
 
-5. **Test your changes**
+6. **Test your changes**
    ```bash
    npm run dev      # Test in development mode
    npm run build    # Ensure it builds
    npm run preview  # Test the production build
    ```
 
-6. **Commit your changes**
+7. **Commit your changes**
    ```bash
    git add .
    git commit -m "Brief description of changes"
@@ -140,7 +140,7 @@ We love hearing ideas for improving the assignment creation experience! Before s
    - `Fix: PDF generation with LaTeX equations`
    - `Update: README with new export options`
 
-7. **Push and create a Pull Request**
+8. **Push and create a Pull Request**
    ```bash
    git push origin feature/your-feature-name
    ```

@@ -69,6 +69,7 @@ const EXCUSED = new Map();
 
 let failed = 0;
 const fail = (msg) => { console.error(`  FAIL  ${msg}`); failed++; };
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: REPO, maxBuffer: 64 << 20 })
   .toString('utf8').split('\0').filter(Boolean);
@@ -79,6 +80,27 @@ for (const path of tracked) {
 }
 
 console.log(`\nno local traces — ${tracked.length} tracked files\n`);
+
+// =====================================================
+// X-1: a check that scanned nothing must say so
+// =====================================================
+// Three findings in one week had this shape: one NUL byte hid 143 KB of source
+// from check 1; a probe next door compared twelve names against an empty set;
+// check 2 scanned nothing in a repository with no images. All three were GREEN.
+//
+// **Green and correct look identical from outside, and that is the defect.**
+//
+// So every set this file compares against is counted out loud on every run, and
+// an empty one fails rather than passing vacuously. A guard is allowed to find
+// nothing. It is not allowed to be silent about having looked at nothing.
+if (tracked.length === 0) {
+  fail('git ls-files returned nothing — every check below would pass by ' +
+    'scanning an empty tree');
+}
+if (contents.size !== tracked.length) {
+  console.log(`  note  ${tracked.length - contents.size} tracked file(s) could not be ` +
+    `read and were not scanned`);
+}
 
 // =====================================================
 // 1. No absolute path
@@ -219,11 +241,27 @@ const isText = (path) => !BINARY_EXTENSIONS.has(extensionOf(path));
       }
     }
   }
-  console.log(`  1. no absolute path — ${scanned} text files`);
-  // Never silently. A file this check did not read is named, so a guard that
-  // has gone quiet says so instead of passing.
-  for (const path of skipped) {
-    console.log(`  note  ${path} not scanned as text — extension .${extensionOf(path)} is a binary type`);
+  if (scanned === 0) {
+    fail('check 1 scanned no text files at all — every file was classified binary, ' +
+      'which cannot be right and would make this check pass by doing nothing');
+  }
+  console.log(`  1. no absolute path — ${scanned} text files, ` +
+    `${PATH_PATTERNS.length} patterns, ${EXCUSED_LINES.size} excused line(s)`);
+  // Never silently. A file this check did not read is reported, so a guard that
+  // has gone quiet says so instead of passing. Grouped by extension and capped,
+  // because on a repository that tracks photographs this would otherwise be
+  // twenty lines of noise on every green run, and noise is how a reader learns
+  // to skip the output that matters.
+  if (skipped.length > 0) {
+    const byExt = new Map();
+    for (const path of skipped) {
+      const ext = extensionOf(path) || '(none)';
+      byExt.set(ext, (byExt.get(ext) || 0) + 1);
+    }
+    const summary = [...byExt.entries()].sort().map(([ext, n]) => `.${ext} ×${n}`).join(', ');
+    console.log(`  note  ${skipped.length} file(s) not scanned as text — ${summary}`);
+    for (const path of skipped.slice(0, 8)) console.log(`          ${path}`);
+    if (skipped.length > 8) console.log(`          …and ${skipped.length - 8} more`);
   }
   // Scanned anyway, but a NUL in something claiming to be source is worth
   // seeing: it is what made this check silent before 2026-09-03.
@@ -333,41 +371,180 @@ const pngChunks = (buf) => {
   return out;
 };
 
+/**
+ * Every reason one image is unacceptable, as strings. Empty means clean.
+ *
+ * Lifted out of the scan loop so it can be run against fixtures rather than only
+ * against whatever the tree happens to contain — see the self-check below.
+ */
+const imageFindings = (path, buf) => {
+  const out = [];
+  if (/\.jpe?g$/i.test(path)) {
+    const segs = jpegSegments(buf);
+    if (!segs) return [`${path} does not parse as a JPEG`];
+    for (const seg of segs) {
+      const isApp = seg.marker >= 0xe0 && seg.marker <= 0xef;
+      if (!isApp && seg.marker !== 0xfe) continue;
+      const isExif = seg.marker === 0xe1 &&
+        buf.subarray(seg.payloadStart, seg.payloadStart + 6).toString('latin1') === 'Exif\0\0';
+      if (isExif && isOrientationOnlyExif(buf, seg)) continue;
+      out.push(`${path} carries a ${APP_NAME(seg.marker)} segment of ${seg.size} bytes` +
+        `${isExif ? ' (Exif, beyond an orientation flag)' : ''} — strip it without ` +
+        `re-encoding the image, so the entropy-coded scan stays byte-identical`);
+    }
+  } else if (/\.png$/i.test(path)) {
+    const chunks = pngChunks(buf);
+    if (!chunks) return [`${path} does not parse as a PNG`];
+    for (const c of chunks) {
+      if (PNG_KEEP.has(c.type)) continue;
+      out.push(`${path} carries a ${c.type} chunk of ${c.len} bytes — strip it; ` +
+        `only pixel and rendering chunks belong in a tracked image`);
+    }
+  }
+  return out;
+};
+
+const isImagePath = (path) => /\.(jpe?g|png)$/i.test(path);
+
 {
   let scanned = 0;
   for (const [path, buf] of contents) {
-    if (/\.jpe?g$/i.test(path)) {
-      scanned++;
-      const segs = jpegSegments(buf);
-      if (!segs) { fail(`${path} does not parse as a JPEG`); continue; }
-      for (const seg of segs) {
-        const isApp = seg.marker >= 0xe0 && seg.marker <= 0xef;
-        if (!isApp && seg.marker !== 0xfe) continue;
-        const isExif = seg.marker === 0xe1 &&
-          buf.subarray(seg.payloadStart, seg.payloadStart + 6).toString('latin1') === 'Exif\0\0';
-        if (isExif && isOrientationOnlyExif(buf, seg)) continue;
-        fail(`${path} carries a ${APP_NAME(seg.marker)} segment of ${seg.size} bytes` +
-          `${isExif ? ' (Exif, beyond an orientation flag)' : ''} — strip it without ` +
-          `re-encoding the image, so the entropy-coded scan stays byte-identical`);
-      }
-    } else if (/\.png$/i.test(path)) {
-      scanned++;
-      const chunks = pngChunks(buf);
-      if (!chunks) { fail(`${path} does not parse as a PNG`); continue; }
-      for (const c of chunks) {
-        if (PNG_KEEP.has(c.type)) continue;
-        fail(`${path} carries a ${c.type} chunk of ${c.len} bytes — strip it; ` +
-          `only pixel and rendering chunks belong in a tracked image`);
-      }
+    if (!isImagePath(path)) continue;
+    scanned++;
+    for (const finding of imageFindings(path, buf)) fail(finding);
+  }
+  // X-1: a check that scanned nothing has to say so. This one scans zero images
+  // in a repository that tracks none, and green then means "not run", which from
+  // outside is indistinguishable from "passed".
+  console.log(scanned === 0
+    ? '  2. no metadata in a tracked image — NO TRACKED IMAGE; the scan ran over ' +
+      'nothing (the self-check below is what exercises it)'
+    : `  2. no metadata in a tracked image — ${scanned} images`);
+}
+
+// ---- check 2 exercises itself, on fixtures built here and tracked nowhere ----
+// Check 2 used to be proven only by the tree containing a dirty image. Both
+// repositories have now cleaned theirs, and this one tracks no image at all, so
+// the check went green by scanning nothing and a break in either parser would
+// have surfaced whenever somebody next added a photograph.
+//
+// The fixtures are a few dozen bytes each and are built in memory: nothing is
+// tracked, so nothing here can itself become a finding for check 1 or 3.
+//
+// **The Orientation pair is the point of the exercise.** That exemption is the
+// one deviation the strip work took, and an exception nobody probes is a hole
+// with a comment over it. One tag wider must be refused.
+{
+  const be16 = (n) => Buffer.from([n >> 8 & 0xff, n & 0xff]);
+  const be32 = (n) => Buffer.from([n >>> 24 & 0xff, n >>> 16 & 0xff, n >>> 8 & 0xff, n & 0xff]);
+
+  const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  // The CRC is never read by pngChunks, so a placeholder keeps the fixture
+  // honest about its shape without pulling in a CRC implementation.
+  const pngChunk = (type, data = Buffer.alloc(0)) => Buffer.concat([
+    be32(data.length), Buffer.from(type, 'latin1'), data, be32(0),
+  ]);
+  const png = (...extra) => Buffer.concat([
+    PNG_SIG,
+    pngChunk('IHDR', Buffer.alloc(13)),
+    ...extra,
+    pngChunk('IDAT', Buffer.alloc(8)),
+    pngChunk('IEND'),
+  ]);
+
+  // An Exif APP1: 'Exif\0\0', a big-endian TIFF header, then `entries` IFD0
+  // entries and a nul next-IFD pointer. One entry is the shape the exception
+  // admits; two is one tag wider.
+  const exifApp1 = (entries) => {
+    const tags = [];
+    for (let i = 0; i < entries; i++) {
+      tags.push(Buffer.concat([
+        be16(i === 0 ? 0x0112 : 0x0132),  // Orientation, then DateTime
+        be16(3), be32(1), be32(6 << 16),
+      ]));
+    }
+    const tiff = Buffer.concat([
+      Buffer.from('MM', 'latin1'), be16(0x002a), be32(8),
+      be16(entries), ...tags, be32(0),
+    ]);
+    const payload = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), tiff]);
+    return Buffer.concat([Buffer.from([0xff, 0xe1]), be16(payload.length + 2), payload]);
+  };
+
+  // A one-entry Exif with junk after the IFD. Size 34 is what the exception
+  // pins, and the entry count alone does not catch this: mutating `size !== 34`
+  // to `size >= 34` left every other fixture still refused, because they widen
+  // the IFD. This is the shape that slips through when only the size is relaxed,
+  // and it is here because that mutation survived without it.
+  const exifApp1WithTrailer = (trailer) => {
+    const base = exifApp1(1);
+    const payload = Buffer.concat([base.subarray(4), Buffer.alloc(trailer)]);
+    return Buffer.concat([Buffer.from([0xff, 0xe1]), be16(payload.length + 2), payload]);
+  };
+
+  const jpeg = (...segments) => Buffer.concat([
+    Buffer.from([0xff, 0xd8]),
+    ...segments,
+    Buffer.from([0xff, 0xdb]), be16(4), Buffer.alloc(2),   // a DQT, so it is not all APPn
+    Buffer.from([0xff, 0xda]), be16(4), Buffer.alloc(2),   // SOS ends the segment walk
+    Buffer.from([0xff, 0xd9]),
+  ]);
+  const comSegment = Buffer.concat([Buffer.from([0xff, 0xfe]), be16(6), Buffer.alloc(4)]);
+
+  const CASES = [
+    ['a clean PNG', 'fixture.png', png(), false],
+    ['a PNG carrying tEXt', 'fixture.png', png(pngChunk('tEXt', Buffer.from('a\0b'))), true],
+    ['a PNG carrying iTXt', 'fixture.png', png(pngChunk('iTXt', Buffer.from('a\0b'))), true],
+    ['a PNG carrying a C2PA caBX', 'fixture.png', png(pngChunk('caBX', Buffer.alloc(16))), true],
+    ['a clean JPEG', 'fixture.jpg', jpeg(), false],
+    ['a JPEG with an orientation-only Exif', 'fixture.jpg', jpeg(exifApp1(1)), false],
+    ['a JPEG with an Exif one tag wider', 'fixture.jpg', jpeg(exifApp1(2)), true],
+    ['a JPEG with a one-entry Exif and trailing bytes', 'fixture.jpg',
+     jpeg(exifApp1WithTrailer(12)), true],
+    ['a JPEG carrying a COM comment', 'fixture.jpg', jpeg(comSegment), true],
+  ];
+
+  let ran = 0;
+  for (const [what, name, buf, shouldFail] of CASES) {
+    ran++;
+    const findings = imageFindings(name, buf);
+    if (shouldFail && findings.length === 0) {
+      fail(`check 2 accepted ${what} — its parser is not seeing what it is meant to see`);
+    }
+    if (!shouldFail && findings.length > 0) {
+      fail(`check 2 rejected ${what}: ${findings.join('; ')}`);
     }
   }
-  console.log(`  2. no metadata in a tracked image — ${scanned} images`);
+  // The exemption's boundary, asserted as a pair rather than two separate cases,
+  // because what matters is that they differ.
+  const narrow = imageFindings('fixture.jpg', jpeg(exifApp1(1)));
+  const wider = imageFindings('fixture.jpg', jpeg(exifApp1(2)));
+  if (!(narrow.length === 0 && wider.length > 0)) {
+    fail('the orientation-only Exif exception no longer distinguishes one tag from two — ' +
+      `narrow: ${narrow.length} finding(s), wider: ${wider.length}`);
+  }
+  // The exception is pinned on the SIZE as well as the entry count, and both
+  // halves need their own case: relaxing the size alone leaves every
+  // wider-IFD fixture still refused, so without this the mutation is invisible.
+  const padded = imageFindings('fixture.jpg', jpeg(exifApp1WithTrailer(12)));
+  if (padded.length === 0) {
+    fail('a one-entry Exif with trailing bytes was accepted — the exception is ' +
+      'pinned on the entry count but no longer on the 34-byte size');
+  }
+  if (ran !== CASES.length) fail(`check 2 self-check ran ${ran} of ${CASES.length} fixtures`);
+  console.log(`     self-check — ${ran} in-memory fixtures, ` +
+    `${CASES.filter((c) => c[3]).length} of them dirty, including both sides of the ` +
+    `orientation exception`);
 }
 
 // =====================================================
 // 3. No personal name
 // =====================================================
-console.log(`  3. no personal names`);
+if (FORBIDDEN_NAME_HASHES.size === 0) {
+  fail('the forbidden-name list is empty — check 3 would compare every token ' +
+    'against nothing and report clean');
+}
+console.log(`  3. no personal names — ${plural(FORBIDDEN_NAME_HASHES.size, 'hashed entry', 'hashed entries')}`);
 
 /**
  * Every letter run whose NORMALISED form is at least `min` characters.
@@ -557,7 +734,12 @@ const FORBIDDEN_PRODUCT_HASHES = new Set([
       }
     }
   }
-  console.log(`  4. no product names${hitFiles ? ` — ${hitFiles} file(s) with findings` : ''}`);
+  if (FORBIDDEN_PRODUCT_HASHES.size === 0) {
+    fail('the forbidden-product list is empty — check 4 would compare every token ' +
+      'against nothing and report clean');
+  }
+  console.log(`  4. no product names — ${plural(FORBIDDEN_PRODUCT_HASHES.size, 'hashed entry', 'hashed entries')}` +
+    `${hitFiles ? `, ${hitFiles} file(s) with findings` : ''}`);
 }
 
 // An exemption for a file that has gone protects nothing and hides the next
