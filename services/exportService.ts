@@ -1185,7 +1185,7 @@ const ANSWER_BEARING: Array<[suffix: string, what: string]> = [
   ['.md',                     'the authored source, rubrics included'],
 ];
 
-const buildDistributionNotice = (names: string[]): string => {
+const buildDistributionNotice = (names: string[], studentZipName: string): string => {
   const base = (n: string) => n.slice(n.lastIndexOf('/') + 1);
   const instructor = names.filter(n => n.startsWith(INSTRUCTOR_DIR));
 
@@ -1222,7 +1222,14 @@ const buildDistributionNotice = (names: string[]): string => {
 
   const count = studentRows.length === 1 ? '1 file' : studentRows.length + ' files';
 
+  // THE FIRST LINE IS THE WHOLE INSTRUCTION (item 3, 2026-09-06). It used to be
+  // a list of files to select and re-zip; it is now one filename to post. An
+  // instructor in a hurry reads the top of a file and stops, so what they must
+  // do goes there, and the explanation goes below it.
   return [
+    'Post ' + studentZipName + ' to your students. Post nothing else from this',
+    'archive. Everything under ' + INSTRUCTOR_DIR + ' contains answers.',
+    '',
     'INSTRUCTOR ONLY. DO NOT GIVE THIS FOLDER TO STUDENTS.',
     '',
     'This export contains the answer key.',
@@ -1230,7 +1237,7 @@ const buildDistributionNotice = (names: string[]): string => {
     'Files here that contain answers (in ' + INSTRUCTOR_DIR + '):',
     ...answerRows.map(row),
     '',
-    'Give students only these ' + count + ', from ' + STUDENT_DIR + ':',
+    studentZipName + ' holds these ' + count + ', and nothing else:',
     ...studentRows.map(row),
     '',
     'Keep everything else. It is your backup and your grading material.',
@@ -1298,7 +1305,10 @@ export const buildExportEntries = async (
     entries[`${INSTRUCTOR_DIR}template.pdf`] = await createPDF(assignment, 'template');
   }
 
-  entries[DISTRIBUTION_NOTICE_NAME] = buildDistributionNotice(Object.keys(entries));
+  // The notice names the inner archive, so it is generated from the same
+  // function that names it on disk — never from a second copy of the pattern.
+  entries[DISTRIBUTION_NOTICE_NAME] =
+    buildDistributionNotice(Object.keys(entries), exportFilenames(assignment).studentZip);
   return entries;
 };
 
@@ -1347,6 +1357,43 @@ export const STUDENT_ZIP_CONTENTS = {
   // and printing — which is exactly why it is also offered on its own (item 5).
   electronic: [PDF_ENTRY, SPEC_ENTRY],
 } as const;
+
+/**
+ * THE CONSUMER'S CONTRACT, checked as the consumer checks it.
+ *
+ * The archive this builds is loaded by the Student Submission app, whose
+ * `services/assignmentBundle.ts` REJECTS a bundle with no
+ * `assignment_spec.json`, with more than one `assignment_spec.json`, or with
+ * more than one `layout_*.csv`. It matches on BASE NAMES and ignores directory
+ * prefixes, so a second copy under any folder is a duplicate to the loader even
+ * though it reads as a different path to us.
+ *
+ * **This is redundant with `STUDENT_ZIP_CONTENTS` today, and deliberately kept
+ * separate.** That check enforces what we meant to ship and refuses any extra
+ * file, so it happens to catch every duplicate as well — which is exactly why
+ * this one cannot be reached through `buildStudentEntries` and cannot be
+ * mutation-tested through it. It is a *different contract*, owned by another
+ * repository and able to change without us: if our exact-contents rule is ever
+ * relaxed, this is what still holds the loader's requirements. Extracted so it
+ * is directly testable rather than dead code that merely looks like a guard.
+ */
+export const loaderContractProblems = (names: string[]): string[] => {
+  const baseOf = (n: string) => n.slice(Math.max(n.lastIndexOf('/'), n.lastIndexOf('\\')) + 1);
+  const countBase = (pred: (b: string) => boolean) => names.filter(n => pred(baseOf(n))).length;
+  const problems: string[] = [];
+
+  const specCount = countBase(b => b === 'assignment_spec.json');
+  if (specCount !== 1) {
+    problems.push(
+      `the Student Submission app needs exactly one assignment_spec.json; this archive has ${specCount}`);
+  }
+  const mapCount = countBase(b => /^layout_.*\.csv$/i.test(b));
+  if (mapCount > 1) {
+    problems.push(
+      `the Student Submission app refuses a bundle with more than one layout_*.csv; this archive has ${mapCount}`);
+  }
+  return problems;
+};
 
 /**
  * The student-facing entries, at the archive root, asserted rather than assumed.
@@ -1470,6 +1517,8 @@ export const buildStudentEntries = (
   }
   for (const extra of remaining) problems.push(`"${extra}" is not a file students may receive`);
 
+  problems.push(...loaderContractProblems(Object.keys(out)));
+
   if (problems.length) {
     throw new Error(
       'Export stopped: the student ZIP would not have been safe to post.\n' +
@@ -1482,13 +1531,18 @@ export const buildStudentEntries = (
 // ---- Download names ------------------------------------------------------
 //
 // **The name is the only thing standing between a tired instructor and
-// publishing the answer key.** All three files land in one Downloads folder
-// among hundreds, and the cost of choosing wrong is the grading rubric going to
-// the whole class.
+// publishing the answer key.**
 //
-//     {stem}_FOR_STUDENTS.pdf       read and print
-//     {stem}_FOR_STUDENTS.zip       load in the app
-//     {stem}_INSTRUCTOR_ONLY.zip    contains the grading rubric
+//     {stem}_INSTRUCTOR_ONLY.zip    the one download; contains the grading rubric
+//       └── {stem}_FOR_STUDENTS.zip   the one file to post, inside it
+//
+// REVERSED 2026-09-06. Until today these were separate downloads, one per
+// button. They are now one download with the student archive inside it, so the
+// two names no longer land side by side in a Downloads folder and the choice
+// that could publish the answer key is not offered at all: the instructor opens
+// one archive and posts the file whose name says FOR_STUDENTS. The names still
+// have to survive being read together, because they are now read together
+// *inside* the archive.
 //
 // **`Export` is the word that failed**: it named the operation and said nothing
 // about who the file was for, so the reader had to already know. Sharing the
@@ -1510,8 +1564,9 @@ export const exportFilenames = (assignment: Assignment) => {
   const stem = stemOf(assignment);
   return {
     instructorZip: `${stem}_${INSTRUCTOR_SUFFIX}.zip`,
+    // No longer a download of its own — this is the name of the single entry
+    // inside the instructor archive that the instructor posts, untouched.
     studentZip: `${stem}_${STUDENT_SUFFIX}.zip`,
-    studentPdf: `${stem}_${STUDENT_SUFFIX}.pdf`,
   };
 };
 
@@ -1525,10 +1580,13 @@ export const exportFilenames = (assignment: Assignment) => {
 // silently too, across ports — an app that has quietly stopped downloading
 // anything, which is unrecoverable from inside the page.
 //
-// So each artifact has its own button and its own gesture. This is why
-// `downloadQrTemplate` already ships one ZIP rather than two files, and the
-// reasoning is the same one generalised: nothing is ever queued behind anything,
-// so a missing file is impossible rather than merely loud.
+// Yesterday's answer was one button per artifact, so that no gesture ever
+// triggered two downloads. **Today's answer is stronger: one download per
+// export, full stop.** A rule that says "never call this twice in a gesture" is
+// a rule someone has to keep; an export that produces a single archive cannot
+// break it. The student package rides inside that archive, which is also why
+// `downloadQrTemplate` ships one ZIP rather than two files — same reasoning,
+// applied to the whole export.
 const saveOne = (content: Blob, filename: string) => {
   // Handle file-saver import differences (default export vs named export property)
   const save = (FileSaver as any).saveAs || FileSaver;
@@ -1549,6 +1607,59 @@ const addZipEntry = async (zip: JSZip, name: string, content: Blob | string): Pr
   zip.file(name, content instanceof Blob ? new Uint8Array(await content.arrayBuffer()) : content);
 };
 
+/**
+ * THE OUTER ARCHIVE, as path → content, with the student package inside it.
+ *
+ * Split out from the download for the same reason `buildExportEntries` is: the
+ * archive an instructor receives can then be asserted without a browser, over
+ * the bytes rather than over the intention.
+ *
+ * **`student/` does not appear here.** Its three files exist in exactly one
+ * place — inside `{stem}_FOR_STUDENTS.zip` — so the outer archive cannot come
+ * to hold a second, drifting copy of the spec, and there is nothing loose for
+ * an instructor to post by mistake.
+ *
+ * The inner archive is built by filtering the SAME `entries` map, through
+ * `buildStudentEntries`, which refuses rather than emitting anything unsafe.
+ */
+export const buildOuterEntries = async (
+  entries: Record<string, Blob | string>,
+  assignment: Assignment
+): Promise<{
+  outer: Record<string, Blob | string | Uint8Array>;
+  studentZipName: string;
+  studentNames: string[];
+}> => {
+  // Asserted before a byte is written; throws if the package would be unsafe.
+  const student = buildStudentEntries(entries, assignment);
+
+  const innerZip = new JSZip();
+  for (const [name, content] of Object.entries(student)) {
+    await addZipEntry(innerZip, name, content);
+  }
+  const innerBytes = await innerZip.generateAsync({ type: 'uint8array' });
+
+  const studentZipName = exportFilenames(assignment).studentZip;
+  const outer: Record<string, Blob | string | Uint8Array> = {
+    [DISTRIBUTION_NOTICE_NAME]: entries[DISTRIBUTION_NOTICE_NAME],
+    [studentZipName]: innerBytes,
+  };
+  for (const [name, content] of Object.entries(entries)) {
+    if (name.startsWith(INSTRUCTOR_DIR)) outer[name] = content;
+  }
+
+  // Assert the RESULT, not the loop above: no loose student file, and nothing
+  // outside the notice, the inner archive and instructor/.
+  const stray = Object.keys(outer).filter(
+    n => n !== DISTRIBUTION_NOTICE_NAME && n !== studentZipName && !n.startsWith(INSTRUCTOR_DIR));
+  if (stray.length) {
+    throw new Error(
+      'Export stopped: the instructor archive holds files that belong nowhere in it.\n' +
+      stray.map(n => `  • "${n}"`).join('\n'));
+  }
+  return { outer, studentZipName, studentNames: Object.keys(student) };
+};
+
 export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
     // Asks before rescaling, and throws RescaleDeclinedError if told not to —
@@ -1559,55 +1670,41 @@ export const exportService = {
     // archive and the student archive can never be produced from an entry map
     // that only one of them would accept. If the student ZIP would be unsafe,
     // that is a fact about this assignment and the whole export stops.
-    buildStudentEntries(entries, assignment);
+    const { outer, studentZipName, studentNames } = await buildOuterEntries(entries, assignment);
 
     const zip = new JSZip();
-    for (const [name, content] of Object.entries(entries)) {
-      await addZipEntry(zip, name, content);
+    for (const [name, content] of Object.entries(outer)) {
+      if (name === studentZipName) {
+        // STORED, not deflated. It is already a compressed archive: deflating
+        // it again costs time on every export and saves nothing. This is a
+        // deliberate exception to the archive default set below.
+        zip.file(name, content as Uint8Array, { compression: 'STORE' });
+      } else {
+        await addZipEntry(zip, name, content as Blob | string);
+      }
     }
-    saveOne(await zip.generateAsync({ type: 'blob' }), exportFilenames(assignment).instructorZip);
-  },
-
-  /**
-   * ITEM 4 — the archive the instructor posts, with nothing to unpack, re-zip or
-   * decide. Student files only, at the root, asserted before a byte is written.
-   */
-  downloadStudentZip: async (assignment: Assignment) => {
-    assignment = normalizePointsConfirmed(assignment);
-    const student = buildStudentEntries(await buildExportEntries(assignment), assignment);
-
-    const zip = new JSZip();
-    for (const [name, content] of Object.entries(student)) await addZipEntry(zip, name, content);
-    const filename = exportFilenames(assignment).studentZip;
-    const blob = await zip.generateAsync({ type: 'blob' });
+    const filename = exportFilenames(assignment).instructorZip;
+    // DEFLATE for the archive as a whole. JSZip's default is STORE, so until
+    // 2026-09-06 this export was written uncompressed — and the bulk of it is
+    // the grader document, the rubric, the backup and the `.md`, which are all
+    // text and compress by roughly four to one. It also makes the STORE above
+    // load-bearing rather than a restatement of the default: with the archive
+    // deflating, removing it really would recompress the inner zip.
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
     saveOne(blob, filename);
     // The bytes are returned, not just the intent, so a test can open the
     // artifact this function exists to produce rather than assert that it meant
-    // to produce it. A check that stops at the return value cannot tell a
-    // correct download from one that saved something else entirely.
-    return { filename, names: Object.keys(student), blob };
+    // to produce one.
+    return { filename, studentZipName, studentNames, blob };
   },
 
-  /**
-   * ITEM 5 — the assignment as a PDF, on its own.
-   *
-   * A student who cannot see what the homework is until they unzip a file on a
-   * phone will not start it, so the readable artifact has to be postable without
-   * unpacking anything. It is the *same* PDF that is inside the student ZIP,
-   * taken from the same entry map rather than regenerated, so a student who took
-   * only the ZIP still has everything and the two can never differ.
-   */
-  downloadStudentPdf: async (assignment: Assignment) => {
-    assignment = normalizePointsConfirmed(assignment);
-    const student = buildStudentEntries(await buildExportEntries(assignment), assignment);
-    const pdf = student['assignment.pdf'];
-    if (!(pdf instanceof Blob)) {
-      throw new Error('Export stopped: the student PDF was not produced.');
-    }
-    const filename = exportFilenames(assignment).studentPdf;
-    saveOne(pdf, filename);
-    return { filename, blob: pdf };
-  },
+  // REMOVED 2026-09-06: `downloadStudentZip` and `downloadStudentPdf`.
+  //
+  // They were separate downloads behind separate buttons, which is how the
+  // export came to cost three deliberate gestures. Both artifacts still exist
+  // and are still built from the same entry map — the student archive is now an
+  // entry inside the instructor archive, and the PDF is inside that. Nothing is
+  // lost; what is gone is the opportunity to download the wrong one.
 
   downloadMd: (assignment: Assignment) => {
     // `assignmentToMd` normalises internally, and the .md carries the scaled

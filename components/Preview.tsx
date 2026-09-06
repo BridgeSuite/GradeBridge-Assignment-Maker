@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { storageService } from '../services/storageService';
 import { exportService, isRescaleDeclined } from '../services/exportService';
 import { Layout, Card, Button } from './Common';
-import { Download, ArrowLeft, Edit2, Users, FileText } from 'lucide-react';
+import { Download, ArrowLeft, Edit2 } from 'lucide-react';
 import { SubmissionType } from '../types';
 import { FormattedText } from './FormattedText';
 
@@ -13,50 +13,25 @@ const Preview: React.FC = () => {
   const navigate = useNavigate();
   const assignment = id ? storageService.get(id) : undefined;
 
+  // ONE download. The instructor archive, with the student package inside it.
+  // Named in the message, because knowing which file to post is now the whole
+  // of the instructor's remaining job. Saying what is inside that file is also
+  // the only cheap check that the map travelled with the sheet.
   const handleExport = async () => {
     if (!assignment) return;
     try {
-      await exportService.downloadZIP(assignment);
+      const { filename, studentZipName, studentNames } = await exportService.downloadZIP(assignment);
+      alert(
+        `Downloaded ${filename}\n\n` +
+        `Post ${studentZipName} from inside it. That one file holds:\n` +
+        studentNames.map(n => `  ${n}`).join('\n') +
+        `\n\nPost nothing else: everything under instructor/ contains answers.`
+      );
     } catch (error) {
       // Declining the rescale is a decision, not a failure. Say nothing.
       if (isRescaleDeclined(error)) return;
       console.error(error);
       alert(error instanceof Error ? error.message : 'Failed to export the assignment package.');
-    }
-  };
-
-  // Each download is its own button and its own click. Chrome delivers one
-  // programmatic download per user gesture and silently drops the rest — see
-  // the note beside `saveOne` in exportService.ts — so nothing here ever
-  // triggers two.
-  const handleStudentZip = async () => {
-    if (!assignment) return;
-    try {
-      const { filename, names } = await exportService.downloadStudentZip(assignment);
-      // Named, because the whole point is that the instructor knows which file
-      // to post. Saying what is inside it is also the only cheap check that the
-      // map travelled with the sheet.
-      alert(
-        `Downloaded ${filename}\n\nPost this file. It contains:\n` +
-        names.map(n => `  ${n}`).join('\n') +
-        `\n\nIt holds no grading material. Everything else stays with you.`
-      );
-    } catch (error) {
-      if (isRescaleDeclined(error)) return;
-      console.error(error);
-      alert(error instanceof Error ? error.message : 'Failed to build the student ZIP.');
-    }
-  };
-
-  const handleStudentPdf = async () => {
-    if (!assignment) return;
-    try {
-      const { filename } = await exportService.downloadStudentPdf(assignment);
-      alert(`Downloaded ${filename}\n\nThe same PDF is inside the student ZIP — this copy is so students can read and print it without unzipping anything.`);
-    } catch (error) {
-      if (isRescaleDeclined(error)) return;
-      console.error(error);
-      alert(error instanceof Error ? error.message : 'Failed to build the student PDF.');
     }
   };
 
@@ -82,17 +57,10 @@ const Preview: React.FC = () => {
            <Link to={`/edit/${assignment.id}`}>
               <Button variant="secondary"><Edit2 className="w-4 h-4 mr-2"/>Edit</Button>
            </Link>
-           {/* The two student downloads lead, and the instructor archive is
-               secondary — the asymmetry is total: posting the instructor
-               archive publishes the rubric to the class. */}
-           <Button onClick={handleStudentZip}>
-             <Users className="w-4 h-4 mr-2" /> Give to students
-           </Button>
-           <Button variant="secondary" onClick={handleStudentPdf}>
-             <FileText className="w-4 h-4 mr-2" /> Student PDF
-           </Button>
-           <Button variant="secondary" onClick={handleExport}>
-             <Download className="w-4 h-4 mr-2" /> Instructor export
+           {/* One export control. The file to post is inside the archive it
+               produces, so there is no second download to choose wrong. */}
+           <Button onClick={handleExport}>
+             <Download className="w-4 h-4 mr-2" /> Export
            </Button>
         </div>
       }

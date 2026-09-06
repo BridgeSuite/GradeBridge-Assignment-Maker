@@ -6,7 +6,7 @@ import { Assignment } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService, isRescaleDeclined } from '../services/exportService';
 import { Layout, Card, Button } from '../components/Common';
-import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode, Users } from 'lucide-react';
+import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
 import { parseMdToAssignment, courseKeyWarning } from '../services/mdParserService';
 import { degradeRetiredTypes } from '../services/retiredTypes';
@@ -45,36 +45,27 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  /**
+   * ONE download. The instructor archive, with the student package inside it.
+   *
+   * The message names the one file to post, because that is now the whole of
+   * the instructor's remaining job: open the archive, post the entry whose name
+   * says FOR_STUDENTS, keep the rest.
+   */
   const handleExport = async (assignment: Assignment) => {
     try {
-      await exportService.downloadZIP(assignment);
+      const { filename, studentZipName, studentNames } = await exportService.downloadZIP(assignment);
+      alert(
+        `Downloaded ${filename}\n\n` +
+        `Post ${studentZipName} from inside it. That one file holds:\n` +
+        studentNames.map(n => `  ${n}`).join('\n') +
+        `\n\nPost nothing else: everything under instructor/ contains answers.`
+      );
     } catch (error) {
       // Declining the rescale is a decision, not a failure. Say nothing.
       if (isRescaleDeclined(error)) return;
       console.error(error);
       alert(error instanceof Error ? error.message : 'Failed to export the assignment package.');
-    }
-  };
-
-  /**
-   * The archive the instructor posts. Its own button and its own click: Chrome
-   * delivers one programmatic download per user gesture and drops the rest in
-   * silence (see `saveOne` in exportService.ts), so no handler here triggers
-   * two. The loose student PDF lives on the assignment's own page, beside the
-   * room to explain it; a student holding the ZIP already has that PDF.
-   */
-  const handleStudentZip = async (assignment: Assignment) => {
-    try {
-      const { filename, names } = await exportService.downloadStudentZip(assignment);
-      alert(
-        `Downloaded ${filename}\n\nPost this file. It contains:\n` +
-        names.map(n => `  ${n}`).join('\n') +
-        `\n\nIt holds no grading material. Everything else stays with you.`
-      );
-    } catch (error) {
-      if (isRescaleDeclined(error)) return;
-      console.error(error);
-      alert(error instanceof Error ? error.message : 'Failed to build the student ZIP.');
     }
   };
 
@@ -362,19 +353,11 @@ const Dashboard: React.FC = () => {
                   <span className="hidden sm:inline">Copy</span>
                 </Button>
                 <Button
-                  onClick={() => handleStudentZip(assignment)}
-                  title="The file to post — student files only, no grading material"
-                >
-                  <Users className="w-4 h-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Students</span>
-                </Button>
-                <Button
-                  variant="secondary"
                   onClick={() => handleExport(assignment)}
-                  title="Everything, including the answer key — never give this to students"
+                  title="One download: the file to post, plus your grading material — never give the whole archive to students"
                 >
                   <Download className="w-4 h-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Instructor</span>
+                  <span className="hidden sm:inline">Export</span>
                 </Button>
                 <Button 
                   variant="danger" 
