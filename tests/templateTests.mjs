@@ -1668,40 +1668,48 @@ check('item 4: authored text with Greek and math is not silently garbled', async
   });
 
   // Paths gained a student/ | instructor/ split on 2026-08-31 so that "give
-  // students the student folder" is unambiguous. Filenames did not change.
+  // students the student folder" is unambiguous. The two student files gained
+  // their shipping names on 2026-09-06, when the student zip was replaced by
+  // two loose files, so they are looked up through `exportFilenames` rather than
+  // by a literal that would then exist in two places.
   const base = n => n.slice(n.lastIndexOf('/') + 1);
   const named = (entries, name) => Object.keys(entries).find(n => base(n) === name);
+  const hwNames = exportSvc.exportFilenames(appendixB);
+  const elNames = exportSvc.exportFilenames({ ...appendixB, inputMode: 'electronic' });
 
-  check('handwritten: assignment.pdf IS the QR template, and there is no second PDF', async () => {
+  check('handwritten: the student PDF IS the QR template, and there is no second PDF', async () => {
     const pdfs = Object.keys(hwEntries).filter(n => n.endsWith('.pdf'));
-    assertEqual(pdfs, ['student/assignment.pdf'], 'a handwritten export should contain exactly one PDF');
+    assertEqual(pdfs, [`student/${hwNames.studentPdf}`], 'a handwritten export should contain exactly one PDF');
     // Same bytes as the standalone generator produces — not a lookalike.
     const direct = await gen.generateTemplate(appendixB);
-    const a = Buffer.from(await hwEntries['student/assignment.pdf'].arrayBuffer());
+    const a = Buffer.from(await hwEntries[`student/${hwNames.studentPdf}`].arrayBuffer());
     const b = Buffer.from(await direct.pdf.arrayBuffer());
-    assertEqual(a.length, b.length, 'assignment.pdf is not the template PDF');
-    assert(a.subarray(0, 2000).equals(b.subarray(0, 2000)), 'assignment.pdf differs from the template PDF');
+    assertEqual(a.length, b.length, 'the student PDF is not the template PDF');
+    assert(a.subarray(0, 2000).equals(b.subarray(0, 2000)), 'the student PDF differs from the template PDF');
   });
 
   check('handwritten: no template.pdf — it serves no purpose on a page-format sheet', () =>
     assert(!named(hwEntries, 'template.pdf'), 'the boxed answer-region sheet is still being exported'));
 
-  check('handwritten: the sidecar travels with the PDF, under the name the QR points at', () => {
+  check('handwritten: the sidecar is instructor-side, under the name the QR points at', () => {
+    // CHANGED 2026-09-06: the map is no longer a student file. The student's
+    // copy rides inside the spec, verbatim; this one is the instructor's, for
+    // the Gradescope outline. `run-tests.mjs` holds the two byte-identical.
     const csv = Object.keys(hwEntries).filter(n => n.endsWith('.csv'));
-    assertEqual(csv, [`student/layout_${t.assignmentId}.csv`],
-      'the layout map is missing, misnamed, or not beside the PDF it must travel with');
+    assertEqual(csv, [`instructor/layout_${t.assignmentId}.csv`],
+      'the layout map is missing, misnamed, or still being handed to students');
   });
 
   check('handwritten: the QR template PDF really does carry a QR and four marks', async () => {
-    const bytes = Buffer.from(await hwEntries['student/assignment.pdf'].arrayBuffer()).toString('latin1');
+    const bytes = Buffer.from(await hwEntries[`student/${hwNames.studentPdf}`].arrayBuffer()).toString('latin1');
     const rects = [...bytes.matchAll(/([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+) re/g)];
-    assert(rects.length > 100, 'assignment.pdf has too few drawing ops to contain a QR');
+    assert(rects.length > 100, 'the student PDF has too few drawing ops to contain a QR');
     assert(!/Gradescope Answer Region/.test(bytes), 'the old boxed answer region leaked into it');
   });
 
-  check('electronic: assignment.pdf for the student, template.pdf for the instructor, no layout map', () => {
+  check('electronic: the student PDF for the student, template.pdf for the instructor, no layout map', () => {
     assertEqual(Object.keys(elEntries).filter(n => n.endsWith('.pdf')).sort(),
-      ['instructor/template.pdf', 'student/assignment.pdf'], 'the electronic PDF pair changed');
+      ['instructor/template.pdf', `student/${elNames.studentPdf}`], 'the electronic PDF pair changed');
     assertEqual(Object.keys(elEntries).filter(n => n.endsWith('.csv')), [],
       'an electronic export gained a layout map');
     // template.pdf sets up the Gradescope outline, which is an instructor task.
@@ -1710,8 +1718,9 @@ check('item 4: authored text with Greek and math is not silently garbled', async
   });
 
   check('both modes still carry the spec, the html, the tex, the rubric and the grader doc', () => {
-    for (const [label, entries] of [['handwritten', hwEntries], ['electronic', elEntries]]) {
-      for (const name of ['assignment_spec.json', 'assignment.html', 'assignment.tex']) {
+    for (const [label, entries, names] of
+         [['handwritten', hwEntries, hwNames], ['electronic', elEntries, elNames]]) {
+      for (const name of [names.studentUpload, 'assignment.html', 'assignment.tex']) {
         assert(named(entries, name), `${label}: ${name} is missing`);
       }
       assert(Object.keys(entries).some(n => n.endsWith('_grading_rubric.json')), `${label}: no rubric`);

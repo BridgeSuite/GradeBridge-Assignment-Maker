@@ -13,17 +13,16 @@ const Preview: React.FC = () => {
   const navigate = useNavigate();
   const assignment = id ? storageService.get(id) : undefined;
 
-  // ONE download. The instructor archive, with the student package inside it.
-  // Named in the message, because knowing which file to post is now the whole
-  // of the instructor's remaining job. Saying what is inside that file is also
-  // the only cheap check that the map travelled with the sheet.
+  // ONE download. The instructor archive, with the two student files loose at
+  // its root. Named in the message, because knowing which files to post is now
+  // the whole of the instructor's remaining job.
   const handleExport = async () => {
     if (!assignment) return;
     try {
-      const { filename, studentZipName, studentNames } = await exportService.downloadZIP(assignment);
+      const { filename, studentNames } = await exportService.downloadZIP(assignment);
       alert(
         `Downloaded ${filename}\n\n` +
-        `Post ${studentZipName} from inside it. That one file holds:\n` +
+        `Post these to your students, from inside it:\n` +
         studentNames.map(n => `  ${n}`).join('\n') +
         `\n\nPost nothing else: everything under instructor/ contains answers.`
       );

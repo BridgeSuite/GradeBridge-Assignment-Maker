@@ -46,18 +46,18 @@ const Dashboard: React.FC = () => {
   };
 
   /**
-   * ONE download. The instructor archive, with the student package inside it.
+   * ONE download. The instructor archive, with the two student files loose at
+   * its root.
    *
-   * The message names the one file to post, because that is now the whole of
-   * the instructor's remaining job: open the archive, post the entry whose name
-   * says FOR_STUDENTS, keep the rest.
+   * The message names them, because that is now the whole of the instructor's
+   * remaining job: open the archive, post those two, keep the rest.
    */
   const handleExport = async (assignment: Assignment) => {
     try {
-      const { filename, studentZipName, studentNames } = await exportService.downloadZIP(assignment);
+      const { filename, studentNames } = await exportService.downloadZIP(assignment);
       alert(
         `Downloaded ${filename}\n\n` +
-        `Post ${studentZipName} from inside it. That one file holds:\n` +
+        `Post these to your students, from inside it:\n` +
         studentNames.map(n => `  ${n}`).join('\n') +
         `\n\nPost nothing else: everything under instructor/ contains answers.`
       );

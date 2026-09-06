@@ -1,6 +1,6 @@
 
 import { Assignment, SubmissionType } from '../types';
-import { encryptJson, normalizeCoursePublicKey, validateCoursePublicKey } from './cryptoService';
+import { decryptJson, encryptJson, normalizeCoursePublicKey, validateCoursePublicKey } from './cryptoService';
 import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
 import { stemForGrader } from './figureText';
 import { generateTemplate } from './templateGenerator';
@@ -1094,8 +1094,16 @@ ${katexCss}
 /** Fields always written, in the order the spec serialises them. */
 const SPEC_ASSIGNMENT_REQUIRED = ['id', 'courseCode', 'title', 'preamble', 'problems', 'createdAt', 'updatedAt'] as const;
 /** Written only when the assignment actually carries them, so a spec from
- *  before a field existed stays byte-for-byte what it was. */
-const SPEC_ASSIGNMENT_OPTIONAL = ['inputMode', 'aiFeedback', 'coursePublicKey'] as const;
+ *  before a field existed stays byte-for-byte what it was.
+ *
+ *  `layoutCsvName` / `layoutCsv` are the exception to "fields of `Assignment`":
+ *  they are not authored, they are the map the generator just produced, handed
+ *  to `buildAssignmentSpec` as its second argument. They ride in the spec so a
+ *  handwritten student has ONE file to load and no second file to choose
+ *  wrongly — and so the map, which decides where their answers are cut from,
+ *  is neither readable nor editable on the way. Both present or both absent,
+ *  never one. See THE EMBEDDED LAYOUT below. */
+const SPEC_ASSIGNMENT_OPTIONAL = ['inputMode', 'aiFeedback', 'coursePublicKey', 'layoutCsvName', 'layoutCsv'] as const;
 const SPEC_PROBLEM_REQUIRED = ['id', 'name', 'description', 'subsections'] as const;
 const SPEC_SUBSECTION_REQUIRED = ['id', 'name', 'description', 'points', 'submissionType'] as const;
 const SPEC_SUBSECTION_OPTIONAL = ['minWords', 'maxImages', 'config'] as const;
@@ -1119,7 +1127,36 @@ const pickFields = (src: Record<string, unknown>, required: readonly string[], o
   return out;
 };
 
-export const buildAssignmentSpec = async (assignment: Assignment): Promise<Assignment> => {
+// =====================================================
+// THE EMBEDDED LAYOUT
+// =====================================================
+// A handwritten student used to receive three files and had to open a zip to
+// get the sheet out to print. That single act put the layout map in front of
+// them — the file that decides where their answers are cut from, in plain text,
+// editable — and left them choosing which of two files to upload.
+//
+// The map now travels INSIDE the spec, which is `gb1:`-encoded, so it is
+// neither readable nor editable and there is nothing to choose between.
+//
+// **The CSV text is embedded VERBATIM: not reformatted, not converted to JSON,
+// not normalised.** That is the whole reason this cannot move `layout_id`.
+// `computeLayoutId` hashes `canonicalMapSerialization(rows)` — the PARSED rows,
+// not the file bytes — so a consumer that embeds the same text and parses it
+// with the same parser gets identical rows by construction. Reformat it here
+// and the guarantee becomes an argument instead of a fact. `95438EDF` is
+// printed into the QR on every ENG17 sheet that already exists: every other
+// mistake in this file is a redeploy, this one is a reprint.
+export interface EmbeddedLayout {
+  /** The sidecar's own filename, so a consumer's errors can still name a file. */
+  name: string;
+  /** `toLayoutCsv()`'s output, byte for byte, as written to `instructor/`. */
+  csv: string;
+}
+
+export const buildAssignmentSpec = async (
+  assignment: Assignment,
+  layout?: EmbeddedLayout,
+): Promise<Assignment> => {
   // Validate the key before building, so a malformed one stops the export
   // rather than silently producing submissions nobody can read.
   const pem = normalizeCoursePublicKey(assignment.coursePublicKey || '');
@@ -1135,6 +1172,23 @@ export const buildAssignmentSpec = async (assignment: Assignment): Promise<Assig
   // the spec stays identical to a pre-gb2 export and the student app falls back
   // to gb1.
   if (pem) source.coursePublicKey = pem; else delete source.coursePublicKey;
+
+  // Both fields or neither, refused here rather than downstream: a spec naming a
+  // map it does not carry, or carrying one it cannot name, is a shape no
+  // consumer has been written for, and the export is the last place anyone
+  // looks at it.
+  delete source.layoutCsvName;
+  delete source.layoutCsv;
+  if (layout) {
+    if (typeof layout.name !== 'string' || !layout.name ||
+        typeof layout.csv !== 'string' || !layout.csv) {
+      throw new Error(
+        'Export stopped: the layout to embed in the assignment spec is incomplete. ' +
+        'A spec carries the map\'s name and the map\'s text, or neither — never one.');
+    }
+    source.layoutCsvName = layout.name;
+    source.layoutCsv = layout.csv;
+  }
 
   const spec = pickFields(source, SPEC_ASSIGNMENT_REQUIRED, SPEC_ASSIGNMENT_OPTIONAL);
   spec.problems = (assignment.problems || []).map(prob => {
@@ -1185,19 +1239,21 @@ const ANSWER_BEARING: Array<[suffix: string, what: string]> = [
   ['.md',                     'the authored source, rubrics included'],
 ];
 
-const buildDistributionNotice = (names: string[], studentZipName: string): string => {
+const buildDistributionNotice = (
+  names: string[],
+  student: { studentPdf: string; studentUpload: string },
+): string => {
   const base = (n: string) => n.slice(n.lastIndexOf('/') + 1);
   const instructor = names.filter(n => n.startsWith(INSTRUCTOR_DIR));
 
   // The student list is ordered by what the instructor does with it, not by
-  // insertion order: print the sheet, hand over the spec, keep the map with the
-  // PDF. Anything unrecognised is still listed — a student file silently
-  // missing from this list is the failure the notice exists to prevent.
-  const STUDENT_ORDER = ['assignment.pdf', 'assignment_spec.json'];
+  // insertion order: print the sheet, then hand over the file they upload.
+  // Anything unrecognised is still listed — a student file silently missing
+  // from this list is the failure the notice exists to prevent.
+  const STUDENT_ORDER = [student.studentPdf, student.studentUpload];
   const studentWhat = (b: string) =>
-      b === 'assignment.pdf' ? 'the sheet they print and write on'
-    : b === 'assignment_spec.json' ? 'loaded by the Student Submission app'
-    : b.startsWith('layout_') ? 'the map the app crops by; it must travel with the PDF'
+      b === student.studentPdf ? 'the sheet they print and write on'
+    : b === student.studentUpload ? 'the one file they upload; the layout map is inside it'
     : '';
   const rank = (b: string) => {
     const i = STUDENT_ORDER.indexOf(b);
@@ -1207,6 +1263,12 @@ const buildDistributionNotice = (names: string[], studentZipName: string): strin
     .filter(n => n.startsWith(STUDENT_DIR)).map(base)
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
     .map(b => [b, studentWhat(b)] as const);
+
+  // The map used to be a student file. An instructor who remembers that it
+  // "must travel with the PDF" would post the copy now sitting in instructor/,
+  // and nothing downstream would object — the student app would simply take the
+  // separate map in preference to the embedded one. Say where it went.
+  const mapName = instructor.map(base).find(b => /^layout_.*\.csv$/i.test(b));
 
   const answerRows = ANSWER_BEARING
     .map(([suffix, what]) => {
@@ -1223,12 +1285,13 @@ const buildDistributionNotice = (names: string[], studentZipName: string): strin
   const count = studentRows.length === 1 ? '1 file' : studentRows.length + ' files';
 
   // THE FIRST LINE IS THE WHOLE INSTRUCTION (item 3, 2026-09-06). It used to be
-  // a list of files to select and re-zip; it is now one filename to post. An
-  // instructor in a hurry reads the top of a file and stops, so what they must
-  // do goes there, and the explanation goes below it.
+  // a list of files to select and re-zip; it is now the two filenames to post.
+  // An instructor in a hurry reads the top of a file and stops, so what they
+  // must do goes there, and the explanation goes below it.
   return [
-    'Post ' + studentZipName + ' to your students. Post nothing else from this',
-    'archive. Everything under ' + INSTRUCTOR_DIR + ' contains answers.',
+    'Post ' + student.studentPdf + ' and ' + student.studentUpload + ' to your',
+    'students. Post nothing else from this archive. Everything under ' + INSTRUCTOR_DIR,
+    'contains answers.',
     '',
     'INSTRUCTOR ONLY. DO NOT GIVE THIS FOLDER TO STUDENTS.',
     '',
@@ -1237,9 +1300,16 @@ const buildDistributionNotice = (names: string[], studentZipName: string): strin
     'Files here that contain answers (in ' + INSTRUCTOR_DIR + '):',
     ...answerRows.map(row),
     '',
-    studentZipName + ' holds these ' + count + ', and nothing else:',
+    'Give students these ' + count + ', and nothing else:',
     ...studentRows.map(row),
     '',
+    ...(mapName ? [
+      'The layout map ' + mapName + ' is now INSIDE ' + student.studentUpload + '.',
+      'The copy in ' + INSTRUCTOR_DIR + ' is yours, for the Gradescope outline. Do not',
+      'post it: students no longer need it, and it is the map their answers are',
+      'cut from.',
+      '',
+    ] : []),
     'Keep everything else. It is your backup and your grading material.',
     '',
   ].join('\n');
@@ -1249,24 +1319,39 @@ const buildDistributionNotice = (names: string[], studentZipName: string): strin
  * Everything that goes in the export ZIP, as path → content. Split out from the
  * download so the contents can be asserted without a browser.
  *
- * **`assignment.pdf` is the one PDF.** For a handwritten assignment it *is* the
+ * **There is one student PDF.** For a handwritten assignment it *is* the
  * page-format sheet — the QR, the marks, the question text and the ruled writing
  * areas. There is deliberately no second PDF to choose between: the instructor
- * prints `assignment.pdf` and that is the whole story.
+ * prints it and that is the whole story.
+ *
+ * **The two student entries carry the names they will ship under**, not internal
+ * ones renamed later. `STUDENT_DIR` is only a marker for who may receive an
+ * entry; the filename is decided in one place, `exportFilenames`.
  */
 export const buildExportEntries = async (
   assignment: Assignment
 ): Promise<Record<string, Blob | string>> => {
   const stem = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}`;
   const handwritten = assignment.inputMode === 'handwritten';
+  const { studentPdf, studentUpload } = exportFilenames(assignment);
+
+  // THE TEMPLATE COMES FIRST on the handwritten path, because its CSV text goes
+  // into the spec: the spec cannot be built until the map exists.
+  // generateTemplate() runs the spec 8.7 self-test and throws rather than
+  // emitting a non-compliant template, so a failure stops the whole export —
+  // which is the intent.
+  const template = handwritten ? await generateTemplate(assignment) : null;
 
   const entries: Record<string, Blob | string> = {
     // ---- student/ : the only files a student may receive --------------------
     // Spec JSON — encoded with AES-256-GCM so students cannot casually read or
     // edit it, and built from a whitelist so it carries no grading material at
-    // all. The Student Submission app decodes it on load; Import JSON here
-    // handles encoded files too.
-    [`${STUDENT_DIR}assignment_spec.json`]: await encryptJson(await buildAssignmentSpec(assignment)),
+    // all. On a handwritten assignment it also carries the layout map verbatim,
+    // so this is the only file a student uploads. The Student Submission app
+    // decodes it on load; Import JSON here handles encoded files too.
+    [`${STUDENT_DIR}${studentUpload}`]: await encryptJson(await buildAssignmentSpec(
+      assignment,
+      template ? { name: template.csvFilename, csv: template.csv } : undefined)),
 
     // ---- instructor/ : backup, grading material, readable documents ---------
     // THE BACKUP. The one file whose job is completeness — see
@@ -1285,19 +1370,18 @@ export const buildExportEntries = async (
     [`${INSTRUCTOR_DIR}${stem}_grader_document.html`]: await generateGraderHTML(assignment),
   };
 
-  if (handwritten) {
-    // The page-format sheet is the assignment. generateTemplate() runs the spec
-    // 8.7 self-test and throws rather than emitting a non-compliant template, so
-    // a failure stops the whole export — which is the intent.
-    const template = await generateTemplate(assignment);
-    entries[`${STUDENT_DIR}assignment.pdf`] = template.pdf;
-    // The sidecar the Submission app crops by. Its filename carries the template
-    // id because that is what the printed QR points at; do not rename it. It
-    // sits beside the PDF because the two must travel together — the app refuses
-    // to crop when the QR's hash does not match the map.
-    entries[`${STUDENT_DIR}${template.csvFilename}`] = template.csv;
+  if (template) {
+    // The page-format sheet is the assignment.
+    entries[`${STUDENT_DIR}${studentPdf}`] = template.pdf;
+    // The sidecar map, INSTRUCTOR-SIDE since 2026-09-06. Its filename carries
+    // the template id because that is what the printed QR points at; do not
+    // rename it — the same text is embedded in the spec above, and the two
+    // copies are asserted byte-identical before anything is written. The
+    // instructor's use for it is the Gradescope outline; the student's copy
+    // rides inside the file they upload.
+    entries[`${INSTRUCTOR_DIR}${template.csvFilename}`] = template.csv;
   } else {
-    entries[`${STUDENT_DIR}assignment.pdf`] = await createPDF(assignment, 'student');
+    entries[`${STUDENT_DIR}${studentPdf}`] = await createPDF(assignment, 'student');
     // The boxed answer-region sheet, for setting up the Gradescope outline —
     // which is an instructor task, so it is not in student/. Handwritten has no
     // use for it: the page-format sheet already is the answer surface, and a
@@ -1305,15 +1389,15 @@ export const buildExportEntries = async (
     entries[`${INSTRUCTOR_DIR}template.pdf`] = await createPDF(assignment, 'template');
   }
 
-  // The notice names the inner archive, so it is generated from the same
-  // function that names it on disk — never from a second copy of the pattern.
+  // The notice names the two student files, so it is generated from the same
+  // function that names them on disk — never from a second copy of the pattern.
   entries[DISTRIBUTION_NOTICE_NAME] =
-    buildDistributionNotice(Object.keys(entries), exportFilenames(assignment).studentZip);
+    buildDistributionNotice(Object.keys(entries), { studentPdf, studentUpload });
   return entries;
 };
 
 // =====================================================
-// THE STUDENT ZIP — what the instructor posts, ready to post
+// THE TWO STUDENT FILES — what the instructor posts, ready to post
 // =====================================================
 //
 // THE FAILURE THIS REMOVES. The export ZIP holds `student/` and `instructor/`,
@@ -1326,73 +1410,53 @@ export const buildExportEntries = async (
 // reports a problem. The folders and the generated notice tell a human what to
 // do; they cannot make the machine refuse the wrong thing.
 //
+// **CHANGED 2026-09-06: there is no student ZIP any more.** The student package
+// was itself an archive, which meant a student had to open something to reach
+// the sheet they print — and that single act put the layout map and a second
+// candidate upload file in front of them. Two loose files replace it: a PDF to
+// print and one file to upload, with the map inside the second. The archive an
+// instructor unzips is the same one they always unzipped; what changed is that
+// the two files they post are already loose at its root.
+//
 // **Built by filtering the same `entries` map the export ZIP is built from**,
 // never from a second list of filenames. Two lists is how the two would come to
 // disagree about what is student-facing, and the disagreement would be silent in
 // exactly the same way — a file added to `student/` and forgotten here would be
 // withheld from students, or worse, one added to `instructor/` and named here
 // would be published.
+//
+// **`loaderContractProblems` was removed in the same change.** It enforced the
+// Student Submission loader's rules for a student *archive* — exactly one
+// `assignment_spec.json`, at most one `layout_*.csv`, counted by base name — and
+// there is no longer a student archive for it to run over. Keeping it would have
+// left exactly what its own comment warned against: code that looks like a guard
+// and guards nothing.
 
 /**
- * What the student ZIP must contain, exactly, per input mode.
+ * What the student files must be, exactly. Both modes ship the same two.
  *
  * Each entry carries the human name as well as the matcher, because these
  * strings reach an instructor in a failure message and a raw regular expression
  * is not something anyone should be shown at the moment their export stopped.
- */
-const PDF_ENTRY = { label: 'assignment.pdf', match: (n: string) => n === 'assignment.pdf' };
-const SPEC_ENTRY = { label: 'assignment_spec.json', match: (n: string) => n === 'assignment_spec.json' };
-
-export const STUDENT_ZIP_CONTENTS = {
-  // The sheet, the spec, and the map the app crops by. The map's filename
-  // carries the template id, so it is matched by shape rather than by name.
-  handwritten: [PDF_ENTRY, SPEC_ENTRY, {
-    label: 'the layout map (layout_<template id>.csv)',
-    match: (n: string) => /^layout_[A-Z0-9]{1,12}\.csv$/.test(n),
-  }],
-  // ITEM 1, determined 2026-09-06: an electronic student needs only these two,
-  // and needs the spec more than the PDF. `assignment_spec.json` carries every
-  // problem and sub-part description, and the Submission app renders them, so
-  // the app alone is a complete assignment. The PDF is a convenience for reading
-  // and printing — which is exactly why it is also offered on its own (item 5).
-  electronic: [PDF_ENTRY, SPEC_ENTRY],
-} as const;
-
-/**
- * THE CONSUMER'S CONTRACT, checked as the consumer checks it.
  *
- * The archive this builds is loaded by the Student Submission app, whose
- * `services/assignmentBundle.ts` REJECTS a bundle with no
- * `assignment_spec.json`, with more than one `assignment_spec.json`, or with
- * more than one `layout_*.csv`. It matches on BASE NAMES and ignores directory
- * prefixes, so a second copy under any folder is a duplicate to the loader even
- * though it reads as a different path to us.
+ * **The map is no longer in this list, and the guarantee it stood for did not
+ * go with it.** "The sheet never ships without its map" used to be held here, by
+ * requiring a third file; it is now held by `embeddedLayoutProblems`, which
+ * asserts the handwritten spec actually carries the map's text and that the text
+ * is byte-identical to the instructor's copy. The check moved to where the map
+ * now travels.
  *
- * **This is redundant with `STUDENT_ZIP_CONTENTS` today, and deliberately kept
- * separate.** That check enforces what we meant to ship and refuses any extra
- * file, so it happens to catch every duplicate as well — which is exactly why
- * this one cannot be reached through `buildStudentEntries` and cannot be
- * mutation-tested through it. It is a *different contract*, owned by another
- * repository and able to change without us: if our exact-contents rule is ever
- * relaxed, this is what still holds the loader's requirements. Extracted so it
- * is directly testable rather than dead code that merely looks like a guard.
+ * ITEM 1, determined 2026-09-06: a student needs the upload file more than the
+ * PDF on an electronic assignment — the spec carries every problem and sub-part
+ * description and the Submission app renders them — but both modes ship both,
+ * because on a handwritten assignment the PDF *is* the answer surface.
  */
-export const loaderContractProblems = (names: string[]): string[] => {
-  const baseOf = (n: string) => n.slice(Math.max(n.lastIndexOf('/'), n.lastIndexOf('\\')) + 1);
-  const countBase = (pred: (b: string) => boolean) => names.filter(n => pred(baseOf(n))).length;
-  const problems: string[] = [];
-
-  const specCount = countBase(b => b === 'assignment_spec.json');
-  if (specCount !== 1) {
-    problems.push(
-      `the Student Submission app needs exactly one assignment_spec.json; this archive has ${specCount}`);
-  }
-  const mapCount = countBase(b => /^layout_.*\.csv$/i.test(b));
-  if (mapCount > 1) {
-    problems.push(
-      `the Student Submission app refuses a bundle with more than one layout_*.csv; this archive has ${mapCount}`);
-  }
-  return problems;
+export const studentFileContract = (assignment: Assignment) => {
+  const { studentPdf, studentUpload } = exportFilenames(assignment);
+  return [
+    { label: `the sheet to print (${studentPdf})`, match: (n: string) => n === studentPdf },
+    { label: `the file to upload (${studentUpload})`, match: (n: string) => n === studentUpload },
+  ];
 };
 
 /**
@@ -1485,7 +1549,7 @@ export const buildStudentEntries = (
     // not there. Nothing produces one today; this is what stops the first one
     // being noticed by a student.
     if (base.includes('/') || base.includes('\\')) {
-      problems.push(`"${name}" is nested inside ${STUDENT_DIR} — the student ZIP is flat`);
+      problems.push(`"${name}" is nested inside ${STUDENT_DIR} — the student files are flat`);
       continue;
     }
     out[base] = content;
@@ -1496,32 +1560,29 @@ export const buildStudentEntries = (
   for (const name of Object.keys(out)) {
     if (name.startsWith(INSTRUCTOR_DIR)) problems.push(`"${name}" is an instructor file`);
     if (name === DISTRIBUTION_NOTICE_NAME) {
-      problems.push(`the instructor-only notice "${name}" reached the student ZIP`);
+      problems.push(`the instructor-only notice "${name}" reached the student files`);
     }
   }
   const fromStudentDir = Object.keys(entries).filter(n => n.startsWith(STUDENT_DIR)).length;
   if (Object.keys(out).length !== fromStudentDir) {
-    problems.push(`${fromStudentDir} files are in ${STUDENT_DIR} but ${Object.keys(out).length} reached the ZIP`);
+    problems.push(`${fromStudentDir} files are in ${STUDENT_DIR} but ${Object.keys(out).length} reached the archive root`);
   }
 
-  // The contents must be exactly what the mode calls for — no more, and no
-  // fewer. "No more" is the disclosure guard; "no fewer" catches the sheet
-  // shipped without the map it must travel with, which fails at grading time
-  // rather than at download time.
-  const expected = STUDENT_ZIP_CONTENTS[handwritten ? 'handwritten' : 'electronic'];
+  // The contents must be exactly the two files — no more, and no fewer. "No
+  // more" is the disclosure guard; "no fewer" catches an assignment shipped
+  // without the sheet, or without the file that loads it, which fails when a
+  // student sits down to work rather than at download time.
   const remaining = new Set(Object.keys(out));
-  for (const want of expected) {
+  for (const want of studentFileContract(assignment)) {
     const hit = [...remaining].find(n => want.match(n));
     if (hit) remaining.delete(hit);
-    else problems.push(`the student ZIP is missing ${want.label}`);
+    else problems.push(`the student files are missing ${want.label}`);
   }
   for (const extra of remaining) problems.push(`"${extra}" is not a file students may receive`);
 
-  problems.push(...loaderContractProblems(Object.keys(out)));
-
   if (problems.length) {
     throw new Error(
-      'Export stopped: the student ZIP would not have been safe to post.\n' +
+      'Export stopped: the student files would not have been safe to post.\n' +
       problems.map(p => `  • ${p}`).join('\n')
     );
   }
@@ -1534,27 +1595,36 @@ export const buildStudentEntries = (
 // publishing the answer key.**
 //
 //     {stem}_INSTRUCTOR_ONLY.zip    the one download; contains the grading rubric
-//       └── {stem}_FOR_STUDENTS.zip   the one file to post, inside it
+//       ├── {stem}.pdf                give to students. They print it.
+//       ├── {stem}_UPLOAD.json        give to students. They upload it.
+//       └── instructor/               everything else
 //
-// REVERSED 2026-09-06. Until today these were separate downloads, one per
-// button. They are now one download with the student archive inside it, so the
-// two names no longer land side by side in a Downloads folder and the choice
-// that could publish the answer key is not offered at all: the instructor opens
-// one archive and posts the file whose name says FOR_STUDENTS. The names still
-// have to survive being read together, because they are now read together
-// *inside* the archive.
+// REVERSED 2026-09-06. Until that day these were separate downloads, one per
+// button. They became one download; the student package inside it was itself a
+// zip; and it is now two loose files at that archive's root. The choice that
+// could publish the answer key is not offered at all: the instructor opens one
+// archive and posts the two files that are not in `instructor/`.
 //
-// **`Export` is the word that failed**: it named the operation and said nothing
-// about who the file was for, so the reader had to already know. Sharing the
-// assignment stem means the three still sort next to each other — unavoidable,
-// and accepted — so the distinction has to survive being read side by side,
-// which is what `FOR_STUDENTS` against `INSTRUCTOR_ONLY` does and what `Export`
-// against `student` did not.
+// **`Export` was the word that failed** on the archive: it named the operation
+// and said nothing about who the file was for, so the reader had to already
+// know. `INSTRUCTOR_ONLY` says it.
+//
+// **The two student files deliberately do NOT say `FOR_STUDENTS`.** That suffix
+// existed to tell an *instructor* which file to post, and it is the notice's
+// first line that does that now. These two names are read by a student, to whom
+// "for students" says nothing they do not already know; what a student needs
+// from a filename is which of the two to act on and how. So exactly one of them
+// carries an instruction, `_UPLOAD`, and it is the one whose misuse is the
+// failure: a `.pdf` has one obvious use and a `.json` has none.
 //
 // This RENAMES the existing export download: what used to arrive as
 // `{stem}_Export.zip` is now `{stem}_INSTRUCTOR_ONLY.zip`. Folders unzipped from
 // older downloads keep their old name. Recorded in ASSIGNMENT_MD_SPEC.md §13.
-const STUDENT_SUFFIX = 'FOR_STUDENTS';
+//
+// **`_UPLOAD` IS PROVISIONAL AND AWAITS ANDRE'S APPROVAL** (work order
+// `WORKORDER_BOTH_ONE_UPLOAD_FILE_2026-09-06.md` B2). Both names are decided
+// here and nowhere else, so a change is a change to this function.
+const UPLOAD_SUFFIX = 'UPLOAD';
 const INSTRUCTOR_SUFFIX = 'INSTRUCTOR_ONLY';
 
 const stemOf = (assignment: Assignment) =>
@@ -1564,9 +1634,10 @@ export const exportFilenames = (assignment: Assignment) => {
   const stem = stemOf(assignment);
   return {
     instructorZip: `${stem}_${INSTRUCTOR_SUFFIX}.zip`,
-    // No longer a download of its own — this is the name of the single entry
-    // inside the instructor archive that the instructor posts, untouched.
-    studentZip: `${stem}_${STUDENT_SUFFIX}.zip`,
+    // The two loose student files at the instructor archive's root. Neither is a
+    // download of its own; the instructor posts them from inside the archive.
+    studentPdf: `${stem}.pdf`,
+    studentUpload: `${stem}_${UPLOAD_SUFFIX}.json`,
   };
 };
 
@@ -1608,56 +1679,119 @@ const addZipEntry = async (zip: JSZip, name: string, content: Blob | string): Pr
 };
 
 /**
- * THE OUTER ARCHIVE, as path → content, with the student package inside it.
+ * THE TWO COPIES OF THE MAP MUST AGREE, and it is asserted over what will be
+ * written rather than over what was intended.
+ *
+ * The spec is decoded here exactly as a student's browser decodes it, and the
+ * embedded text compared with `instructor/layout_*.csv` **character for
+ * character**. That is the check the whole design rests on: the hash is computed
+ * over parsed rows, so identical text gives an identical `layout_id` by
+ * construction — and a difference of one character is the one way that stops
+ * being true. `95438EDF` is printed into the QR on paper that already exists.
+ *
+ * Also enforced here: both fields or neither (a spec naming a map it does not
+ * carry is a shape nothing has been written for), a handwritten spec carries
+ * one, and an electronic spec does not — the electronic path generates no map,
+ * so a field claiming otherwise would be a lie about geometry that does not
+ * exist. Returns every problem, so an export that has two is not fixed twice.
+ */
+export const embeddedLayoutProblems = async (
+  entries: Record<string, Blob | string>,
+  assignment: Assignment
+): Promise<string[]> => {
+  const problems: string[] = [];
+  const { studentUpload } = exportFilenames(assignment);
+  const specEntry = entries[`${STUDENT_DIR}${studentUpload}`];
+  if (typeof specEntry !== 'string') {
+    return [`there is no ${studentUpload} to check the embedded layout map in`];
+  }
+
+  const spec = await decryptJson(specEntry) as Record<string, unknown>;
+  const hasName = 'layoutCsvName' in spec, hasCsv = 'layoutCsv' in spec;
+  if (hasName !== hasCsv) {
+    problems.push(
+      `${studentUpload} carries ${hasName ? 'layoutCsvName without layoutCsv' : 'layoutCsv without layoutCsvName'}` +
+      ' — a spec carries the map\'s name and its text, or neither');
+  }
+
+  const csvPath = Object.keys(entries).find(n => /^instructor\/layout_.*\.csv$/.test(n));
+  const csvName = csvPath ? csvPath.slice(INSTRUCTOR_DIR.length) : null;
+
+  if (assignment.inputMode === 'handwritten') {
+    if (!csvPath) {
+      problems.push(`the export has no ${INSTRUCTOR_DIR}layout_*.csv to compare the embedded map against`);
+    }
+    if (!hasCsv) {
+      problems.push(
+        `${studentUpload} carries no layout map, so a handwritten student would have nothing to crop by`);
+    }
+    if (csvPath && hasCsv) {
+      if (spec.layoutCsv !== entries[csvPath]) {
+        problems.push(
+          `the map embedded in ${studentUpload} is not byte-identical to ${csvPath} — ` +
+          'the two copies disagree, so the embedded one may not hash to the layout_id printed on the sheet');
+      }
+      if (spec.layoutCsvName !== csvName) {
+        problems.push(
+          `${studentUpload} names its map "${String(spec.layoutCsvName)}" but the export writes "${csvName}"`);
+      }
+    }
+  } else if (hasCsv || hasName) {
+    problems.push(
+      `${studentUpload} carries a layout map, but an electronic assignment generates none`);
+  }
+  return problems;
+};
+
+/**
+ * THE OUTER ARCHIVE, as path → content, with the two student files at its root.
  *
  * Split out from the download for the same reason `buildExportEntries` is: the
  * archive an instructor receives can then be asserted without a browser, over
  * the bytes rather than over the intention.
  *
- * **`student/` does not appear here.** Its three files exist in exactly one
- * place — inside `{stem}_FOR_STUDENTS.zip` — so the outer archive cannot come
- * to hold a second, drifting copy of the spec, and there is nothing loose for
- * an instructor to post by mistake.
- *
- * The inner archive is built by filtering the SAME `entries` map, through
- * `buildStudentEntries`, which refuses rather than emitting anything unsafe.
+ * The student files are selected by filtering the SAME `entries` map, through
+ * `buildStudentEntries`, which refuses rather than emitting anything unsafe, and
+ * they land at the root under the names they will ship under. Everything else is
+ * behind `instructor/`, so "post the two files that are not in a folder" is the
+ * whole of the instructor's remaining job.
  */
 export const buildOuterEntries = async (
   entries: Record<string, Blob | string>,
   assignment: Assignment
 ): Promise<{
   outer: Record<string, Blob | string | Uint8Array>;
-  studentZipName: string;
   studentNames: string[];
 }> => {
   // Asserted before a byte is written; throws if the package would be unsafe.
   const student = buildStudentEntries(entries, assignment);
 
-  const innerZip = new JSZip();
-  for (const [name, content] of Object.entries(student)) {
-    await addZipEntry(innerZip, name, content);
+  const mapProblems = await embeddedLayoutProblems(entries, assignment);
+  if (mapProblems.length) {
+    throw new Error(
+      'Export stopped: the layout map inside the student file does not match the one this export writes.\n' +
+      mapProblems.map(p => `  • ${p}`).join('\n'));
   }
-  const innerBytes = await innerZip.generateAsync({ type: 'uint8array' });
 
-  const studentZipName = exportFilenames(assignment).studentZip;
   const outer: Record<string, Blob | string | Uint8Array> = {
     [DISTRIBUTION_NOTICE_NAME]: entries[DISTRIBUTION_NOTICE_NAME],
-    [studentZipName]: innerBytes,
+    ...student,
   };
   for (const [name, content] of Object.entries(entries)) {
     if (name.startsWith(INSTRUCTOR_DIR)) outer[name] = content;
   }
 
-  // Assert the RESULT, not the loop above: no loose student file, and nothing
-  // outside the notice, the inner archive and instructor/.
+  // Assert the RESULT, not the loop above: nothing outside the notice, the two
+  // student files and instructor/.
+  const studentNames = Object.keys(student);
   const stray = Object.keys(outer).filter(
-    n => n !== DISTRIBUTION_NOTICE_NAME && n !== studentZipName && !n.startsWith(INSTRUCTOR_DIR));
+    n => n !== DISTRIBUTION_NOTICE_NAME && !studentNames.includes(n) && !n.startsWith(INSTRUCTOR_DIR));
   if (stray.length) {
     throw new Error(
       'Export stopped: the instructor archive holds files that belong nowhere in it.\n' +
       stray.map(n => `  • "${n}"`).join('\n'));
   }
-  return { outer, studentZipName, studentNames: Object.keys(student) };
+  return { outer, studentNames };
 };
 
 export const exportService = {
@@ -1666,45 +1800,35 @@ export const exportService = {
     // before the ZIP is built, so declining writes nothing.
     assignment = normalizePointsConfirmed(assignment);
     const entries = await buildExportEntries(assignment);
-    // Built and asserted even though it is not written here, so the instructor
-    // archive and the student archive can never be produced from an entry map
-    // that only one of them would accept. If the student ZIP would be unsafe,
-    // that is a fact about this assignment and the whole export stops.
-    const { outer, studentZipName, studentNames } = await buildOuterEntries(entries, assignment);
+    // Asserted before a byte is written: if the student files would be unsafe to
+    // post, or the embedded map and the instructor's copy disagree, that is a
+    // fact about this assignment and the whole export stops.
+    const { outer, studentNames } = await buildOuterEntries(entries, assignment);
 
     const zip = new JSZip();
     for (const [name, content] of Object.entries(outer)) {
-      if (name === studentZipName) {
-        // STORED, not deflated. It is already a compressed archive: deflating
-        // it again costs time on every export and saves nothing. This is a
-        // deliberate exception to the archive default set below.
-        zip.file(name, content as Uint8Array, { compression: 'STORE' });
-      } else {
-        await addZipEntry(zip, name, content as Blob | string);
-      }
+      await addZipEntry(zip, name, content as Blob | string);
     }
     const filename = exportFilenames(assignment).instructorZip;
     // DEFLATE for the archive as a whole. JSZip's default is STORE, so until
     // 2026-09-06 this export was written uncompressed — and the bulk of it is
     // the grader document, the rubric, the backup and the `.md`, which are all
-    // text and compress by roughly four to one. It also makes the STORE above
-    // load-bearing rather than a restatement of the default: with the archive
-    // deflating, removing it really would recompress the inner zip.
+    // text and compress by roughly four to one.
     const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
     saveOne(blob, filename);
     // The bytes are returned, not just the intent, so a test can open the
     // artifact this function exists to produce rather than assert that it meant
     // to produce one.
-    return { filename, studentZipName, studentNames, blob };
+    return { filename, studentNames, blob };
   },
 
   // REMOVED 2026-09-06: `downloadStudentZip` and `downloadStudentPdf`.
   //
   // They were separate downloads behind separate buttons, which is how the
   // export came to cost three deliberate gestures. Both artifacts still exist
-  // and are still built from the same entry map — the student archive is now an
-  // entry inside the instructor archive, and the PDF is inside that. Nothing is
-  // lost; what is gone is the opportunity to download the wrong one.
+  // and are still built from the same entry map — the two student files are now
+  // loose at the root of the instructor archive. Nothing is lost; what is gone
+  // is the opportunity to download the wrong one.
 
   downloadMd: (assignment: Assignment) => {
     // `assignmentToMd` normalises internally, and the .md carries the scaled
