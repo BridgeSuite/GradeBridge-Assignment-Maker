@@ -8,9 +8,9 @@ import { exportService, isRescaleDeclined } from '../services/exportService';
 import { Layout, Card, Button } from '../components/Common';
 import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode, Users } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
-import { parseMdToAssignment } from '../services/mdParserService';
+import { parseMdToAssignment, courseKeyWarning } from '../services/mdParserService';
 import { degradeRetiredTypes } from '../services/retiredTypes';
-import { isEncoded, decryptJson } from '../services/cryptoService';
+import { isEncoded, decryptJson, validateCoursePublicKey } from '../services/cryptoService';
 
 const Dashboard: React.FC = () => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -155,13 +155,34 @@ const Dashboard: React.FC = () => {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const content = e.target?.result as string;
         // Retired type tags degrade to Text rather than failing the import; the
         // warning names the sub-part so the instructor can re-pick its type.
         const warnings: string[] = [];
         const assignment = parseMdToAssignment(content, warnings);
+
+        // THE FULL KEY CHECK, WHICH THE PARSER CANNOT DO.
+        //
+        // `parseMdToAssignment` is synchronous and screens the ```pem block
+        // structurally (`looksLikeCoursePublicKey`). `validateCoursePublicKey`
+        // round-trips through WebCrypto and is therefore async, so it runs
+        // here, on the same existing check the export and the editor already
+        // use — a key that is armoured correctly but is not an importable RSA
+        // key is caught here rather than at export time.
+        //
+        // It drops the key and says so. It never refuses the file: the editor
+        // is where a bad key gets replaced.
+        if (assignment.coursePublicKey) {
+          const check = await validateCoursePublicKey(assignment.coursePublicKey);
+          if (!check.ok) {
+            delete assignment.coursePublicKey;
+            warnings.push(courseKeyWarning(check.error || 'the browser could not import it.'));
+          } else if (check.warning) {
+            warnings.push(check.warning);
+          }
+        }
 
         // Check for existing assignment with same courseCode + title
         const existing = storageService.getAll().find(
@@ -175,9 +196,12 @@ const Dashboard: React.FC = () => {
           if (shouldOverwrite) {
             assignment.id = existing.id;
             assignment.createdAt = existing.createdAt;
-            // The .md format carries no course public key, so an overwrite would
-            // silently drop it and quietly downgrade students back to gb1.
-            if (existing.coursePublicKey) {
+            // The .md now carries the course public key (2026-09-05), so the
+            // file wins where it has one. This fallback stays for the two cases
+            // it still covers: a .md written before the block existed, and one
+            // whose block was rejected above — in both, an overwrite would
+            // otherwise drop the key and quietly downgrade students to gb1.
+            if (!assignment.coursePublicKey && existing.coursePublicKey) {
               assignment.coursePublicKey = existing.coursePublicKey;
             }
           }

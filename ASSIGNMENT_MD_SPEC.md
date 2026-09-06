@@ -37,6 +37,7 @@ Sketch the transverse E-field and justify the maximum.
 | `**Template ID:** {ID}` | no | Handwritten only. Goes in the printed QR as the layout key (`[A-Z0-9]{1,12}`, unique across the course). Emitted only when the author pinned one; absent means it is derived from the course code and title. |
 | `**AI Feedback:** on` | no | Whether students may request AI feedback on any problem in this assignment. `on` or `off`; absent means **off**. Emitted by Export only when on, so older files stay byte-identical. |
 | `**Submit at:** {address}` | no | Where students hand the work in. Printed on page 1 of the handwritten sheet, under **When you have finished writing** (§10). Single line; whitespace is collapsed. **Absent means that whole section is not printed** — not a placeholder and not a gapped sentence. Emitted by Export only when set, so older files stay byte-identical. |
+| `` ```pem `` fenced block | no | The **course public key** (SPKI PEM), the field that turns gb2 encryption on. A fenced block rather than a row, because a 4096-bit key is fourteen lines. Read from the metadata region only. Emitted by Export only when set, so older files stay byte-identical. See below. |
 | `**Preamble:** {text}` | no | Instructions shown to the student. Single line. |
 | `**Due:** {anything}` | no | **Ignored on import** — due dates are managed in Canvas. Safe to include or omit. |
 
@@ -78,6 +79,50 @@ this assignment; `off` or an absent line disables it. It gates the student-facin
 grading, which is governed by the sub-part type tags. The feedback itself, the per-problem one-time
 election, and the tally are handled downstream in Gradescope, not by the Assignment Maker or the
 Student app; this line only records the instructor's choice and carries it into the exported spec.
+
+### The course public key
+
+```pem
+-----BEGIN PUBLIC KEY-----
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA...
+-----END PUBLIC KEY-----
+```
+
+The block sits in the metadata region, above the first `## Problem`. Its contents are the
+armoured SPKI PEM exactly as it would be pasted anywhere else — nothing is re-encoded and
+nothing is reconstructed on import.
+
+**Why a fenced block and not a metadata row.** Every other row in the table above is
+single-line by construction, and a 4096-bit SPKI PEM is fourteen lines. The alternative
+considered was a single line carrying the base64 body alone, with the armour rebuilt on import;
+it was rejected because it invents a second representation of a key that is armoured
+everywhere else it appears — the editor's paste box, `assignment_spec.json`, the `.pem` file the
+institution issues, the autograder — and a reader meeting that line could not tell what it was.
+
+**It is read from the metadata region only.** A `` ```pem `` block below the first `## Problem`
+is prose, not the course key, so an assignment that quotes a public key in a question is not
+misread as configuring one.
+
+**Emitted only when set.** A file with no key has no block, which is what every file written
+before 2026-09-05 looks like, and what an assignment using the standard (gb1) encoding means.
+
+**A malformed block rejects the key, never the file.** The assignment imports without a key —
+so exports fall back to gb1 — and the importer says so. Refusing the whole file would lock the
+author out of the one screen where a bad key can be replaced. The check is
+`looksLikeCoursePublicKey` in the parser (structural, synchronous) and `validateCoursePublicKey`
+in the app (a real WebCrypto import); both are the checks the export and the editor already use.
+
+**The key is not a secret and this block does not make it one.** It is the *public* half. It
+already ships to every student inside `assignment_spec.json` (§13's whitelist includes
+`coursePublicKey`), because the student's browser is what encrypts with it. What must never
+appear in a `.md`, or anywhere else that travels, is the private half — the institution holds
+that and this app never touches it.
+
+**Why it is in the `.md` at all.** The `.md` is meant to be the source: the instructor authors
+there and the app imports it. Until 2026-09-05 the format could not express `coursePublicKey`,
+so `Export .md` → `Import Markdown` dropped it in silence, the next export fell back to the
+unhardened gb1 encoding, and nothing reported it. Anything the app holds that the `.md` cannot
+express is a place where the source of truth quietly moves into browser storage.
 
 ---
 
@@ -931,7 +976,7 @@ complete:
 | Route | Restores | Loses |
 |---|---|---|
 | `{stem}_authoring_backup.json` → Import JSON | **everything** | — |
-| `{stem}.md` → Import Markdown | prompts byte-for-byte, `answerLines`, `handwrittenGradingMode`, `inputMode`, `pageFormatId`, `aiFeedback`, and **`targetPoints`, reconstructed from the file's own total** (2026-09-01) | `coursePublicKey`, `config` |
+| `{stem}.md` → Import Markdown | prompts byte-for-byte, `answerLines`, `handwrittenGradingMode`, `inputMode`, `pageFormatId`, `aiFeedback`, **`targetPoints`, reconstructed from the file's own total** (2026-09-01), and **`coursePublicKey`** (2026-09-05) | `config` |
 | `assignment_spec.json` → Import JSON | what a student needs | `aiGradingPrompt`, `graderNote`, `answerLines`, `handwrittenGradingMode`, `targetPoints` |
 
 Two of those losses are worse than they look:

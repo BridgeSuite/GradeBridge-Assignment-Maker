@@ -443,7 +443,7 @@ Font Licences, which the build emits alongside them.
 
 - **Export your JSON regularly** — data is lost if browser cache is cleared
 - **The export ZIP is instructor-only and MUST NOT be given to students.** Four files in its `instructor/` folder contain answers: `{stem}_grader_document.html`, `{stem}_grading_rubric.json`, `{stem}_authoring_backup.json` and `{stem}.md`. Students receive only the contents of `student/`. The ZIP carries a generated `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` at its root naming every file.
-- **`{stem}_authoring_backup.json` (in `instructor/`) is the file that restores an assignment completely** — the whole authoring object, unencrypted, including the grading prompts, grader notes, answer-space settings, the point target and the course public key. It is what Import JSON should be given. `assignment_spec.json` restores only what a student needs, and Import Markdown misses `targetPoints`, `coursePublicKey` and `config`; both now say so on import rather than losing your work silently.
+- **`{stem}_authoring_backup.json` (in `instructor/`) is the file that restores an assignment completely** — the whole authoring object, unencrypted, including the grading prompts, grader notes, answer-space settings, the point target and the course public key. It is what Import JSON should be given. `assignment_spec.json` restores only what a student needs, and Import Markdown misses `config`; both now say so on import rather than losing your work silently. (Import Markdown used to miss `targetPoints` too — fixed 2026-09-01, it now reads the file's own total — and `coursePublicKey`, fixed 2026-09-05, which the `.md` now carries as a fenced `` ```pem `` block.)
 - **`aiGradingPrompt` and `graderNote` are NOT in `assignment_spec.json`.** The student's file is built from an explicit whitelist of the fields the Submission app reads, so no grading prompt, grader note, answer key or reference solution travels to a student's browser. Until 2026-08-31 the spec was the whole assignment object and did carry every prompt — if you hold an export made before then, treat its rubrics as disclosed. Nothing had been distributed.
 - **To reload an assignment as a template, use `Export .md` → `Import Markdown`**, which carries the prompts and grader notes in full. Importing an exported `assignment_spec.json` restores the questions but not the grading material, because that material is no longer in the file.
 - Your rubrics reach the autograder by their proper route, `{Course}_{Title}_grading_rubric.json`, which stays with you
@@ -455,7 +455,10 @@ Font Licences, which the build emits alongside them.
 Optional, per assignment, in the editor under the preamble. Paste the **public**
 key issued for your course — SPKI PEM, starting with
 `-----BEGIN PUBLIC KEY-----` — and it is carried in the exported
-`assignment_spec.json` as `coursePublicKey`.
+`assignment_spec.json` as `coursePublicKey`, and in the exported `.md` as a
+fenced `` ```pem `` block at the top of the file, so `Export .md` →
+`Import Markdown` gives the key back. Until 2026-09-05 that round trip dropped
+it in silence and the next export quietly fell back to `gb1`.
 
 Setting a key selects the hardened `gb2` envelope for submissions; leaving it
 empty keeps the existing `gb1` default. Under `gb2` a per-submission AES key is

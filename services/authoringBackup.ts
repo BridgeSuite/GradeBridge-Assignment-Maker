@@ -21,6 +21,12 @@
 //     `targetPoints` is the nastiest of the three because the damage is delayed
 //     one cycle: the .md carries already-scaled values, so the reimport looks
 //     right and the NEXT export normalises to 100 and halves every point.
+//     Two of those three have since been fixed at the source: `targetPoints` on
+//     2026-09-01 (the import reads the file's own total) and `coursePublicKey`
+//     on 2026-09-05 (the .md carries a fenced ```pem block). `config` remains,
+//     and so does the reason this file exists — a route that has to be
+//     re-verified every time a field is added to `Assignment` is a guarantee
+//     that decays quietly.
 //
 //   In every case the loss was silent.
 //
