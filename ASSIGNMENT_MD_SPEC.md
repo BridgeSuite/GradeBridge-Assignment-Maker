@@ -905,8 +905,9 @@ the answer key. It is laid out so that saying so is unnecessary:
 
 ```
 00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt   generated at export time, names every file
-{stem}.pdf                                  GIVE TO STUDENTS — they print it and write on it
-{stem}_OPEN_IN_APP.json                     GIVE TO STUDENTS — the one file they load into the app
+{stem}_FOR_STUDENTS.zip                     ATTACH THIS. Stored, not deflated.
+  {stem}.pdf                                  they print it and write on it
+  {stem}_OPEN_IN_APP.json                     they load it into the app
 instructor/
   {stem}_authoring_backup.json              THE BACKUP — restores everything
   {stem}.md                                 the authored source
@@ -918,28 +919,32 @@ instructor/
 ```
 
 The shape exists because prose alone was not enough: having removed the answer key from the student
-spec, the largest remaining disclosure path is an instructor handing out the whole ZIP, and "post the
-two files that are not in a folder" is a thing a person can actually do correctly. The notice is
+spec, the largest remaining disclosure path is an instructor handing out the whole ZIP, and "attach the
+one file that is not in a folder" is a thing a person can actually do correctly. The notice is
 **generated from the entry list**, never hand-maintained — a notice that drifts out of step with the
 folder is worse than none, because it will be believed. A test asserts every file it names is present,
 that it names all four answer-bearing files, and that it never tells anyone to hand out one of them.
 
 Nothing in the suite unzips this archive by a hand-written path, so the shape breaks no consumer.
 
-### One download, two loose student files, and the map inside the upload file
+### One download, ONE file to attach, and the map inside the spec
 
-**Changed 2026-09-06.** The student package used to be `{stem}_FOR_STUDENTS.zip`, an archive nested
-inside this one. It is gone, and so is `student/`.
-
-A student receiving a zip had to **open it to reach the sheet they print**, and that single act put
-two things in front of them that should never have been there: the layout map — plain text, editable,
-and the file that decides where their answers are cut from — and a second candidate to upload. Two
-loose files replace it:
+**The student package is one file, and that is what an instructor attaches.** `student/` is gone from
+the written archive; its two files live inside `{stem}_FOR_STUDENTS.zip` and nowhere else, so no second
+copy can drift and there is nothing loose to post by mistake — or, worse, to attach only half of.
 
 | File | What a student does with it |
 |---|---|
 | `{stem}.pdf` | Print it. On a handwritten assignment this *is* the answer surface. |
 | `{stem}_OPEN_IN_APP.json` | Load it into the Submission app. One file, nothing to open, and the layout map is inside it. |
+
+**Both moves happened on 2026-09-06 and the second corrected the first.** The two student files were
+briefly loose at the archive root. That was wrong for a reason the first change did not weigh: an
+instructor building a Canvas assignment attaches **one** file, so two loose files means selecting and
+attaching both — **assembly, which is the thing this whole line of work exists to remove.** The reason
+they were moved out has since gone: the package then held three files, one of them an editable CSV, so
+a student opening it faced a confusing choice. The map now travels inside the spec, so the package
+holds exactly two files and both names say what to do with them.
 
 **The map travels inside the spec, verbatim.** The spec payload gained two optional fields,
 `layoutCsvName` and `layoutCsv` — both present or both absent, never one — and `layoutCsv` holds **the
@@ -959,6 +964,12 @@ the copy written to `instructor/`. A difference of one character **stops the exp
 carrying one of the two fields, a handwritten spec carrying neither, and an electronic spec carrying
 either.
 
+**And again after packaging**, out of the bytes of the zip that will ship: two entries at its root, no
+prefix, nothing answer-bearing, and the map inside the packaged spec still byte-identical to the
+instructor's copy. That check is not a restatement of the one above — a prefix added while writing, an
+entry written twice, or a spec re-encoded on the way in are all invisible to a check that stops at the
+entry map.
+
 The instructor keeps a copy of the map because setting up the Gradescope outline is an instructor
 task. It is under `instructor/` and **must not be posted**: the notice says so by name, because an
 instructor who remembers the old rule that "the map must travel with the PDF" would otherwise post it,
@@ -969,6 +980,7 @@ and nothing downstream would object.
 | Name | For | Why it reads that way |
 |---|---|---|
 | `{stem}_INSTRUCTOR_ONLY.zip` | the instructor | the one download; **contains the grading rubric** |
+| `{stem}_FOR_STUDENTS.zip` | the instructor | the one file to attach to Canvas, ready as it comes |
 | `{stem}.pdf` | the student | a PDF has one obvious use, so it needs no instruction |
 | `{stem}_OPEN_IN_APP.json` | the student | a `.json` is inert to a student, so it carries the instruction — and it names the destination that is **not** the grading site |
 
@@ -988,10 +1000,10 @@ than one that does not.
 `Export` is the word that failed — it named the operation and said nothing about who the file was for,
 so the reader had to already know.
 
-**The two student files deliberately do not say `FOR_STUDENTS`.** That suffix existed to tell an
-*instructor* which file to post, and the notice's first line does that now. These two names are read
-by a student, to whom "for students" says nothing they do not already know. Exactly one of them
-carries an instruction, and it is the one whose misuse is the failure.
+**The two files inside the package deliberately do not say `FOR_STUDENTS`.** That suffix tells an
+*instructor* which file to attach, and it belongs on the package, not on its contents. The two names
+inside are read by a student, to whom "for students" says nothing they do not already know. Exactly
+one of them carries an instruction, and it is the one whose misuse is the failure.
 
 The student files are selected by **filtering the same entry map the archive is built from**, never
 from a second list of filenames — two lists is how the two would come to disagree about what is
@@ -999,6 +1011,10 @@ student-facing, and the disagreement would be silent. Before a byte is written i
 entry came from `student/`, none is nested, no instructor file or notice is among them, and the
 contents are *exactly* the two files. Anything else **stops the export** rather than producing an
 archive that goes to a whole class at once and cannot be recalled.
+
+The package is **stored, not deflated** — it is already a compressed archive, so deflating it again
+costs time on every export and saves nothing. The archive around it *is* deflated, which is what makes
+that exception load-bearing rather than a restatement of JSZip's default.
 
 **One download per user gesture, and that is not a style choice.** Measured in Chrome 152 on
 2026-09-06: three programmatic downloads from a single user gesture delivered **one** file, with the

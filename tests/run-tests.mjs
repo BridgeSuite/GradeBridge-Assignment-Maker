@@ -1939,11 +1939,10 @@ ${r.problem_statement}`);
       const answerFiles = instructorFiles.filter(f => notice.includes(f));
       assert(answerFiles.length === 4,
         `expected 4 answer-bearing files named in the notice, found ${JSON.stringify(answerFiles)}`);
-      // The list of what the instructor posts must be exactly the student
-      // folder. Anchored on the row heading that introduces it (2026-09-06),
-      // since the notice names the two loose student files rather than one
-      // archive to post.
-      const give = notice.slice(notice.indexOf('Give students these '));
+      // The list of what the instructor hands over must be exactly the student
+      // folder. Anchored on the row heading that introduces it, which names the
+      // one package to attach rather than listing loose files to select.
+      const give = notice.slice(notice.indexOf(' holds these '));
       for (const f of names.filter(n => n.startsWith('student/')).map(n => n.slice('student/'.length))) {
         assert(give.includes(f), `the notice does not tell the instructor to hand out ${f}`);
       }
@@ -2726,24 +2725,29 @@ ${r.problem_statement}`);
 
   check('the names say who each file is for, read side by side', () => {
     const n = exportFilenames(hwAssignment());
-    // All three share the assignment stem and are read together *inside* one
+    // All four share the assignment stem and are read together *inside* one
     // archive, so the distinction has to survive being read together. `Export`
     // was the word that failed on the archive: it named the operation and said
     // nothing about the audience.
     assertEqual(n.instructorZip,  'EEC1_Lab_1_In-Lab_INSTRUCTOR_ONLY.zip', 'instructor ZIP name');
+    assertEqual(n.studentZip,     'EEC1_Lab_1_In-Lab_FOR_STUDENTS.zip',    'student package name');
     assertEqual(n.studentPdf,     'EEC1_Lab_1_In-Lab.pdf',                 'student sheet name');
     assertEqual(n.studentUpload,  'EEC1_Lab_1_In-Lab_OPEN_IN_APP.json',    'student upload name');
 
-    // The student ZIP is gone: the package is two loose files now. A name left
-    // behind for an artifact nobody builds is how a removed shape comes back.
-    assertEqual(n.studentZip, undefined, 'the student ZIP name outlived the archive');
+    // The standalone student PDF download is gone with its button. A name left
+    // behind for a download nobody makes is how a removed control comes back.
+    assertEqual(n.studentPdfDownload, undefined, 'a standalone student PDF download name reappeared');
 
     for (const name of Object.values(n)) {
       assert(!/_Export\./.test(name), `"${name}" still names the operation rather than the audience`);
     }
-    // The archive says INSTRUCTOR_ONLY; the two student files must not, since a
-    // student reads them and "for students" tells a student nothing.
+    // The two ARCHIVES say who they are for, because an instructor chooses
+    // between them. The two files INSIDE the package must not: a student reads
+    // those, and "for students" tells a student nothing they do not know.
     assert(n.instructorZip.includes('INSTRUCTOR_ONLY'), 'the instructor archive does not say who it is for');
+    assert(n.studentZip.includes('FOR_STUDENTS'), 'the student package does not say who it is for');
+    assert(!n.instructorZip.includes('FOR_STUDENTS'), 'the instructor archive reads as student-facing');
+    assert(!n.studentZip.includes('INSTRUCTOR_ONLY'), 'the student package reads as instructor-only');
     for (const name of [n.studentPdf, n.studentUpload]) {
       assert(!/INSTRUCTOR/i.test(name), `"${name}" reads as instructor material`);
       assert(!/FOR_STUDENTS/.test(name), `"${name}" tells a student it is for students`);
@@ -2767,80 +2771,114 @@ ${r.problem_statement}`);
     return { written, outer };
   };
 
-  check('one download: the archive is the notice, the two student files, and instructor/', async () => {
+  check('one download: the archive is the notice, ONE student package, and instructor/', async () => {
     const { written, outer } = await openWritten(hwAssignment());
     assertEqual(written.filename, 'EEC1_Lab_1_In-Lab_INSTRUCTOR_ONLY.zip', 'wrong download name');
+    assertEqual(written.studentZipName, hwNames.studentZip, 'wrong student package name');
 
     const names = Object.keys(outer.files).filter(n => !outer.files[n].dir);
     assert(names.includes(DISTRIBUTION_NOTICE_NAME), `no notice in: ${names.join(', ')}`);
-    assert(names.includes(hwNames.studentPdf), `no sheet at the root: ${names.join(', ')}`);
-    assert(names.includes(hwNames.studentUpload), `no upload file at the root: ${names.join(', ')}`);
-    assertEqual(written.studentNames.sort(), [hwNames.studentPdf, hwNames.studentUpload].sort(),
-      'the download reported different student files than it wrote');
+    assert(names.includes(hwNames.studentZip), `no student package in: ${names.join(', ')}`);
 
-    // No student/ folder and no student archive: the two files exist in exactly
-    // one place, so no second copy can drift and there is nothing to open.
+    // No student/ folder, and NO LOOSE STUDENT FILES. The two exist in exactly
+    // one place — inside the package — so no second copy can drift, and an
+    // instructor cannot attach half of what a student needs.
     assertEqual(names.filter(n => n.startsWith(STUDENT_DIR)), [],
       'the archive still carries a loose student/ folder');
-    assertEqual(names.filter(n => /_FOR_STUDENTS\.zip$/.test(n)), [],
-      'the student ZIP is back');
-    assertEqual(names.filter(n => /\.zip$/i.test(n)), [],
-      'the archive holds a nested zip — a student would have to open something');
+    assert(!names.includes(hwNames.studentPdf), 'the sheet is loose at the root as well as packaged');
+    assert(!names.includes(hwNames.studentUpload), 'the upload file is loose at the root as well as packaged');
     assert(names.some(n => n.startsWith(INSTRUCTOR_DIR)), 'no instructor/ folder');
 
     const stray = names.filter(n =>
-      n !== DISTRIBUTION_NOTICE_NAME && !written.studentNames.includes(n) && !n.startsWith(INSTRUCTOR_DIR));
+      n !== DISTRIBUTION_NOTICE_NAME && n !== hwNames.studentZip && !n.startsWith(INSTRUCTOR_DIR));
     assertEqual(stray, [], 'the archive holds something that belongs nowhere in it');
+
+    // Exactly one student package — two would reintroduce the choice this
+    // arrangement exists to remove.
+    assertEqual(names.filter(n => /_FOR_STUDENTS\.zip$/.test(n)).length, 1,
+      'there is not exactly one FOR_STUDENTS archive');
+  });
+
+  check('one download: the archive ROOT is exactly the notice and the one file to attach', async () => {
+    // What an instructor sees first, and what they attach from. Two entries: no
+    // selecting, no assembling.
+    const { outer } = await openWritten(hwAssignment());
+    const loose = Object.keys(outer.files).filter(n => !outer.files[n].dir && !n.includes('/'));
+    assertEqual(loose.sort(), [DISTRIBUTION_NOTICE_NAME, hwNames.studentZip].sort(),
+      'the archive root is not exactly the notice and the student package');
   });
 
   check('one download: nothing answer-bearing is loose at the root', async () => {
-    const { written, outer } = await openWritten(hwAssignment());
-    const names = Object.keys(outer.files).filter(n => !outer.files[n].dir);
-    const loose = names.filter(n => !n.includes('/'));
-    // Checked by shape rather than by exact name: the root is what an instructor
-    // sees first, and it is now what they post from.
+    const { outer } = await openWritten(hwAssignment());
+    const loose = Object.keys(outer.files).filter(n => !outer.files[n].dir && !n.includes('/'));
     for (const n of loose) {
       assert(!/_grading_rubric\.json$|_grader_document\.html$|_authoring_backup\.json$|\.md$/.test(n),
-        `"${n}" is answer-bearing and is loose beside the files the instructor posts`);
+        `"${n}" is answer-bearing and is loose beside the file the instructor attaches`);
     }
-    assertEqual(loose.sort(), [DISTRIBUTION_NOTICE_NAME, hwNames.studentPdf, hwNames.studentUpload].sort(),
-      'the archive root is not exactly the notice and the two student files');
+  });
+
+  check('one download: the student package is exactly two entries at its root', async () => {
+    const { written, outer } = await openWritten(hwAssignment());
+    const inner = await JSZipLib.loadAsync(await outer.file(written.studentZipName).async('uint8array'));
+    const names = Object.keys(inner.files).filter(n => !inner.files[n].dir).sort();
+
+    assertEqual(names, [hwNames.studentPdf, hwNames.studentUpload].sort(),
+      'the student package is not the two expected files');
+    for (const n of names) {
+      assert(!n.includes('/') && !n.includes('\\'), `"${n}" is not at the package's root`);
+      assert(!n.startsWith(INSTRUCTOR_DIR), `"${n}" is instructor material`);
+      assert(!/^layout_.*\.csv$/i.test(n), 'a layout map is still handed to students');
+    }
+    assert(!names.includes(DISTRIBUTION_NOTICE_NAME), 'the instructor-only notice reached the package');
+    for (const n of names) {
+      assert(!/_grading_rubric\.json$|_grader_document\.html$|_authoring_backup\.json$|\.md$/.test(n),
+        `"${n}" is answer-bearing and is inside the file the instructor attaches`);
+    }
   });
 
   check('one download: the layout map is under instructor/ and nowhere else', async () => {
-    const { outer } = await openWritten(hwAssignment());
+    const { written, outer } = await openWritten(hwAssignment());
     const names = Object.keys(outer.files).filter(n => !outer.files[n].dir);
     const maps = names.filter(n => /layout_.*\.csv$/i.test(n));
     assertEqual(maps.length, 1, `expected exactly one layout map, got ${JSON.stringify(maps)}`);
     assert(maps[0].startsWith(INSTRUCTOR_DIR), `the map is not instructor-side: ${maps[0]}`);
+    // And not inside the package either.
+    const inner = await JSZipLib.loadAsync(await outer.file(written.studentZipName).async('uint8array'));
+    assertEqual(Object.keys(inner.files).filter(n => /layout_.*\.csv$/i.test(n)), [],
+      'a layout map is inside the student package');
   });
 
-  check('one download: the map inside the upload file is the instructor copy, byte for byte', async () => {
-    // THE CHECK THE WHOLE DESIGN RESTS ON, over the WRITTEN archive rather than
-    // the entry map: the hash is computed over parsed rows, so identical text
-    // gives an identical layout_id by construction — and one differing character
-    // is the one way that stops being true. The hash is printed on paper.
-    const { outer } = await openWritten(hwAssignment());
+  check('one download: the map inside the PACKAGED spec is the instructor copy, byte for byte', async () => {
+    // THE CHECK THE WHOLE DESIGN RESTS ON, over the WRITTEN archive and through
+    // the packaging step: the hash is computed over parsed rows, so identical
+    // text gives an identical layout_id by construction — and one differing
+    // character is the one way that stops being true. The hash is printed on
+    // paper. Reading it back out of the packaged zip is what makes packaging
+    // itself covered, rather than only the entry map that fed it.
+    const { written, outer } = await openWritten(hwAssignment());
     const names = Object.keys(outer.files).filter(n => !outer.files[n].dir);
     const mapName = names.find(n => /layout_.*\.csv$/i.test(n));
     const csv = await outer.file(mapName).async('string');
-    const spec = await decryptJson(await outer.file(hwNames.studentUpload).async('string'));
 
-    assertEqual(spec.layoutCsv, csv, 'the embedded map is not the text written to instructor/');
-    assertEqual(spec.layoutCsvName, mapName.slice(INSTRUCTOR_DIR.length), 'the embedded map is named wrongly');
+    const inner = await JSZipLib.loadAsync(await outer.file(written.studentZipName).async('uint8array'));
+    const spec = await decryptJson(await inner.file(hwNames.studentUpload).async('string'));
+
+    assertEqual(spec.layoutCsv, csv, 'the packaged map is not the text written to instructor/');
+    assertEqual(spec.layoutCsvName, mapName.slice(INSTRUCTOR_DIR.length), 'the packaged map is named wrongly');
     // Verbatim: the CSV header is still the first line and nothing was reflowed.
     assert(spec.layoutCsv.startsWith('assignment_id,layout_id,region_id,part_id,page_k,'),
-      `the embedded map was reformatted: ${spec.layoutCsv.slice(0, 60)}`);
+      `the packaged map was reformatted: ${spec.layoutCsv.slice(0, 60)}`);
   });
 
-  check('one download: the embedded map hashes to the layout_id the QR carries', async () => {
+  check('one download: the PACKAGED map hashes to the layout_id the QR carries', async () => {
     // Parsed by header name, never by position, and hashed with the app's own
     // computeLayoutId — the same function the Submission app is a byte-identical
     // port of. This is the acceptance test that matters more than any other.
     const a = hwAssignment();
     const template = await genForHash.generateTemplate(a);
-    const { outer } = await openWritten(a);
-    const spec = await decryptJson(await outer.file(hwNames.studentUpload).async('string'));
+    const { written, outer } = await openWritten(a);
+    const inner = await JSZipLib.loadAsync(await outer.file(written.studentZipName).async('uint8array'));
+    const spec = await decryptJson(await inner.file(hwNames.studentUpload).async('string'));
 
     const lines = spec.layoutCsv.split(/\r?\n/).filter(l => l.trim().length > 0);
     const head = lines[0].split(',').map(c => c.trim());
@@ -2852,16 +2890,17 @@ ${r.problem_statement}`);
         x0: Number(col('x0')), y0: Number(col('y0')), x1: Number(col('x1')), y1: Number(col('y1')),
       };
     });
-    assert(rows.length > 0, 'the embedded map has no rows');
+    assert(rows.length > 0, 'the packaged map has no rows');
     assertEqual(await qrpForHash.computeLayoutId(rows), template.layoutId,
-      'the map embedded in the student file does not hash to the layout_id printed on the sheet');
+      'the map inside the packaged student file does not hash to the layout_id printed on the sheet');
   });
 
-  check('one download: the archive is deflated, so it is not shipped uncompressed', async () => {
+  check('one download: the package is STORED, and the rest of the archive is deflated', async () => {
     // Read the ZIP's own compression-method field rather than asking JSZip what
-    // it thinks. JSZip's default is STORE, so until 2026-09-06 this export was
-    // written uncompressed, and the bulk of it is text that compresses about
-    // four to one.
+    // it thinks. The first version of this check trusted `entry.options` and
+    // passed against a build with the STORE option deleted — it was asserting
+    // `undefined === undefined`. The format is unambiguous: local file header is
+    // PK\x03\x04, and bytes 8..9 are the method, 0 = stored, 8 = deflated.
     const written = await exportPdfSvc.exportService.downloadZIP(hwAssignment());
     const buf = Buffer.from(await written.blob.arrayBuffer());
 
@@ -2876,22 +2915,34 @@ ${r.problem_statement}`);
       i += 30 + nameLen + extraLen - 1;
     }
     assert(methods.size > 0, 'no local file headers found in the written archive');
-    const graderDoc = [...methods.keys()].find(n => n.endsWith('_grader_document.html'));
-    assertEqual(methods.get(graderDoc), 8, `${graderDoc} is not deflated`);
+    assert(methods.has(written.studentZipName),
+      `the student package is not an entry: ${[...methods.keys()].join(', ')}`);
+    assertEqual(methods.get(written.studentZipName), 0,
+      `the student package is compression method ${methods.get(written.studentZipName)}, not 0 (stored)`);
+
+    // The counterpart: the rest IS deflated, so this is a deliberate exception
+    // for the one already-compressed entry and not an archive that stopped
+    // compressing altogether.
+    const others = [...methods].filter(([n]) => n !== written.studentZipName);
+    assert(others.some(([, m]) => m === 8),
+      `nothing else in the archive is deflated: ${JSON.stringify(others)}`);
   });
 
-  check('one download: the notice names both files to post in its FIRST line', async () => {
+  check('one download: the notice names the ONE file to attach in its FIRST line', async () => {
     const { written, outer } = await openWritten(hwAssignment());
     const notice = await outer.file(DISTRIBUTION_NOTICE_NAME).async('string');
-    const head = notice.split('\n').slice(0, 3).join(' ');
-    for (const n of written.studentNames) {
-      assert(head.includes(n), `the opening does not name ${n}: "${head}"`);
-    }
-    assert(/^Post /.test(notice), `the first line does not say what to do: "${notice.split('\n')[0]}"`);
+    const first = notice.split('\n')[0];
+    assert(first.includes(written.studentZipName),
+      `the first line does not name the file to attach: "${first}"`);
+    assert(/^Attach /.test(first), `the first line does not say what to do: "${first}"`);
     assert(/Post nothing else/.test(notice), 'the notice does not say to post nothing else');
     // It must not tell anyone to hand out the archive it is inside.
-    assert(!new RegExp('Post ' + written.filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(notice),
-      'the notice tells the instructor to post the instructor archive');
+    assert(!new RegExp('Attach ' + written.filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(notice),
+      'the notice tells the instructor to attach the instructor archive');
+    // The two files inside are still enumerated, so a missing one is visible.
+    for (const n of written.studentNames) {
+      assert(notice.includes(n), `the notice does not list ${n}`);
+    }
   });
 
   check('one download: the notice says where the layout map went', async () => {
@@ -2907,16 +2958,19 @@ ${r.problem_statement}`);
     assert(/Do not\s+post it/.test(notice), 'the notice does not say to keep the instructor copy back');
   });
 
-  check('one download: the electronic archive is the same two loose files, and no map', async () => {
+  check('one download: the electronic archive is the same one package, and no map', async () => {
     const { written, outer } = await openWritten(elAssignment);
     const names = Object.keys(outer.files).filter(n => !outer.files[n].dir);
-    assertEqual(written.studentNames.sort(), [elNames.studentPdf, elNames.studentUpload].sort(),
-      'the electronic student files are wrong');
+    assertEqual(written.studentZipName, elNames.studentZip, 'wrong electronic package name');
     assertEqual(names.filter(n => n.startsWith(STUDENT_DIR)), [],
       'the electronic archive carries a loose student/ folder');
     assertEqual(names.filter(n => /layout_.*\.csv$/i.test(n)), [],
       'an electronic export produced a layout map');
-    const spec = await decryptJson(await outer.file(elNames.studentUpload).async('string'));
+
+    const inner = await JSZipLib.loadAsync(await outer.file(written.studentZipName).async('uint8array'));
+    assertEqual(Object.keys(inner.files).filter(n => !inner.files[n].dir).sort(),
+      [elNames.studentPdf, elNames.studentUpload].sort(), 'the electronic package is wrong');
+    const spec = await decryptJson(await inner.file(elNames.studentUpload).async('string'));
     assert(!('layoutCsv' in spec) && !('layoutCsvName' in spec),
       'an electronic spec claims a layout map that does not exist');
   });
@@ -3010,9 +3064,86 @@ ${r.problem_statement}`);
       'downloadStudentPdf outlived its button');
   });
 
-  check('one download: the sheet in the archive is the real PDF, not a stub', async () => {
-    const { outer } = await openWritten(hwAssignment());
-    const pdf = Buffer.from(await outer.file(hwNames.studentPdf).async('uint8array'));
+
+  // ---- THE POST-PACKAGING GUARD, tested directly -------------------------
+  //
+  // It cannot be reached through `buildOuterEntries`: `buildStudentEntries` and
+  // `embeddedLayoutProblems` refuse a bad entry map first, so every
+  // doctored-entries case above is caught before packaging runs. Reaching this
+  // one means handing it zip bytes. That is the whole reason it is exported and
+  // tested here rather than through the export — measured, not assumed, and the
+  // lesson `loaderContractProblems` taught by being dead code that looked like a
+  // guard.
+  //
+  // What it covers that nothing upstream can: packaging itself. A prefix added
+  // while writing, an entry written twice, an instructor file appended after the
+  // filter ran, or a spec re-encoded on the way in are all invisible to a check
+  // that stops at the entry map.
+  {
+    const { packagedStudentZipProblems } = exportPdfSvc;
+    const a = hwAssignment();
+    const student = buildStudentEntries(hwEntries, a);
+
+    const pack = async (doctor = x => x) => {
+      const z = new JSZipLib();
+      for (const [n, c] of Object.entries(await doctor({ ...student }))) {
+        z.file(n, c instanceof Blob ? new Uint8Array(await c.arrayBuffer()) : c);
+      }
+      return z.generateAsync({ type: 'uint8array' });
+    };
+
+    check('packaged package: a correct one is not reported — the guard is not a blanket no', async () => {
+      const { problems, names } = await packagedStudentZipProblems(await pack(), hwEntries, a);
+      assertEqual(problems, [], 'a correct package was reported as a problem');
+      // The names it read are what the caller reports, which is what makes this
+      // guard load-bearing rather than advisory.
+      assertEqual(names, [hwNames.studentPdf, hwNames.studentUpload].sort(),
+        'the guard did not report what it read');
+    });
+
+    const packagingNegatives = [
+      ['a directory prefix added while writing',
+        e => { const o = {}; for (const [n, c] of Object.entries(e)) o['student/' + n] = c; return o; },
+        /is not at the student ZIP's root|holds \[/],
+      ['an instructor file appended after the filter ran',
+        e => ({ ...e, 'EEC1_Lab_1_In-Lab_grading_rubric.json':
+                      hwEntries[Object.keys(hwEntries).find(n => n.endsWith('_grading_rubric.json'))] }),
+        /answer-bearing and is inside the file the instructor attaches|holds \[/],
+      ['the sheet dropped during packaging',
+        e => { const o = { ...e }; delete o[hwNames.studentPdf]; return o; },
+        /holds \[/],
+    ];
+    for (const [label, doctor, expected] of packagingNegatives) {
+      check(`packaged package refused: ${label}`, async () => {
+        const { problems } = await packagedStudentZipProblems(await pack(doctor), hwEntries, a);
+        assert(problems.length > 0, 'the bad package was accepted');
+        assert(problems.some(p => expected.test(p)),
+          `the failure does not name the specific problem: ${JSON.stringify(problems)}`);
+      });
+    }
+
+    // THE ONE THAT ONLY THIS CHECK CAN SEE. The entry map is correct and passes
+    // every upstream check; the spec is re-encoded with a changed map on the way
+    // into the zip. Nothing before packaging can catch that, and the consequence
+    // is a student file whose map no longer hashes to the layout_id printed on
+    // their paper.
+    check('packaged package refused: the spec re-encoded with a changed map during packaging', async () => {
+      const spec = await decryptJson(student[hwNames.studentUpload]);
+      const before = spec.layoutCsv;
+      spec.layoutCsv = before.replace('0.0572', '0.0573');
+      assert(spec.layoutCsv !== before, 'the fixture map has no coordinate to change');
+
+      const bytes = await pack(async e => ({ ...e, [hwNames.studentUpload]: await encryptJson(spec) }));
+      const { problems } = await packagedStudentZipProblems(bytes, hwEntries, a);
+      assert(problems.some(p => /did not survive packaging intact/.test(p)),
+        `a map changed during packaging was accepted: ${JSON.stringify(problems)}`);
+    });
+  }
+
+  check('one download: the sheet inside the package is the real PDF, not a stub', async () => {
+    const { written, outer } = await openWritten(hwAssignment());
+    const inner = await JSZipLib.loadAsync(await outer.file(written.studentZipName).async('uint8array'));
+    const pdf = Buffer.from(await inner.file(hwNames.studentPdf).async('uint8array'));
     assert(pdf.length > 1000, `the sheet is only ${pdf.length} B`);
     assertEqual(pdf.slice(0, 5).toString('latin1'), '%PDF-', 'the sheet is not a PDF');
   });
