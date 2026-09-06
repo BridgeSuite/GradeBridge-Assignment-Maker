@@ -96,13 +96,13 @@ function parseProblemHeader(line: string): ProblemHeaderMeta | null {
 }
 
 function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'>
-    & { pageFormatId?: string; aiFeedback: boolean } {
+    & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string } {
   // Every optional line here defaults to the value a file written before it
   // existed would have had, so older .md files round-trip byte-for-byte:
   // **Input:** absent → electronic, **Template ID:** absent → derived,
-  // **AI Feedback:** absent → off.
+  // **AI Feedback:** absent → off, **Submit at:** absent → no submission section.
   const meta: Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'>
-      & { pageFormatId?: string; aiFeedback: boolean } =
+      & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string } =
     { courseCode: '', title: '', preamble: '', inputMode: 'electronic' as InputMode, aiFeedback: false };
   for (const line of lines) {
     const l = line.trim();
@@ -123,6 +123,15 @@ function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title'
     // feature, so an ambiguous value should not switch it on.
     m = l.match(/^\*\*AI Feedback:\*\*\s+(.+)$/i);
     if (m) { meta.aiFeedback = /^(on|yes|true|enabled?)$/i.test(m[1].trim()); continue; }
+    // Collapsed to one line: the value is printed into a block whose height is
+    // measured as a single line, and a newline inside it would be drawn but not
+    // reserved.
+    m = l.match(/^\*\*Submit at:\*\*\s+(.+)$/i);
+    if (m) {
+      const address = m[1].replace(/\s+/g, ' ').trim();
+      if (address) meta.submissionAddress = address;
+      continue;
+    }
   }
   return meta;
 }
@@ -484,6 +493,7 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
     // Zero is not a target. An .md with no points anywhere keeps the default.
     ...(authoredTotal > 0 ? { targetPoints: authoredTotal } : {}),
     ...(meta.pageFormatId ? { pageFormatId: meta.pageFormatId } : {}),
+    ...(meta.submissionAddress ? { submissionAddress: meta.submissionAddress } : {}),
     aiFeedback: meta.aiFeedback,
     preamble: meta.preamble,
     problems,

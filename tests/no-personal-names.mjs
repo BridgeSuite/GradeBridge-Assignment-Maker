@@ -173,9 +173,12 @@ const EXCUSED_LINES = new Map([
    'the .tex escape and therefore has to contain a literal backslash. It is ' +
    'written as a drive letter and a temp directory because that is the ' +
    'shortest thing in prose that carries one.'],
-  ['tests/run-tests.mjs:663',
+  ['tests/run-tests.mjs:695',
    'the assertion over that same fixture string, which cannot check the ' +
-   'escaping without containing the thing being escaped.'],
+   'escaping without containing the thing being escaped. NOTE: pinned by exact ' +
+   'line, so inserting checks above it moves it and this entry must move too — ' +
+   'which is the trade the pinning buys, and it fails loudly rather than ' +
+   'silently widening the pattern.'],
 ]);
 
 /**

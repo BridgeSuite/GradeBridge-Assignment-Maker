@@ -36,10 +36,42 @@ Sketch the transverse E-field and justify the maximum.
 | `**Input:** handwritten` | no | Marks the whole assignment as handwritten. Any other value, or the line being absent, means **electronic**. Emitted by Export only for handwritten assignments, so older electronic files have no such line. |
 | `**Template ID:** {ID}` | no | Handwritten only. Goes in the printed QR as the layout key (`[A-Z0-9]{1,12}`, unique across the course). Emitted only when the author pinned one; absent means it is derived from the course code and title. |
 | `**AI Feedback:** on` | no | Whether students may request AI feedback on any problem in this assignment. `on` or `off`; absent means **off**. Emitted by Export only when on, so older files stay byte-identical. |
+| `**Submit at:** {address}` | no | Where students hand the work in. Printed on page 1 of the handwritten sheet, under **When you have finished writing** (§10). Single line; whitespace is collapsed. **Absent means that whole section is not printed** — not a placeholder and not a gapped sentence. Emitted by Export only when set, so older files stay byte-identical. |
 | `**Preamble:** {text}` | no | Instructions shown to the student. Single line. |
 | `**Due:** {anything}` | no | **Ignored on import** — due dates are managed in Canvas. Safe to include or omit. |
 
-`inputMode` governs which mediums are valid (see §5): a `handwritten` assignment should use only `[handwritten]` / `[handwritten:human]` sub-parts; an `electronic` assignment should use everything except those.
+**`inputMode` governs which mediums are valid (see §5), and this is a MUST.**
+A `handwritten` assignment **must** use only `[handwritten]` /
+`[handwritten:human]` sub-parts; an `electronic` assignment **must** use
+everything except those.
+
+**An assignment mixing the two is a mixed-medium assignment, and Export
+refuses it**, naming the offending sub-parts. Both directions otherwise
+produce an answer that cannot be collected, silently: a handwritten
+assignment gives a typed part a printed box to photograph and leaves a
+human grader no document to read, and an electronic assignment gives a
+handwritten part a `region_id` pointing at a layout map that was never
+written.
+
+**The check is at export, not at authoring**, because a hand-written `.md`
+reaches Export without passing through the editor.
+
+**Mixed-medium is not `hybrid`** (§12). `hybrid` is a reserved per-part value
+meaning one answer that is both writing and a drawing. It is unrelated to
+mixing mediums across an assignment.
+
+`**Submit at:**` carries the submission address, and it is a **value rather than a constant** on purpose. The
+standing instructions on page 1 name no institution and no deployment, because the tool is meant for use
+beyond the campus that commissioned it and its text has to be true wherever it prints; a hardcoded URL in
+the generator would be the same violation one step along, and would have printed a dead address onto every
+sheet of the term this suite was renamed and moved hosts. So the address belongs to the author. If it is
+absent, the tool prints **nothing at all** about submitting rather than a sentence with a gap in it — a
+sheet reading "go to ______" is worse than one that says nothing, because a hundred copies of it are printed
+before anyone notices. An export with no address set warns once, at the moment of generation, and proceeds:
+collecting the pages some other way is a legitimate workflow.
+
+The address does **not** travel in `assignment_spec.json` (§13's whitelist). A student reading the spec is
+already inside the app, so there would be nothing to tell them.
 
 `**AI Feedback:** on` allows students to request the one-time, gradeless AI feedback on any problem in
 this assignment; `off` or an absent line disables it. It gates the student-facing feedback only, not
@@ -477,8 +509,34 @@ for word" is the shape the failure actually takes.
 The tool prints, once, on page 1, in this order: that the work must be the student's own; how to print
 the sheet and check the corner marks; not to write a name or student ID; that only what is inside a
 box is collected, and that the box wants a composed answer rather than a workspace; how to cancel
-abandoned work; and to write darker rather than bigger. The author's preamble keeps everything about
-the work — show your working, give units, and course conventions such as ENG17's cover-sheet rule.
+abandoned work; to write darker rather than bigger; and — **only when `**Submit at:**` is set** — how
+to hand the work in. The author's preamble keeps everything about the work — show your working, give
+units, course conventions such as a cover-sheet rule, and **what assistance is permitted**.
+
+### When you have finished writing
+
+Until 2026-09-06 the tool claimed the submission half of that boundary and left it empty. Page 1
+carried `Your own work`, `Before you start`, `As you work` and the preamble, and said **nothing about
+submitting**: no mention that an app exists, no address, nothing about photographing pages. A student
+printed sixteen sheets, did the work properly, and was left holding paper with no stated next step.
+The preamble could not fill the gap without breaking the split, and an author who tried would trip the
+duplicate-instruction guard.
+
+The section is the four steps in order — go to the address, load the assignment `.zip`, photograph each
+page, check each photograph — followed by one unnumbered line telling the student to keep their printed
+pages until the grade is posted. The steps are numbered and the last line is not, and that difference
+carries meaning: a student who photographs before loading the assignment file has to start again, while
+the sections above are independent statements.
+
+**It is the one conditional section on the page**, and `**Submit at:**` is what conditions it (§2).
+Every line in it is held to the governing rule below, and none of it is worth anything to the automatic
+reader alone: *check each photograph* helps a human grader just as much, since a page too dark to read
+is unreadable to anyone, and the student is the only person who can retake it; *keep your printed pages*
+is the student's own protection in a dispute and the only copy of the original that exists.
+
+**The address changes nothing about the geometry.** Page 1 carries no regions, so `layout_id` is
+identical whether an address is set, unset, or changed — the same property the instructions page was
+given in the first place, and a test holds it.
 
 **The integrity block names no institution, and none may be named.** "The work you submit must be your
 own. Submitting work that is not your own is academic misconduct." That is true wherever the sheet is
@@ -824,6 +882,44 @@ of them.
 
 Filenames are unchanged, which is what the briefs and the Gradescope setup instructions actually name.
 Nothing in the suite unzips this archive programmatically, so the folders break no consumer.
+
+### The three downloads, and why they are three
+
+The folders tell a human what to do. They cannot make the machine refuse the wrong thing, and skipping
+the unzip-and-re-zip step is **silent and complete**: the Submission app matches entries by base name
+and ignores directory prefixes, so the whole export ZIP loads *perfectly* — the student gets their
+assignment and the grading rubric in one download, with nothing anywhere reporting a problem. Since
+2026-09-06 the export therefore offers three separate files:
+
+| Download | Contents | For |
+|---|---|---|
+| `{stem}_FOR_STUDENTS.pdf` | `assignment.pdf` on its own | read and print — no unzipping |
+| `{stem}_FOR_STUDENTS.zip` | the `student/` contents, **at the root**, no prefix | load in the app; post this as it comes |
+| `{stem}_INSTRUCTOR_ONLY.zip` | everything, unchanged, in both folders | your backup and your grading material — **contains the grading rubric** |
+
+**This renames the existing export download.** What used to arrive as `{stem}_Export.zip` is now
+`{stem}_INSTRUCTOR_ONLY.zip`; folders already unzipped from an older download keep the name they have.
+`Export` is the word that failed — it named the operation and said nothing about who the file was for, so
+the reader had to already know. The three share the assignment stem and therefore still sort next to each
+other, which is unavoidable and accepted: the distinction has to survive being read side by side, and
+`FOR_STUDENTS` against `INSTRUCTOR_ONLY` does where `Export` against `student` did not.
+
+The student ZIP is built by **filtering the same entry map the export ZIP is built from**, never from a
+second list of filenames — two lists is how the two would come to disagree about what is student-facing,
+and the disagreement would be silent in the same way. Before a byte is written it is asserted: every
+entry came from `student/`, none is nested, no instructor file or notice is present, and the contents are
+*exactly* what the mode calls for — `assignment.pdf`, `assignment_spec.json` and `layout_{TemplateID}.csv`
+handwritten, the first two electronic. Anything else **stops the export** rather than emitting an archive
+that goes to a whole class at once and cannot be recalled.
+
+The standalone PDF is the *same* PDF that is inside the ZIP, taken from the same build rather than
+regenerated, so a student who took only the ZIP has everything a student who took only the PDF has.
+
+**Each download has its own button and its own click, and that is not a style choice.** Measured in
+Chrome 152 on 2026-09-06: three programmatic downloads from a single user gesture delivered **one** file,
+with the other two silently dropped — no exception, nothing in the console — and once Chrome had blocked
+automatic downloads for the site, a *single* download from it failed silently too. One file per gesture is
+the only arrangement in which a missing file is impossible rather than merely loud.
 
 ### Which file restores your work
 
