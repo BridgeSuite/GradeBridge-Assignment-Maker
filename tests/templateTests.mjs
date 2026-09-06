@@ -688,6 +688,151 @@ check('every problem starts a new page; no page mixes two problems', () => {
     assert(!/Print at 100%, not/.test(html),
       'the standing instructions leaked into an electronic assignment');
   });
+
+  // ---------- the submission section (2026-09-06) ----------
+  // The tool claimed the ground and left it empty: page 1 carried `Your own
+  // work`, `Before you start`, `As you work` and the preamble, and said nothing
+  // about submitting. A student printed sixteen sheets, did the work properly,
+  // and was holding paper with no stated next step.
+  const ADDRESS = 'submit.example.edu/demo';
+  const drawnText = async (assignment) => {
+    const g = await gen.generateTemplate(assignment);
+    const bytes = Buffer.from(await g.pdf.arrayBuffer()).toString('latin1');
+    return {
+      g,
+      text: [...bytes.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' ')
+        .toLowerCase().replace(/[^a-z0-9]+/g, ' '),
+    };
+  };
+
+  check('submission section: it prints, on page 1, when an address is set', async () => {
+    const { g, text } = await drawnText(instr({ submissionAddress: ADDRESS }));
+    const norm = s => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    assert(text.includes(norm(lay.SUBMISSION_HEADING)),
+      'the submission heading is not on the sheet');
+    for (const item of lay.submissionItems(ADDRESS)) {
+      const first = norm(item).split(' ').slice(0, 6).join(' ');
+      assertEqual(text.split(first).length - 1, 1,
+        `"${first}..." appears the wrong number of times; each line must print exactly once`);
+    }
+    assert(text.includes(norm(ADDRESS)), 'the address itself is not printed');
+    const rows = g.ink.filter(b => /^instructions /.test(b.what));
+    assertEqual([...new Set(rows.map(b => b.pageK))], [1],
+      'an instruction row was drawn off page 1');
+  });
+
+  check('submission section: with no address the section is ENTIRELY absent', async () => {
+    // Not a placeholder, not an example, not a sentence with a gap in it. A
+    // sheet reading "go to ______" is worse than one that says nothing, because
+    // a hundred copies are printed before anyone notices.
+    const { text } = await drawnText(instr());
+    const norm = s => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    assert(!text.includes(norm(lay.SUBMISSION_HEADING)),
+      'the submission heading printed with no address set');
+    for (const fragment of ['go to', 'photograph each page', 'keep your printed pages',
+                            'load the assignment file']) {
+      assert(!text.includes(fragment), `"${fragment}" printed with no address set`);
+    }
+    // And nothing that looks like a blank to fill in.
+    assert(!/_{3,}/.test(text), 'a fill-in rule was printed');
+    assert(!/\bexample\b/.test(text), 'an example address was printed');
+  });
+
+  check('submission section: the address is the only thing that varies, and it is a value', async () => {
+    // No institution and no fixed deployment address may appear in the standing
+    // text — the same rule the rest of the page is already held to, extended to
+    // the section that most invites a hardcoded URL.
+    for (const sentence of [
+      ...lay.STANDING_INSTRUCTIONS.flatMap(s => s.items),
+      lay.STANDING_CLOSING,
+      lay.SUBMISSION_HEADING,
+      // The items with the address REMOVED — what the tool itself contributes.
+      ...lay.submissionItems('').map(s => s),
+    ]) {
+      assert(!/https?:\/\//i.test(sentence), `standing text carries a URL: "${sentence}"`);
+      assert(!/\.(com|edu|org|net|io|gov)\b/i.test(sentence),
+        `standing text carries a domain: "${sentence}"`);
+      assert(!/gradebridge\.|bridgesuite|github\.io/i.test(sentence),
+        `standing text names a deployment: "${sentence}"`);
+      assert(!/universit|college|campus|\bdavis\b|\buc\b/i.test(sentence),
+        `standing text names an institution: "${sentence}"`);
+    }
+  });
+
+  check('submission section: layout_id does not move when the address changes', async () => {
+    // Page 1 carries no regions, so nothing on it can be in the geometry hash.
+    // This is the property the 2026-09-01 instructions-page work established and
+    // it must survive a new section being added to that page.
+    const none = await gen.generateTemplate(instr());
+    const set = await gen.generateTemplate(instr({ submissionAddress: ADDRESS }));
+    const other = await gen.generateTemplate(instr({ submissionAddress: 'a.example.org/x' }));
+    assertEqual(set.layoutId, none.layoutId, 'setting an address moved the layout id');
+    assertEqual(other.layoutId, none.layoutId, 'changing the address moved the layout id');
+    assertEqual(set.pageCount, none.pageCount, 'the submission section changed the page count');
+  });
+
+  check('submission section: an unset address WARNS but never refuses', async () => {
+    // Warned, not refused, deliberately: collecting the pages some other way is
+    // a legitimate workflow and refusing it would make the tool unusable for it.
+    // But printing nothing in silence is the defect the section exists to
+    // remove, and only the instructor can tell the two apart.
+    const quiet = await gen.generateTemplate(instr());
+    assert(quiet.selfTest.passed, 'a missing submission address refused the export');
+    assert(quiet.selfTest.warnings.some(w => /submission address/i.test(w)),
+      `no warning about the missing address: ${JSON.stringify(quiet.selfTest.warnings)}`);
+    const set = await gen.generateTemplate(instr({ submissionAddress: ADDRESS }));
+    assertEqual(set.selfTest.warnings.filter(w => /submission address/i.test(w)), [],
+      'an assignment WITH an address was warned about anyway');
+  });
+
+  check('submission section: the duplicate guard covers it too', async () => {
+    // Once it prints it is a standing instruction like any other, and the
+    // preamble must not repeat it. "Photograph your pages and upload them" is
+    // exactly the sort of line an author writes before the tool ever said it.
+    const echo = 'Photograph each page when the app asks, then check it before you submit.';
+    let threw = null;
+    try {
+      await gen.generateTemplate(instr({ submissionAddress: ADDRESS, preamble: echo }));
+    } catch (err) { threw = err; }
+    assert(threw, 'a preamble repeating the submission steps was emitted anyway');
+    assert(/repeats the standing instruction/.test(threw.message),
+      `the failure does not name the duplication: ${threw.message}`);
+
+    // And the same preamble is NOT flagged when no address is set, because then
+    // the tool prints nothing for it to duplicate.
+    const ok = await gen.generateTemplate(instr({ preamble: echo }));
+    assert(ok.selfTest.passed, 'a preamble was flagged against a section that is not printed');
+  });
+
+  check('submission section: every line still passes the governing rule', () => {
+    // "If a piece of advice would only ever help the automatic reader, it does
+    // not belong in front of students." Nothing here may be about helping the
+    // detector — no cropping, no lighting, no how-to-hold-the-phone.
+    for (const item of lay.submissionItems(ADDRESS)) {
+      assert(!/\b(crop|contrast|resolution|dpi|glare|flat surface|straight on|shadow)\b/i.test(item),
+        `a line exists only to help the automatic reader: "${item}"`);
+    }
+    // The steps are numbered because they are a sequence; the last line is not
+    // a step and is deliberately not numbered.
+    const items = lay.submissionItems(ADDRESS);
+    assertEqual(items.slice(0, 4).map(s => /^\d\. /.test(s)), [true, true, true, true],
+      'the four ordered steps are not numbered');
+    assert(!/^\d\. /.test(items[items.length - 1]),
+      'the closing line is numbered as though it were a step');
+  });
+
+  check('submission section: the whole instructions page still fits with it', async () => {
+    // The section is four steps longer than the page used to be, on top of a
+    // real preamble. Guard 4 refuses an overflow, so this asserts the ordinary
+    // case has not been pushed over the edge.
+    const g = await gen.generateTemplate(instr({
+      submissionAddress: ADDRESS,
+      preamble: 'Show all working and give every answer in SI units. A calculator and your ' +
+                'textbook are allowed; an AI assistant is not. Staple the cover sheet to the front.',
+    }));
+    assertEqual(g.layout.instructionsPage.overflowMm, 0, 'the instructions page overflowed');
+    assert(g.selfTest.passed, `the self-test failed: ${g.selfTest.failures.join('; ')}`);
+  });
 }
 
 // ---------- a region is never shorter than its authored line count (2026-08-31) ----------

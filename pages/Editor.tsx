@@ -581,6 +581,35 @@ const Editor: React.FC = () => {
                       Up to 12 characters, A–Z and 0–9. Must be unique across the course — the Submission app uses it
                       to find this assignment's layout map. Leave blank to derive one automatically.
                     </p>
+
+                    {/* Where students hand the work in. A value, never a
+                        constant: the standing text on page 1 names no
+                        institution and no deployment, so this is the one place
+                        an address can come from. Blank prints nothing at all —
+                        see Assignment.submissionAddress. */}
+                    <label className="block text-xs font-medium text-academic-700 mt-4 mb-1">
+                      Submission address <span className="font-normal text-academic-500">— printed on page 1</span>
+                    </label>
+                    <input
+                      value={assignment.submissionAddress ?? ''}
+                      placeholder="e.g. submit.example.edu/eng17"
+                      onChange={e => setAssignment({
+                        ...assignment,
+                        submissionAddress: e.target.value.replace(/\s+/g, ' ').trimStart() || undefined,
+                      })}
+                      className="w-full max-w-md text-sm border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
+                    />
+                    <p className="text-xs text-academic-500 mt-1 leading-relaxed">
+                      Where students go to photograph and upload their pages. Students type this from paper, so keep it
+                      short and leave off <code className="font-mono">https://</code>.
+                      {' '}
+                      {(assignment.submissionAddress || '').trim()
+                        ? 'Page 1 will tell students how to submit.'
+                        : <span className="text-amber-700">
+                            Leave it blank and page 1 says nothing about submitting — no placeholder and no gap.
+                            Blank is right if you collect the pages some other way.
+                          </span>}
+                    </p>
                   </div>
                 )}
               </div>

@@ -7,6 +7,7 @@ import { generateTemplate } from './templateGenerator';
 import { partIdentifiers } from './templateLayout';
 import { buildAuthoringBackup } from './authoringBackup';
 import { apportionPoints } from './pointsService';
+import { strandedSubsectionLabels, typeAllowedInMode } from './inputModeService';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
@@ -836,6 +837,15 @@ export const assignmentToMd = (assignment: Assignment): string => {
     lines.push(`**AI Feedback:** on`);
     lines.push('');
   }
+  // Where students hand the work in, printed on page 1 of the handwritten sheet.
+  // Emitted only when set, so a file written before it existed round-trips
+  // byte-for-byte — and carried at all because `Export .md` → `Import Markdown`
+  // is a documented restore route, and a field that vanishes on that round trip
+  // is the silent-loss defect this suite has already paid for twice.
+  if ((normalized.submissionAddress || '').trim()) {
+    lines.push(`**Submit at:** ${normalized.submissionAddress!.trim()}`);
+    lines.push('');
+  }
   if (normalized.preamble) {
     lines.push(`**Preamble:** ${normalized.preamble}`);
   }
@@ -1271,20 +1281,311 @@ export const buildExportEntries = async (
   return entries;
 };
 
+// =====================================================
+// THE STUDENT ZIP — what the instructor posts, ready to post
+// =====================================================
+//
+// THE FAILURE THIS REMOVES. The export ZIP holds `student/` and `instructor/`,
+// and posting it requires the instructor to unzip it and re-zip the `student/`
+// contents by hand. Skipping that step is **silent and complete**: the Student
+// Submission app's `baseName()` ignores directory prefixes, so
+// `student/assignment_spec.json` matches, `instructor/` holds no spec and no
+// layout file, and the whole export loads *perfectly*. The student gets their
+// assignment and the grading rubric in one download, and nothing anywhere
+// reports a problem. The folders and the generated notice tell a human what to
+// do; they cannot make the machine refuse the wrong thing.
+//
+// **Built by filtering the same `entries` map the export ZIP is built from**,
+// never from a second list of filenames. Two lists is how the two would come to
+// disagree about what is student-facing, and the disagreement would be silent in
+// exactly the same way — a file added to `student/` and forgotten here would be
+// withheld from students, or worse, one added to `instructor/` and named here
+// would be published.
+
+/**
+ * What the student ZIP must contain, exactly, per input mode.
+ *
+ * Each entry carries the human name as well as the matcher, because these
+ * strings reach an instructor in a failure message and a raw regular expression
+ * is not something anyone should be shown at the moment their export stopped.
+ */
+const PDF_ENTRY = { label: 'assignment.pdf', match: (n: string) => n === 'assignment.pdf' };
+const SPEC_ENTRY = { label: 'assignment_spec.json', match: (n: string) => n === 'assignment_spec.json' };
+
+export const STUDENT_ZIP_CONTENTS = {
+  // The sheet, the spec, and the map the app crops by. The map's filename
+  // carries the template id, so it is matched by shape rather than by name.
+  handwritten: [PDF_ENTRY, SPEC_ENTRY, {
+    label: 'the layout map (layout_<template id>.csv)',
+    match: (n: string) => /^layout_[A-Z0-9]{1,12}\.csv$/.test(n),
+  }],
+  // ITEM 1, determined 2026-09-06: an electronic student needs only these two,
+  // and needs the spec more than the PDF. `assignment_spec.json` carries every
+  // problem and sub-part description, and the Submission app renders them, so
+  // the app alone is a complete assignment. The PDF is a convenience for reading
+  // and printing — which is exactly why it is also offered on its own (item 5).
+  electronic: [PDF_ENTRY, SPEC_ENTRY],
+} as const;
+
+/**
+ * The student-facing entries, at the archive root, asserted rather than assumed.
+ *
+ * Throws rather than emitting a bad archive. Everything here is a *publishing*
+ * mistake — the archive goes to a whole class at once and cannot be recalled —
+ * so the same reasoning applies as to the template self-test: refuse, and name
+ * what is wrong, rather than warn beside a download that has already happened.
+ */
+export const buildStudentEntries = (
+  entries: Record<string, Blob | string>,
+  assignment: Assignment
+): Record<string, Blob | string> => {
+  // This took the mode as a BOOLEAN until 2026-09-05, and the change is not
+  // cosmetic: naming the offending sub-parts needs the assignment. It does mean
+  // a stale caller passing `true` would be read as an object with no
+  // `inputMode`, silently become electronic, and then refuse for a puzzling
+  // reason — a layout map "not a file students may receive". Say what actually
+  // happened instead. TypeScript stops this in the app; the test suites and the
+  // scratch harnesses are plain JavaScript, where it is a live trap.
+  if (!assignment || typeof assignment !== 'object' || !Array.isArray(assignment.problems)) {
+    throw new Error(
+      'buildStudentEntries() takes the assignment as its second argument, not a mode flag. ' +
+      `Got ${assignment === null ? 'null' : typeof assignment}.`
+    );
+  }
+
+  const mode = assignment.inputMode === 'handwritten' ? 'handwritten' : 'electronic';
+  const handwritten = mode === 'handwritten';
+
+  // ---- MIXED-MEDIUM: refuse, and say which sub-parts ----------------------
+  //
+  // One assignment is either handwritten throughout or electronic throughout.
+  // A mixed one is representable — `submissionType` is per sub-part — and until
+  // now it EXPORTED CLEANLY in both directions, producing an answer that cannot
+  // be collected, silently:
+  //
+  //   handwritten + a text part   the student is given a printed box to
+  //                               photograph for an answer they typed, and no
+  //                               PDF is generated at all, so a human grader has
+  //                               no document to read.
+  //   electronic + a handwritten  the rubric names a `region_id` against a
+  //   part                        layout map that was never written, and the
+  //                               student is directed to a page-upload section
+  //                               that is not rendered for their assignment.
+  //
+  // Neither is recoverable once a student has submitted, and no downstream check
+  // can catch either: `layout_id` hashes GEOMETRY, and mixed-medium geometry is
+  // perfectly valid geometry.
+  //
+  // **The check is here, at export, and not at authoring.** The editor already
+  // filters the medium pills by mode, so the UI cannot create one — but
+  // `parseMdToAssignment` sets `inputMode` and the per-part types with no
+  // cross-check between them, so a hand-written `.md` reaches Export without
+  // ever passing through the editor. An authoring-side guard is therefore not a
+  // guard. This is the one place every route converges.
+  //
+  // It NAMES THE OFFENDING SUB-PARTS. A refusal that says only "mixed medium"
+  // sends the author hunting through a long assignment for something the tool
+  // already knows the location of. The labels come from
+  // `strandedSubsectionLabels`, the same function the editor's mode-switch
+  // dialog uses, so the two can never describe the same defect differently.
+  const stranded = strandedSubsectionLabels(assignment.problems || [], mode);
+  if (stranded.length > 0) {
+    const one = stranded.length === 1;
+    throw new Error([
+      'Export stopped: this assignment mixes handwritten and electronic sub-parts.',
+      '',
+      handwritten
+        ? `It is a handwritten assignment, so every sub-part must be Handwritten. ${one ? 'This one is' : 'These are'} not:`
+        : `It is an electronic assignment, so no sub-part may be Handwritten. ${one ? 'This one is' : 'These are'}:`,
+      ...stranded.map(label => `  • ${label}`),
+      '',
+      `Change ${one ? 'it' : 'them'}, or switch the whole assignment to ` +
+      `${handwritten ? 'Electronic' : 'Handwritten'}. An assignment cannot be half of each: the ` +
+      `answers to the sub-parts above could not be collected from a student, and nothing later ` +
+      `in the pipeline would report a problem.`,
+    ].join('\n'));
+  }
+
+  const out: Record<string, Blob | string> = {};
+  const problems: string[] = [];
+
+  for (const [name, content] of Object.entries(entries)) {
+    if (!name.startsWith(STUDENT_DIR)) continue;
+    const base = name.slice(STUDENT_DIR.length);
+    // A nested path under `student/` would arrive at the root still carrying a
+    // separator, and a consumer that splits on it would see a directory that is
+    // not there. Nothing produces one today; this is what stops the first one
+    // being noticed by a student.
+    if (base.includes('/') || base.includes('\\')) {
+      problems.push(`"${name}" is nested inside ${STUDENT_DIR} — the student ZIP is flat`);
+      continue;
+    }
+    out[base] = content;
+  }
+
+  // Belt and braces over the filter above: assert the *result*, not the loop, so
+  // a future change to how entries are selected is still held to the outcome.
+  for (const name of Object.keys(out)) {
+    if (name.startsWith(INSTRUCTOR_DIR)) problems.push(`"${name}" is an instructor file`);
+    if (name === DISTRIBUTION_NOTICE_NAME) {
+      problems.push(`the instructor-only notice "${name}" reached the student ZIP`);
+    }
+  }
+  const fromStudentDir = Object.keys(entries).filter(n => n.startsWith(STUDENT_DIR)).length;
+  if (Object.keys(out).length !== fromStudentDir) {
+    problems.push(`${fromStudentDir} files are in ${STUDENT_DIR} but ${Object.keys(out).length} reached the ZIP`);
+  }
+
+  // The contents must be exactly what the mode calls for — no more, and no
+  // fewer. "No more" is the disclosure guard; "no fewer" catches the sheet
+  // shipped without the map it must travel with, which fails at grading time
+  // rather than at download time.
+  const expected = STUDENT_ZIP_CONTENTS[handwritten ? 'handwritten' : 'electronic'];
+  const remaining = new Set(Object.keys(out));
+  for (const want of expected) {
+    const hit = [...remaining].find(n => want.match(n));
+    if (hit) remaining.delete(hit);
+    else problems.push(`the student ZIP is missing ${want.label}`);
+  }
+  for (const extra of remaining) problems.push(`"${extra}" is not a file students may receive`);
+
+  if (problems.length) {
+    throw new Error(
+      'Export stopped: the student ZIP would not have been safe to post.\n' +
+      problems.map(p => `  • ${p}`).join('\n')
+    );
+  }
+  return out;
+};
+
+// ---- Download names ------------------------------------------------------
+//
+// **The name is the only thing standing between a tired instructor and
+// publishing the answer key.** All three files land in one Downloads folder
+// among hundreds, and the cost of choosing wrong is the grading rubric going to
+// the whole class.
+//
+//     {stem}_FOR_STUDENTS.pdf       read and print
+//     {stem}_FOR_STUDENTS.zip       load in the app
+//     {stem}_INSTRUCTOR_ONLY.zip    contains the grading rubric
+//
+// **`Export` is the word that failed**: it named the operation and said nothing
+// about who the file was for, so the reader had to already know. Sharing the
+// assignment stem means the three still sort next to each other — unavoidable,
+// and accepted — so the distinction has to survive being read side by side,
+// which is what `FOR_STUDENTS` against `INSTRUCTOR_ONLY` does and what `Export`
+// against `student` did not.
+//
+// This RENAMES the existing export download: what used to arrive as
+// `{stem}_Export.zip` is now `{stem}_INSTRUCTOR_ONLY.zip`. Folders unzipped from
+// older downloads keep their old name. Recorded in ASSIGNMENT_MD_SPEC.md §13.
+const STUDENT_SUFFIX = 'FOR_STUDENTS';
+const INSTRUCTOR_SUFFIX = 'INSTRUCTOR_ONLY';
+
+const stemOf = (assignment: Assignment) =>
+  `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}`;
+
+export const exportFilenames = (assignment: Assignment) => {
+  const stem = stemOf(assignment);
+  return {
+    instructorZip: `${stem}_${INSTRUCTOR_SUFFIX}.zip`,
+    studentZip: `${stem}_${STUDENT_SUFFIX}.zip`,
+    studentPdf: `${stem}_${STUDENT_SUFFIX}.pdf`,
+  };
+};
+
+// **One download per user gesture. Never two.**
+//
+// Measured in Chrome 152.0.7977.77 on 2026-09-06, over file-saver's own
+// mechanism on an http origin: three `saveAs` calls from one click delivered
+// ONE file; the other two never arrived, with no exception and nothing in the
+// console. Spacing them 300 ms apart delivered none. And once Chrome had
+// blocked automatic downloads for the site, a *single* download from it failed
+// silently too, across ports — an app that has quietly stopped downloading
+// anything, which is unrecoverable from inside the page.
+//
+// So each artifact has its own button and its own gesture. This is why
+// `downloadQrTemplate` already ships one ZIP rather than two files, and the
+// reasoning is the same one generalised: nothing is ever queued behind anything,
+// so a missing file is impossible rather than merely loud.
+const saveOne = (content: Blob, filename: string) => {
+  // Handle file-saver import differences (default export vs named export property)
+  const save = (FileSaver as any).saveAs || FileSaver;
+  save(content, filename);
+};
+
+/**
+ * Add one entry, as bytes rather than as a `Blob`.
+ *
+ * JSZip only accepts a `Blob` where `support.blob` is true, which is a browser.
+ * Outside one the entry is stored as an unrecognised type and fails on *read*
+ * with "Can't read the data of '...'" — so an archive built in a test looks
+ * fine until something opens it. Converting here costs nothing (the bytes are
+ * already in memory) and is what lets the suite open the archive this app
+ * exists to produce, rather than assert that it meant to produce one.
+ */
+const addZipEntry = async (zip: JSZip, name: string, content: Blob | string): Promise<void> => {
+  zip.file(name, content instanceof Blob ? new Uint8Array(await content.arrayBuffer()) : content);
+};
+
 export const exportService = {
   downloadZIP: async (assignment: Assignment) => {
     // Asks before rescaling, and throws RescaleDeclinedError if told not to —
     // before the ZIP is built, so declining writes nothing.
     assignment = normalizePointsConfirmed(assignment);
-    const zip = new JSZip();
-    for (const [name, content] of Object.entries(await buildExportEntries(assignment))) {
-      zip.file(name, content);
-    }
-    const content = await zip.generateAsync({ type: 'blob' });
+    const entries = await buildExportEntries(assignment);
+    // Built and asserted even though it is not written here, so the instructor
+    // archive and the student archive can never be produced from an entry map
+    // that only one of them would accept. If the student ZIP would be unsafe,
+    // that is a fact about this assignment and the whole export stops.
+    buildStudentEntries(entries, assignment);
 
-    // Handle file-saver import differences (default export vs named export property)
-    const save = (FileSaver as any).saveAs || FileSaver;
-    save(content, `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}_Export.zip`);
+    const zip = new JSZip();
+    for (const [name, content] of Object.entries(entries)) {
+      await addZipEntry(zip, name, content);
+    }
+    saveOne(await zip.generateAsync({ type: 'blob' }), exportFilenames(assignment).instructorZip);
+  },
+
+  /**
+   * ITEM 4 — the archive the instructor posts, with nothing to unpack, re-zip or
+   * decide. Student files only, at the root, asserted before a byte is written.
+   */
+  downloadStudentZip: async (assignment: Assignment) => {
+    assignment = normalizePointsConfirmed(assignment);
+    const student = buildStudentEntries(await buildExportEntries(assignment), assignment);
+
+    const zip = new JSZip();
+    for (const [name, content] of Object.entries(student)) await addZipEntry(zip, name, content);
+    const filename = exportFilenames(assignment).studentZip;
+    const blob = await zip.generateAsync({ type: 'blob' });
+    saveOne(blob, filename);
+    // The bytes are returned, not just the intent, so a test can open the
+    // artifact this function exists to produce rather than assert that it meant
+    // to produce it. A check that stops at the return value cannot tell a
+    // correct download from one that saved something else entirely.
+    return { filename, names: Object.keys(student), blob };
+  },
+
+  /**
+   * ITEM 5 — the assignment as a PDF, on its own.
+   *
+   * A student who cannot see what the homework is until they unzip a file on a
+   * phone will not start it, so the readable artifact has to be postable without
+   * unpacking anything. It is the *same* PDF that is inside the student ZIP,
+   * taken from the same entry map rather than regenerated, so a student who took
+   * only the ZIP still has everything and the two can never differ.
+   */
+  downloadStudentPdf: async (assignment: Assignment) => {
+    assignment = normalizePointsConfirmed(assignment);
+    const student = buildStudentEntries(await buildExportEntries(assignment), assignment);
+    const pdf = student['assignment.pdf'];
+    if (!(pdf instanceof Blob)) {
+      throw new Error('Export stopped: the student PDF was not produced.');
+    }
+    const filename = exportFilenames(assignment).studentPdf;
+    saveOne(pdf, filename);
+    return { filename, blob: pdf };
   },
 
   downloadMd: (assignment: Assignment) => {

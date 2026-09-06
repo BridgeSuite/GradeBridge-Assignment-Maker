@@ -282,7 +282,7 @@ def parse_metadata(lines):
     """
     Parse the title line and metadata fields from the top of the file.
     Returns dict with courseCode, title, preamble, inputMode, pageFormatId,
-    aiFeedback.
+    aiFeedback, submissionAddress.
     Due date is intentionally ignored — managed in Canvas.
     """
     meta = {
@@ -296,7 +296,11 @@ def parse_metadata(lines):
         'pageFormatId': None,
         # **AI Feedback:** absent means off, so files written before the flag
         # existed stay valid and feedback-off.
-        'aiFeedback': False
+        'aiFeedback': False,
+        # **Submit at:** absent means page 1 prints no submission section at
+        # all — not a placeholder and not a gapped sentence. See
+        # Assignment.submissionAddress in types.ts.
+        'submissionAddress': None
     }
 
     for line in lines:
@@ -335,6 +339,15 @@ def parse_metadata(lines):
         m = re.match(r'^\*\*AI Feedback:\*\*\s+(.+)$', line, re.IGNORECASE)
         if m:
             meta['aiFeedback'] = bool(re.match(r'^(on|yes|true|enabled?)$', m.group(1).strip(), re.IGNORECASE))
+            continue
+
+        # Where students hand the work in: **Submit at:** gradebridge.example.edu
+        # Collapsed to one line, as the printed block reserves one.
+        m = re.match(r'^\*\*Submit at:\*\*\s+(.+)$', line, re.IGNORECASE)
+        if m:
+            address = re.sub(r'\s+', ' ', m.group(1)).strip()
+            if address:
+                meta['submissionAddress'] = address
             continue
 
     return meta
@@ -622,6 +635,9 @@ def parse_md(filepath):
         # Only present when the .md pinned one; otherwise the QR template
         # generator derives it from the course code and title.
         **({'pageFormatId': meta['pageFormatId']} if meta.get('pageFormatId') else {}),
+        # Only present when the .md carried it; absent means page 1 prints no
+        # submission section rather than a gapped one.
+        **({'submissionAddress': meta['submissionAddress']} if meta.get('submissionAddress') else {}),
         'createdAt': now_ms,
         'updatedAt': now_ms
     }

@@ -32,7 +32,7 @@ import {
 import {
   BORDER_MM, COLUMN_X0_MM, COLUMN_X1_MM, LayoutRow, MIN_ANSWER_LINES, MIN_BOX_MM,
   REGION_BOTTOM_MM, STANDING_CLOSING, STANDING_INSTRUCTIONS, TemplateLayout, WRITING_LINE_MM,
-  answerBoxMm, csvUnsafeFields, enumerateParts,
+  answerBoxMm, csvUnsafeFields, enumerateParts, printableSubmissionAddress, submissionItems,
 } from './templateLayout';
 import { splitFigures } from './figureBlocks';
 import { encodeQr } from './qrEncoder';
@@ -148,11 +148,24 @@ export interface SelfTestInput {
 const NORMALISE = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const WINDOW_WORDS = 6;
 
-export const duplicatedStandingInstructions = (preamble: string): string[] => {
+/**
+ * `extraSentences` carries the conditional submission section, which is printed
+ * only when the author set an address. It is passed in rather than derived from
+ * `STANDING_INSTRUCTIONS` because the section does not exist until there is an
+ * address — but once it does print, it is a standing instruction like any other
+ * and the preamble must not repeat it. A guard that covered only the
+ * unconditional sentences would go quiet on exactly the section most likely to
+ * be duplicated, since "photograph your pages and upload them" is the sort of
+ * thing an author writes into a preamble before the tool ever said it.
+ */
+export const duplicatedStandingInstructions = (
+  preamble: string, extraSentences: readonly string[] = []
+): string[] => {
   const hay = ` ${NORMALISE(preamble || '')} `;
   if (hay.trim().length === 0) return [];
   const sentences = [
     ...STANDING_INSTRUCTIONS.flatMap(sec => sec.items),
+    ...extraSentences,
     STANDING_CLOSING,
   ];
   const hits: string[] = [];
@@ -424,8 +437,11 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
   // Guard 3. The tool must not print an instruction the author's preamble also
   // prints. See `duplicatedStandingInstructions` — the duplication is the reason
   // the split exists, so it is checked rather than trusted.
+  const submissionAddress = printableSubmissionAddress(assignment);
   add(0, 'the preamble does not repeat a standing instruction',
-    duplicatedStandingInstructions(assignment.preamble || ''));
+    duplicatedStandingInstructions(
+      assignment.preamble || '',
+      submissionAddress ? submissionItems(submissionAddress) : []));
 
   // Guard 4. "Problems begin on page 2, always" breaks if the standing
   // instructions plus a long preamble overflow the page, so an overflow refuses
@@ -453,7 +469,22 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
 
   const failures = checks.filter(c => !c.passed).map(c => `check ${c.id || '–'} — ${c.name}: ${c.detail}`);
 
-  return { passed: failures.length === 0, checks, failures, warnings: [] };
+  // WARNED, NOT REFUSED, and the severity is the decision rather than an
+  // oversight. A sheet with no submission address is a legitimate assignment —
+  // an instructor who collects on paper, or through Canvas, or who has not
+  // deployed the Submission app, has a working workflow and refusing it would
+  // make the tool unusable for them. But printing nothing silently is precisely
+  // the defect this section was added to remove, and the instructor is the only
+  // person who can tell the two apart. So: say it once, at the moment they are
+  // about to print, and let them proceed.
+  const warnings = submissionAddress ? [] : [
+    'No submission address is set, so page 1 does not tell students how to hand this in. ' +
+    'The sheet says nothing about it at all rather than printing a gap. Set the submission ' +
+    'address on the assignment if students submit through the app; ignore this if you collect ' +
+    'the pages some other way.',
+  ];
+
+  return { passed: failures.length === 0, checks, failures, warnings };
 };
 
 // ---- Post-draw: what actually landed on the page -------------------------

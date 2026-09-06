@@ -372,6 +372,75 @@ export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: read
 ];
 
 /**
+ * How to hand the work in. **The tool owns this ground under the split above —
+ * and until 2026-09-06 it claimed the ground and left it empty.** The sheet
+ * carried `Your own work`, `Before you start`, `As you work` and the author's
+ * preamble, and said nothing at all about submitting: no mention that an app
+ * exists, no address, nothing about photographing pages. A student printed
+ * sixteen sheets, did the work properly, and was left holding paper with no
+ * stated next step. The preamble could not fill the gap without breaking the
+ * split, and an author who tried would trip the duplicate-instruction guard.
+ *
+ * **Printed only when the author has set an address, and omitted entirely
+ * otherwise** — see `Assignment.submissionAddress` for why the address cannot be
+ * a constant and why a gapped sentence is worse than silence. That makes this
+ * the one conditional section on the page.
+ *
+ * Each line is held to the governing rule above — advice that only helps the
+ * automatic reader does not belong in front of students:
+ *
+ *  - *Check each photograph* earns its place with a human grader too. A page
+ *    photographed too dark to read is unreadable to a TA and to a model alike,
+ *    and the student is the only person who can retake it.
+ *  - *Keep your printed pages* is the student's own protection in a dispute
+ *    about what they wrote, and the only copy of the original that exists.
+ *  - Nothing here says how to hold a phone, how to crop, or anything else whose
+ *    only beneficiary would be the detector.
+ *
+ * No mark anywhere depends on any of it.
+ */
+export const SUBMISSION_HEADING = 'When you have finished writing';
+
+/**
+ * The four steps are **numbered and the last line is not**, which is the one
+ * formatting difference from every other section on the page and is carrying
+ * meaning: these happen in order, and a student who photographs before loading
+ * the assignment file has to start again. The sections above are independent
+ * statements and are deliberately left unnumbered.
+ */
+export const submissionItems = (address: string): string[] => [
+  `1. Go to ${address} on your phone or laptop.`,
+  '2. Load the assignment file: the .zip you downloaded with this assignment.',
+  '3. Photograph each page when the app asks.',
+  '4. Check each photograph in the app before you submit. If a page is dark or blurred, take it again.',
+  'Keep your printed pages until your grade is posted.',
+];
+
+/**
+ * The address as it will print, or `''` when there is none. Trimmed and reduced
+ * to one line: the field is a single address and a newline inside it would be
+ * reserved as one line and drawn as another, which is how a block silently
+ * overruns the space measured for it.
+ */
+export const printableSubmissionAddress = (assignment: Assignment): string =>
+  (assignment.submissionAddress || '').replace(/\s+/g, ' ').trim();
+
+/**
+ * The standing sections in printed order, including the conditional submission
+ * section. **Every consumer must read this rather than `STANDING_INSTRUCTIONS`**
+ * — the layout, the duplicate-instruction guard and the tests alike — or a
+ * sentence the tool prints stops being one the guards know about.
+ */
+export const standingSections = (
+  assignment: Assignment
+): ReadonlyArray<{ heading: string; items: readonly string[] }> => {
+  const address = printableSubmissionAddress(assignment);
+  return address
+    ? [...STANDING_INSTRUCTIONS, { heading: SUBMISSION_HEADING, items: submissionItems(address) }]
+    : STANDING_INSTRUCTIONS;
+};
+
+/**
  * Not decoration. Students read "your work is scanned" as "my handwriting is
  * being judged", and the anxious response is to write larger and slower, which
  * costs them time and helps nobody.
@@ -418,7 +487,7 @@ export const buildInstructionsPage = (assignment: Assignment): InstructionsPage 
   });
 
   let y = FIRST_PROMPT_TOP_MM;
-  STANDING_INSTRUCTIONS.forEach((section, i) => {
+  standingSections(assignment).forEach((section, i) => {
     if (i > 0) y = round4(y + INSTR_SECTION_GAP_MM);
     rows.push({
       style: 'section', text: section.heading,

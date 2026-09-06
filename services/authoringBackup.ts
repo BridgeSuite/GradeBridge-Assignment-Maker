@@ -115,6 +115,8 @@ const GAPS: Gap[] = [
     present: a => a.targetPoints !== undefined },
   { label: 'the course public key — without it exports fall back from gb2 to gb1',
     present: a => !!a.coursePublicKey },
+  { label: 'the submission address — without it page 1 of the printed sheet does not tell students how to hand the work in',
+    present: a => !!(a.submissionAddress || '').trim() },
 ];
 
 const subs = (a: any): any[] =>

@@ -210,11 +210,36 @@ console.log(`fixture: ${fixture ? fixturePath : `NOT FOUND at ${fixturePath}`}\n
 // 1. validateCoursePublicKey — the fixture key
 // =====================================================
 if (fixture) {
+  // THE CONTRACT, NOT A CONSTANT (fixed 2026-09-05).
+  //
+  // This used to assert `bits === 2048`. It passed for as long as every key the
+  // suite had ever seen was 2048-bit, and it failed the moment a real one
+  // arrived: the live ENG17 Fall course key is RSA-4096. **An assertion that
+  // rejects the configuration production actually uses is worse than no
+  // assertion** — and it was worse still here, because `npm test` chained the
+  // suites with `&&`, so this one red line hid four entirely green suites
+  // behind it.
+  //
+  // `cryptoService.validateCoursePublicKey` already states the contract: 2048
+  // and 4096 are in-contract and carry no warning, anything else imports but
+  // warns. So the test now checks that contract rather than restating one of
+  // its two legal values. The Student Submission app fixed the identical defect
+  // the same way, at its own `run-tests.mjs:159`.
+  const IN_CONTRACT_BITS = [2048, 4096];
   const r = await validateCoursePublicKey(fixture.public_key_spki_pem);
-  check('fixture SPKI public key validates as a 2048-bit RSA key', () => {
+  check('fixture key is an in-contract RSA PUBLIC key (2048 or 4096, never private)', () => {
+    // It must be the PUBLIC half. The private counterpart is rejected by the
+    // check below; this asserts the fixture we are validating is not one.
+    assert(/-----BEGIN PUBLIC KEY-----/.test(fixture.public_key_spki_pem),
+      'the fixture public key is not in SPKI public form');
+    assert(!/PRIVATE KEY/i.test(fixture.public_key_spki_pem),
+      'the fixture public key contains a private key');
     assert(r.ok === true, `ok is ${r.ok}: ${r.error}`);
-    assert(r.bits === 2048, `bits is ${r.bits}, expected 2048`);
-    assert(!r.warning, `unexpected warning: ${r.warning}`);
+    assert(IN_CONTRACT_BITS.includes(r.bits),
+      `bits is ${r.bits}; the course key contract is ${IN_CONTRACT_BITS.join(' or ')}`);
+    // In-contract sizes carry no warning — that is what "in contract" means, and
+    // it is what keeps this from silently accepting an off-contract key.
+    assert(!r.warning, `an in-contract ${r.bits}-bit key produced a warning: ${r.warning}`);
   });
 
   const priv = await validateCoursePublicKey(fixture.private_key_pkcs8_pem);
@@ -233,12 +258,19 @@ if (fixture) {
   const crlf = `  ${fixture.public_key_spki_pem.trim().replace(/\n/g, '\r\n')}  `;
   const crlfResult = await validateCoursePublicKey(crlf);
   check('a CRLF / untrimmed paste of the same key still validates', () => {
+    // The property under test is NORMALISATION, not size: the same key pasted
+    // with Windows line endings and stray whitespace must validate to the same
+    // result. Comparing against `r` rather than a literal says exactly that, and
+    // cannot go stale when the fixture key is reissued at a different size.
     assert(crlfResult.ok === true, `ok is ${crlfResult.ok}: ${crlfResult.error}`);
-    assert(crlfResult.bits === 2048, `bits is ${crlfResult.bits}`);
+    assertEqual(crlfResult.bits, r.bits,
+      'a CRLF paste of the same key validated to a different modulus size');
+    assertEqual(crlfResult.warning, r.warning,
+      'a CRLF paste of the same key produced a different warning');
   });
 } else {
   for (const n of [
-    'fixture SPKI public key validates as a 2048-bit RSA key',
+    'fixture key is an in-contract RSA PUBLIC key (2048 or 4096, never private)',
     'fixture PRIVATE key is rejected with the private-key message',
     'a truncated paste is rejected',
     'a CRLF / untrimmed paste of the same key still validates',
@@ -1704,6 +1736,7 @@ ${r.problem_statement}`);
     // A real key when the fixture is available, so the spec-building checks
     // below exercise the validating path rather than a placeholder.
     coursePublicKey: fixture ? fixture.public_key_spki_pem : '-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----\n',
+    submissionAddress: 'submit.example.edu/eng17',
     problems: [{
       id: 'p1', name: 'Divider', description: 'A stem with a $V_s$ in it.',
       subsections: [
@@ -2388,6 +2421,373 @@ ${r.problem_statement}`);
   });
 }
 
+
+
+// =====================================================
+// THE STUDENT ZIP IS POSTABLE AS IT COMES, AND ASSERTED BEFORE IT IS WRITTEN
+// =====================================================
+// The failure being removed: the export ZIP holds `student/` and `instructor/`,
+// and posting it correctly requires the instructor to unzip and re-zip by hand.
+// Skipping that step is silent and total — the Submission app's `baseName()`
+// ignores directory prefixes, so the WHOLE export loads perfectly and the
+// student receives the grading rubric alongside their assignment with nothing
+// anywhere reporting a problem.
+//
+// So the assertions below are about publishing, not about tidiness: an archive
+// goes to a whole class at once and cannot be recalled.
+{
+  const { buildStudentEntries, buildExportEntries, exportFilenames,
+          STUDENT_DIR, INSTRUCTOR_DIR, DISTRIBUTION_NOTICE_NAME } = exportPdfSvc;
+
+  const hwAssignment = (extra = {}) => makeAssignment({
+    inputMode: 'handwritten',
+    targetPoints: 100,
+    submissionAddress: 'submit.example.edu/demo',
+    problems: [{
+      id: 'p1', name: 'Divider', description: '',
+      subsections: [
+        { id: 's1', name: 'A', description: 'Do it.', points: 50,
+          submissionType: 'Handwritten', handwrittenGradingMode: 'ai', answerLines: 6 },
+        { id: 's2', name: 'B', description: 'Check it.', points: 50,
+          submissionType: 'Handwritten', handwrittenGradingMode: 'ai', answerLines: 6 },
+      ],
+    }],
+    ...extra,
+  });
+
+  const elAssignment = makeAssignment({ targetPoints: 100 });
+  const hwEntries = await buildExportEntries(hwAssignment());
+  const elEntries = await buildExportEntries(elAssignment);
+
+  check('student ZIP: handwritten carries exactly the sheet, the spec and the map', () => {
+    const names = Object.keys(buildStudentEntries(hwEntries, hwAssignment())).sort();
+    assertEqual(names.filter(n => !n.startsWith('layout_')),
+      ['assignment.pdf', 'assignment_spec.json'], 'the handwritten student ZIP is not the three expected files');
+    assert(names.some(n => /^layout_[A-Z0-9]{1,12}\.csv$/.test(n)),
+      `no layout map in the student ZIP: ${names.join(', ')}`);
+    assertEqual(names.length, 3, `expected exactly three files, got ${names.join(', ')}`);
+  });
+
+  check('student ZIP: electronic carries exactly the sheet and the spec (item 1)', () => {
+    assertEqual(Object.keys(buildStudentEntries(elEntries, elAssignment)).sort(),
+      ['assignment.pdf', 'assignment_spec.json'], 'the electronic student ZIP is not the two expected files');
+  });
+
+  check('student ZIP: every entry is at the root, with no student/ prefix and no separator', () => {
+    for (const flavour of [[hwEntries, hwAssignment()], [elEntries, elAssignment]]) {
+      for (const name of Object.keys(buildStudentEntries(...flavour))) {
+        assert(!name.startsWith(STUDENT_DIR), `"${name}" kept its ${STUDENT_DIR} prefix`);
+        assert(!name.includes('/') && !name.includes('\\'), `"${name}" carries a path separator`);
+      }
+    }
+  });
+
+  check('student ZIP: it is the same bytes as student/ in the export, not a second build', () => {
+    // The point of filtering the one entry map: the two archives cannot come to
+    // disagree about what is student-facing, because there is only one list.
+    const student = buildStudentEntries(hwEntries, hwAssignment());
+    for (const [name, content] of Object.entries(student)) {
+      assert(hwEntries[`${STUDENT_DIR}${name}`] === content,
+        `"${name}" in the student ZIP is not the object from ${STUDENT_DIR}`);
+    }
+    assertEqual(Object.keys(student).length,
+      Object.keys(hwEntries).filter(n => n.startsWith(STUDENT_DIR)).length,
+      'the student ZIP and student/ hold different numbers of files');
+  });
+
+  check('student ZIP: nothing from instructor/ and no notice, checked by content too', () => {
+    const student = buildStudentEntries(hwEntries, hwAssignment());
+    const instructorBlobs = Object.entries(hwEntries)
+      .filter(([n]) => n.startsWith(INSTRUCTOR_DIR) || n === DISTRIBUTION_NOTICE_NAME);
+    for (const [iName, iContent] of instructorBlobs) {
+      for (const [sName, sContent] of Object.entries(student)) {
+        assert(sContent !== iContent,
+          `"${sName}" in the student ZIP is the same content as "${iName}"`);
+      }
+    }
+  });
+
+  // ---- The deliberate negatives -----------------------------------------
+  // Each doctors the entry map so an instructor file would reach students, and
+  // asserts the export STOPS rather than writing an archive that cannot be
+  // recalled. Mutation-tested by construction: each case fails only because of
+  // the specific rule it names.
+  const negatives = [
+    ['an instructor file mis-filed under student/',
+      e => ({ ...e, [`${STUDENT_DIR}EEC1_Lab_1_In-Lab_grading_rubric.json`]:
+                    e[Object.keys(e).find(n => n.endsWith('_grading_rubric.json'))] }),
+      /is not a file students may receive/],
+    ['the grader document under an innocent-looking name',
+      e => ({ ...e, [`${STUDENT_DIR}assignment_notes.html`]:
+                    e[Object.keys(e).find(n => n.endsWith('_grader_document.html'))] }),
+      /assignment_notes\.html" is not a file students may receive/],
+    ['the instructor-only notice moved into student/',
+      e => ({ ...e, [`${STUDENT_DIR}${DISTRIBUTION_NOTICE_NAME}`]: e[DISTRIBUTION_NOTICE_NAME] }),
+      /instructor-only notice/],
+    ['a nested path under student/',
+      e => ({ ...e, [`${STUDENT_DIR}extra/notes.txt`]: 'x' }),
+      /nested inside student\/ — the student ZIP is flat/],
+    ['the layout map dropped, so the sheet would ship without it',
+      e => { const o = { ...e }; delete o[Object.keys(o).find(n => n.includes('layout_'))]; return o; },
+      /missing the layout map/],
+  ];
+
+  for (const [label, doctor, expected] of negatives) {
+    check(`student ZIP refuses: ${label}`, () => {
+      let threw = null;
+      try { buildStudentEntries(doctor(hwEntries), hwAssignment()); } catch (err) { threw = err; }
+      assert(threw, 'the bad student ZIP was built anyway');
+      assert(/would not have been safe to post/.test(threw.message),
+        `the failure does not say what went wrong: ${threw.message}`);
+      assert(expected.test(threw.message),
+        `the failure does not name the specific problem: ${threw.message}`);
+    });
+  }
+
+  check('student ZIP: a clean export is NOT refused — the guard is not a blanket no', () => {
+    // The counterpart every refusal test needs: proof the guard passes the real
+    // thing, so a rule that refused everything would be caught.
+    buildStudentEntries(hwEntries, hwAssignment());
+    buildStudentEntries(elEntries, elAssignment);
+  });
+
+
+  // ---- MIXED-MEDIUM (2026-09-05) ----------------------------------------
+  // One assignment is either handwritten throughout or electronic throughout.
+  // Both directions used to export CLEANLY, producing an answer that cannot be
+  // collected, with nothing downstream able to notice: `layout_id` hashes
+  // geometry, and mixed-medium geometry is valid geometry.
+  const mixedSubs = [
+    { id: 's1', name: 'Handwritten part', description: 'Do it.', points: 25,
+      submissionType: 'Handwritten', handwrittenGradingMode: 'ai', answerLines: 6 },
+    { id: 's2', name: 'Typed part', description: 'Type it.', points: 25, submissionType: 'Text' },
+    { id: 's3', name: 'AI graded part', description: 'Explain.', points: 25,
+      submissionType: 'AI Graded: Short' },
+    { id: 's4', name: 'Photo part', description: 'Photograph it.', points: 25,
+      submissionType: 'Image', maxImages: 2, imageGradingMode: 'human' },
+  ];
+  const mixed = (inputMode) => makeAssignment({
+    inputMode, targetPoints: 100,
+    problems: [{ id: 'p1', name: 'Mixed problem', description: 'A shared setup.',
+                 subsections: mixedSubs }],
+  });
+
+  // The entries map is irrelevant to this refusal — it fires on the assignment,
+  // before anything is filtered — so a clean handwritten map is reused for both
+  // directions. That is deliberate: it proves the guard is not accidentally
+  // reading the files.
+  check('mixed-medium: a HANDWRITTEN assignment with electronic parts is refused', () => {
+    let threw = null;
+    try { buildStudentEntries(hwEntries, mixed('handwritten')); } catch (err) { threw = err; }
+    assert(threw, 'a mixed-medium handwritten assignment exported anyway');
+    assert(/mixes handwritten and electronic sub-parts/.test(threw.message),
+      `the refusal does not name the defect: ${threw.message}`);
+    assert(/every sub-part must be Handwritten/.test(threw.message),
+      `the refusal does not state the rule for this direction: ${threw.message}`);
+    // It must NAME the offending sub-parts — a refusal that says only "mixed
+    // medium" sends the author hunting through a long assignment.
+    for (const label of ['1b. Typed part — Text',
+                         '1c. AI graded part — AI Graded: Short',
+                         '1d. Photo part — Image']) {
+      assert(threw.message.includes(label), `the refusal does not name "${label}": ${threw.message}`);
+    }
+    // And must NOT accuse the part that is correct.
+    assert(!/1a\. Handwritten part/.test(threw.message),
+      `the refusal names a sub-part that is allowed: ${threw.message}`);
+  });
+
+  check('mixed-medium: an ELECTRONIC assignment with handwritten parts is refused', () => {
+    let threw = null;
+    try { buildStudentEntries(elEntries, mixed('electronic')); } catch (err) { threw = err; }
+    assert(threw, 'a mixed-medium electronic assignment exported anyway');
+    assert(/mixes handwritten and electronic sub-parts/.test(threw.message),
+      `the refusal does not name the defect: ${threw.message}`);
+    assert(/no sub-part may be Handwritten/.test(threw.message),
+      `the refusal does not state the rule for this direction: ${threw.message}`);
+    assert(threw.message.includes('1a. Handwritten part — Handwritten'),
+      `the refusal does not name the offending sub-part: ${threw.message}`);
+    // The electronic parts are the correct ones here; naming them would be wrong.
+    for (const wrong of ['1b. Typed part', '1c. AI graded part', '1d. Photo part']) {
+      assert(!threw.message.includes(wrong),
+        `the refusal names an allowed sub-part "${wrong}": ${threw.message}`);
+    }
+  });
+
+  check('mixed-medium: a .md written by hand outside the app is refused too', async () => {
+    // THIS is why the guard is at export and not at authoring. The editor
+    // filters the medium pills by mode, so its UI cannot build a mixed
+    // assignment — but `parseMdToAssignment` sets `inputMode` and the per-part
+    // types with no cross-check between them, so a hand-written `.md` reaches
+    // Export having never passed through the editor.
+    const handMd = [
+      '# MIX: Imported By Hand', '',
+      '**Input:** handwritten', '',
+      '**Preamble:** Answer every part.', '',
+      '## Problem 1: Mixed problem',
+      'A shared setup.', '',
+      '### (a) Handwritten part [50 pts] [handwritten]',
+      'Question text for the handwritten part.', '',
+      '### (b) Typed part [50 pts] [text]',
+      'Question text for the typed part.', '',
+    ].join('\n');
+    const imported = parseMdToAssignment(handMd);
+    // The parser itself does not object — that is the finding, asserted so it
+    // cannot quietly change without this note changing with it.
+    assertEqual(imported.inputMode, 'handwritten', 'the .md did not import as handwritten');
+    assertEqual(imported.problems[0].subsections.map(s => s.submissionType),
+      ['Handwritten', 'Text'], 'the .md did not import as mixed');
+
+    let threw = null;
+    try { buildStudentEntries(hwEntries, imported); } catch (err) { threw = err; }
+    assert(threw, 'a mixed-medium assignment imported from .md exported anyway');
+    assert(threw.message.includes('1b. Typed part — Text'),
+      `the refusal does not name the offending sub-part: ${threw.message}`);
+  });
+
+  check('mixed-medium: a single-medium assignment is not refused, in either mode', () => {
+    // The counterpart every refusal needs: proof the guard passes the real
+    // thing. A rule that refused everything would satisfy the tests above.
+    buildStudentEntries(hwEntries, hwAssignment());
+    buildStudentEntries(elEntries, elAssignment);
+  });
+
+  check('mixed-medium: the refusal stops the WHOLE export, not just the student ZIP', async () => {
+    // `downloadZIP` builds and asserts the student entries even though it does
+    // not write them, so the instructor archive of a mixed assignment is refused
+    // too. Exporting "just the instructor copy" of a broken assignment would
+    // leave the defect alive and unremarked.
+    let threw = null;
+    try { await exportPdfSvc.exportService.downloadZIP(mixed('handwritten')); }
+    catch (err) { threw = err; }
+    assert(threw, 'the instructor export of a mixed-medium assignment succeeded');
+    assert(/mixes handwritten and electronic sub-parts/.test(threw.message),
+      `the instructor export failed for some other reason: ${threw.message}`);
+  });
+
+  check('the three download names say who each file is for, read side by side', () => {
+    const n = exportFilenames(hwAssignment());
+    // These names share the assignment stem, so they DO sort next to each other.
+    // That is accepted and unavoidable; what it means is that the distinction
+    // has to survive being read side by side rather than relying on distance.
+    // `Export` was the word that failed — it named the operation and said
+    // nothing about the audience.
+    assertEqual(n.instructorZip, 'EEC1_Lab_1_In-Lab_INSTRUCTOR_ONLY.zip', 'instructor ZIP name');
+    assertEqual(n.studentZip,    'EEC1_Lab_1_In-Lab_FOR_STUDENTS.zip',    'student ZIP name');
+    assertEqual(n.studentPdf,    'EEC1_Lab_1_In-Lab_FOR_STUDENTS.pdf',    'student PDF name');
+
+    // No name may say only what the operation was.
+    for (const name of Object.values(n)) {
+      assert(!/_Export\./.test(name), `"${name}" still names the operation rather than the audience`);
+      assert(/FOR_STUDENTS|INSTRUCTOR_ONLY/.test(name),
+        `"${name}" does not say who it is for`);
+    }
+    // The two audiences must not be confusable, in either direction.
+    assert(!n.instructorZip.includes('FOR_STUDENTS'),
+      'the instructor archive reads as student-facing');
+    assert(!n.studentZip.includes('INSTRUCTOR_ONLY') && !n.studentPdf.includes('INSTRUCTOR_ONLY'),
+      'a student file reads as instructor-only');
+    // The student ZIP and the student PDF are one decision, so they differ only
+    // by extension.
+    assertEqual(n.studentPdf.replace(/\.pdf$/, ''), n.studentZip.replace(/\.zip$/, ''),
+      'the student PDF and the student ZIP do not read as the same decision');
+  });
+
+  check('item 5: the standalone PDF is byte-identical to the one inside the student ZIP', async () => {
+    // Asserted over the ARTIFACTS the two download handlers actually save, not
+    // over what they meant to save. An earlier version of this check read
+    // `buildStudentEntries` directly and passed happily against a
+    // `downloadStudentPdf` mutated to regenerate the PDF from scratch — it
+    // proved a property of a function neither download calls.
+    const a = hwAssignment();
+    const pdfDownload = await exportPdfSvc.exportService.downloadStudentPdf(a);
+    const zipDownload = await exportPdfSvc.exportService.downloadStudentZip(a);
+
+    const JSZipLib = requireFromRepo('jszip');
+    const opened = await JSZipLib.loadAsync(await zipDownload.blob.arrayBuffer());
+    const inZip = Buffer.from(await opened.file('assignment.pdf').async('uint8array'));
+    const standalone = Buffer.from(await pdfDownload.blob.arrayBuffer());
+
+    // Identical apart from the PDF trailer's `/ID`, which jsPDF fills with a
+    // fresh random document identifier on every build and which carries no
+    // content at all. Measured: two builds of the same assignment differ in
+    // exactly those 32 hex characters and nowhere else, creation date included.
+    // Stripping it is what makes this a check on the DOCUMENT rather than on
+    // the clock.
+    const withoutId = (buf) =>
+      buf.toString('latin1').replace(/\/ID \[[^\]]*\]/g, '/ID []');
+    assert(standalone.length > 0, 'the standalone PDF is empty');
+    assertEqual(standalone.length, inZip.length,
+      `the standalone PDF is ${standalone.length} B and the one in the ZIP is ${inZip.length} B`);
+    assert(withoutId(inZip) === withoutId(standalone),
+      'the standalone PDF is not the same document as the PDF in the student ZIP');
+    // And the ZIP really is flat, checked on the archive rather than the map.
+    assertEqual(Object.keys(opened.files).filter(n => n.includes('/')), [],
+      'the written student ZIP contains a directory');
+  });
+}
+
+// =====================================================
+// THE SUBMISSION ADDRESS SURVIVES EVERY ROUND TRIP
+// =====================================================
+// It prints onto paper and nowhere else, so losing it silently produces a sheet
+// that does not tell students how to hand the work in — which is the whole
+// defect the section was added to remove, reintroduced by the restore path.
+{
+  const withAddress = makeAssignment({
+    inputMode: 'handwritten',
+    targetPoints: 100,
+    submissionAddress: 'submit.example.edu/eng17',
+  });
+
+  check('submission address: Export .md → Import Markdown carries it', () => {
+    const md = assignmentToMd(withAddress);
+    assert(/\*\*Submit at:\*\* submit\.example\.edu\/eng17/.test(md),
+      `the .md does not carry the address:\n${md.split('\n').slice(0, 12).join('\n')}`);
+    assertEqual(parseMdToAssignment(md).submissionAddress, 'submit.example.edu/eng17',
+      'the address did not survive the .md round trip');
+  });
+
+  check('submission address: an .md without one produces no field at all', () => {
+    // Absence must stay absence: a file written before this existed round-trips
+    // byte-for-byte, and an empty string would print an empty submission section.
+    const md = assignmentToMd(makeAssignment({ targetPoints: 100 }));
+    assert(!/Submit at:/.test(md), 'a .md gained a Submit at line it never had');
+    assert(!('submissionAddress' in parseMdToAssignment(md)),
+      'importing an .md with no address invented the field');
+  });
+
+  check('submission address: it is NOT in the student spec', async () => {
+    // The whitelist excludes by default and this stays excluded: the student is
+    // already inside the app by the time they can read the spec, so it would be
+    // a field that reaches students and is read by nothing.
+    const spec = await buildAssignmentSpec(withAddress);
+    assert(!('submissionAddress' in spec), 'the submission address reached the student spec');
+    assert(!STUDENT_SPEC_FIELDS.assignment.includes('submissionAddress'),
+      'the submission address was added to the student whitelist');
+  });
+
+  // The two parsers are required to move in lockstep; this holds them to it on
+  // the one field this work order added.
+  {
+    const python = ['python', 'python3', 'py'].find(exe =>
+      spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
+    const name = 'submission address: convert.py reads the same line the app writes';
+    if (!python) results.push(`  SKIP  ${name} (no Python interpreter on PATH)`);
+    else check(name, () => {
+      const work = mkdtempSync(join(tmpdir(), 'gb-submit-at-'));
+      const mdPath = join(work, 'SubmitAtProbe.md');
+      writeFileSync(mdPath, assignmentToMd(withAddress), 'utf8');
+      const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), mdPath], { encoding: 'utf8' });
+      assert(run.status === 0, `convert.py failed: ${run.stderr || run.stdout}`);
+      const spec = JSON.parse(readFileSync(join(work, 'SubmitAtProbe_spec.json'), 'utf8'));
+      assertEqual(spec.submissionAddress, parseMdToAssignment(assignmentToMd(withAddress)).submissionAddress,
+        'convert.py and mdParserService disagree about **Submit at:**');
+      assertEqual(spec.submissionAddress, 'submit.example.edu/eng17',
+        'convert.py did not read the address');
+      rmSync(work, { recursive: true, force: true });
+    });
+  }
+}
 
 // ---------- report ----------
 // Every async check has to land before anything is counted.

@@ -6,7 +6,7 @@ import { Assignment } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService, isRescaleDeclined } from '../services/exportService';
 import { Layout, Card, Button } from '../components/Common';
-import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode } from 'lucide-react';
+import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode, Users } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
 import { parseMdToAssignment } from '../services/mdParserService';
 import { degradeRetiredTypes } from '../services/retiredTypes';
@@ -53,6 +53,28 @@ const Dashboard: React.FC = () => {
       if (isRescaleDeclined(error)) return;
       console.error(error);
       alert(error instanceof Error ? error.message : 'Failed to export the assignment package.');
+    }
+  };
+
+  /**
+   * The archive the instructor posts. Its own button and its own click: Chrome
+   * delivers one programmatic download per user gesture and drops the rest in
+   * silence (see `saveOne` in exportService.ts), so no handler here triggers
+   * two. The loose student PDF lives on the assignment's own page, beside the
+   * room to explain it; a student holding the ZIP already has that PDF.
+   */
+  const handleStudentZip = async (assignment: Assignment) => {
+    try {
+      const { filename, names } = await exportService.downloadStudentZip(assignment);
+      alert(
+        `Downloaded ${filename}\n\nPost this file. It contains:\n` +
+        names.map(n => `  ${n}`).join('\n') +
+        `\n\nIt holds no grading material. Everything else stays with you.`
+      );
+    } catch (error) {
+      if (isRescaleDeclined(error)) return;
+      console.error(error);
+      alert(error instanceof Error ? error.message : 'Failed to build the student ZIP.');
     }
   };
 
@@ -315,9 +337,20 @@ const Dashboard: React.FC = () => {
                   <Copy className="w-4 h-4 sm:mr-2" />
                   <span className="hidden sm:inline">Copy</span>
                 </Button>
-                <Button variant="secondary" onClick={() => handleExport(assignment)} title="Export ZIP">
+                <Button
+                  onClick={() => handleStudentZip(assignment)}
+                  title="The file to post — student files only, no grading material"
+                >
+                  <Users className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Students</span>
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => handleExport(assignment)}
+                  title="Everything, including the answer key — never give this to students"
+                >
                   <Download className="w-4 h-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Export</span>
+                  <span className="hidden sm:inline">Instructor</span>
                 </Button>
                 <Button 
                   variant="danger" 
