@@ -444,19 +444,20 @@ Determine the cutoff frequency of the TE10 mode.
 
 ## 10. Handwritten templates (QR page format)
 
-For a handwritten assignment, **the page-format sheet is the assignment**. Export ZIP puts it in as `student/assignment.pdf` — there is no separate template to go and find, and no second PDF to pick between:
+For a handwritten assignment, **the page-format sheet is the assignment**. Export ZIP puts it at the archive root as `{stem}.pdf` — there is no separate template to go and find, and no second PDF to pick between:
 
 | File in the ZIP | Handwritten | Electronic |
 |---|---|---|
-| `student/assignment.pdf` | **The page-format sheet**: four corner marks, the QR, the question text and one ruled answer area per part, on every page. Print this. | The usual assignment paper. |
-| `student/layout_{TemplateID}.csv` | The sidecar map the Submission app crops by. Its content hash is written into every page's QR. | — |
+| `{stem}.pdf` | **The page-format sheet**: four corner marks, the QR, the question text and one ruled answer area per part, on every page. Print this. | The usual assignment paper. |
+| `{stem}_OPEN_IN_APP.json` | The spec the Submission app loads, **with the layout map inside it** (§13). | The spec the Submission app loads. |
+| `instructor/layout_{TemplateID}.csv` | The instructor's copy of the sidecar map, for setting up the Gradescope outline. Its content hash is written into every page's QR. **Not a student file** — the student's copy travels inside the upload file. | — |
 | `instructor/template.pdf` | — *(not exported: the sheet above already is the answer surface, and a second boxed one only invites printing the wrong PDF)* | The boxed answer-region sheet, for setting up the Gradescope outline — an instructor task, so it is not a student file. |
 
-The spec, the two readable documents, the grading rubric, the grader document, the authoring backup and the `.md` are in both modes — see §13 for the folder split and what may be handed out.
+The two readable documents, the grading rubric, the grader document, the authoring backup and the `.md` are in both modes — see §13 for the shape of the archive and what may be handed out.
 
 The editor's **QR Template** button emits the same sheet plus its map as a standalone ZIP, for regenerating after a layout edit without rebuilding the whole export.
 
-**The PDF and the map must travel together** — which is why both are in `student/`. The PDF is useless without the map its QR hashes to, and the Submission app refuses to crop when the hash does not match — which is the point: a stale map would otherwise register perfectly and cut the wrong rectangles with no error anywhere.
+**The PDF and the map must travel together, and since 2026-09-06 they cannot come apart**: the map is embedded verbatim in `{stem}_OPEN_IN_APP.json` rather than shipped beside the sheet (§13). The PDF is useless without the map its QR hashes to, and the Submission app refuses to crop when the hash does not match — which is the point: a stale map would otherwise register perfectly and cut the wrong rectangles with no error anywhere. Handing a student two files that must match was the arrangement in which they could be mismatched; one file cannot be.
 
 The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Page/GradeBridge_Page_Format_v1.md`, transcribed into `services/pageFormat.ts`, and enforced by the spec 8.7 self-test that runs on every generation — a template that fails any check is not emitted at all.
 
@@ -759,12 +760,12 @@ the artifacts never said who reads them. So, per artifact:
 
 | Artifact | Read by | Authoritative for | Never carries |
 |---|---|---|---|
-| `student/assignment_spec.json` | the Student Submission app | what the student is asked, and how they are allowed to answer it | **grading prompts, grader notes, answer keys, reference solutions, grading-resource settings** — anything a student must not see |
+| `{stem}_OPEN_IN_APP.json` (the student spec) | the Student Submission app | what the student is asked, how they are allowed to answer it, and — handwritten only — **the layout map, embedded verbatim** (§13) | **grading prompts, grader notes, answer keys, reference solutions, grading-resource settings** — anything a student must not see |
 | `instructor/{stem}_authoring_backup.json` | this app, on Import JSON | **restoring an assignment completely** — it is the only artifact that does | *(no restriction: it is the whole assignment, and it is why the ZIP must never be given to students)* |
-| `layout_{TemplateID}.csv` | the page consumer that crops (§10) | **where** each region is on the page — nothing else | anything a grader needs in order to grade |
+| `layout_{TemplateID}.csv` | the page consumer that crops (§10) — reached through `{stem}_OPEN_IN_APP.json`, or as the instructor's own copy under `instructor/` | **where** each region is on the page — nothing else | anything a grader needs in order to grade |
 | `{stem}_grading_rubric.json` | the grading system | what each item asks, what it is worth, what a grader is told, and the answer's **modality** | **model names, temperature, token budgets, or any other grading-system resource decision** |
 | `{stem}_grader_document.html` | a human TA, on screen or on paper | the answer key and the rubric in readable form | anything machine-parsed — nothing may depend on its markup |
-| `assignment.pdf` | the student, on paper | the whole assignment | identity fields — no name, ID or date blank (§10) |
+| `{stem}.pdf` | the student, on paper | the whole assignment | identity fields — no name, ID or date blank (§10) |
 | `instructor/{stem}.md` | this app, on Import Markdown; and a human editing it | the authored source — the format an author actually writes | *(it carries the grading prompts, so it is instructor-only)* |
 | `assignment.html`, `assignment.tex` | a human, for reading and hand-editing | the assignment as a document | anything the other artifacts are authoritative for |
 
@@ -904,67 +905,107 @@ the answer key. It is laid out so that saying so is unnecessary:
 
 ```
 00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt   generated at export time, names every file
-student/                                    the ONLY files a student may receive
-  assignment.pdf                            the sheet they print and write on
-  assignment_spec.json                      loaded by the Student Submission app
-  layout_{TemplateID}.csv                   handwritten only; must travel with the PDF
+{stem}.pdf                                  GIVE TO STUDENTS — they print it and write on it
+{stem}_OPEN_IN_APP.json                     GIVE TO STUDENTS — the one file they load into the app
 instructor/
   {stem}_authoring_backup.json              THE BACKUP — restores everything
   {stem}.md                                 the authored source
   {stem}_grading_rubric.json                for the autograder
   {stem}_grader_document.html               for you and your TAs
   assignment.html, assignment.tex           readable/hand-editable copies
+  layout_{TemplateID}.csv                   handwritten only; YOUR copy, for the Gradescope outline
   template.pdf                              electronic only; for the Gradescope outline
 ```
 
-The folders exist because the prose alone was not enough: having removed the answer key from
-`assignment_spec.json`, the largest remaining disclosure path is an instructor handing out the whole
-ZIP, and "give students the student folder" is a thing a person can actually do correctly. The notice
-is **generated from the entry list**, never hand-maintained — a notice that drifts out of step with
-the folder is worse than none, because it will be believed. A test asserts every file it names is
-present, that it names all four answer-bearing files, and that it never tells anyone to hand out one
-of them.
+The shape exists because prose alone was not enough: having removed the answer key from the student
+spec, the largest remaining disclosure path is an instructor handing out the whole ZIP, and "post the
+two files that are not in a folder" is a thing a person can actually do correctly. The notice is
+**generated from the entry list**, never hand-maintained — a notice that drifts out of step with the
+folder is worse than none, because it will be believed. A test asserts every file it names is present,
+that it names all four answer-bearing files, and that it never tells anyone to hand out one of them.
 
-Filenames are unchanged, which is what the briefs and the Gradescope setup instructions actually name.
-Nothing in the suite unzips this archive programmatically, so the folders break no consumer.
+Nothing in the suite unzips this archive by a hand-written path, so the shape breaks no consumer.
 
-### The three downloads, and why they are three
+### One download, two loose student files, and the map inside the upload file
 
-The folders tell a human what to do. They cannot make the machine refuse the wrong thing, and skipping
-the unzip-and-re-zip step is **silent and complete**: the Submission app matches entries by base name
-and ignores directory prefixes, so the whole export ZIP loads *perfectly* — the student gets their
-assignment and the grading rubric in one download, with nothing anywhere reporting a problem. Since
-2026-09-06 the export therefore offers three separate files:
+**Changed 2026-09-06.** The student package used to be `{stem}_FOR_STUDENTS.zip`, an archive nested
+inside this one. It is gone, and so is `student/`.
 
-| Download | Contents | For |
+A student receiving a zip had to **open it to reach the sheet they print**, and that single act put
+two things in front of them that should never have been there: the layout map — plain text, editable,
+and the file that decides where their answers are cut from — and a second candidate to upload. Two
+loose files replace it:
+
+| File | What a student does with it |
+|---|---|
+| `{stem}.pdf` | Print it. On a handwritten assignment this *is* the answer surface. |
+| `{stem}_OPEN_IN_APP.json` | Load it into the Submission app. One file, nothing to open, and the layout map is inside it. |
+
+**The map travels inside the spec, verbatim.** The spec payload gained two optional fields,
+`layoutCsvName` and `layoutCsv` — both present or both absent, never one — and `layoutCsv` holds **the
+exact text of `instructor/layout_{TemplateID}.csv`: not reformatted, not converted to JSON, not
+normalised.**
+
+That is not fastidiousness, it is the whole reason this is safe. `layout_id` is the SHA-256 of
+`canonicalMapSerialization(rows)` — the **parsed rows**, not the file bytes — so a consumer that
+embeds the same text and parses it with the same parser gets identical rows *by construction*, and the
+hash cannot move. Reformat the text on the way in and that stops being a fact and becomes an argument.
+The hash is printed into the QR on every page of every sheet already in existence: every other mistake
+in the export is a redeploy, this one is a reprint.
+
+Asserted before a byte is written, over the artifact rather than the intention: the spec is decoded
+exactly as a student's browser decodes it and its `layoutCsv` compared character for character with
+the copy written to `instructor/`. A difference of one character **stops the export**. So does a spec
+carrying one of the two fields, a handwritten spec carrying neither, and an electronic spec carrying
+either.
+
+The instructor keeps a copy of the map because setting up the Gradescope outline is an instructor
+task. It is under `instructor/` and **must not be posted**: the notice says so by name, because an
+instructor who remembers the old rule that "the map must travel with the PDF" would otherwise post it,
+and nothing downstream would object.
+
+### The names
+
+| Name | For | Why it reads that way |
 |---|---|---|
-| `{stem}_FOR_STUDENTS.pdf` | `assignment.pdf` on its own | read and print — no unzipping |
-| `{stem}_FOR_STUDENTS.zip` | the `student/` contents, **at the root**, no prefix | load in the app; post this as it comes |
-| `{stem}_INSTRUCTOR_ONLY.zip` | everything, unchanged, in both folders | your backup and your grading material — **contains the grading rubric** |
+| `{stem}_INSTRUCTOR_ONLY.zip` | the instructor | the one download; **contains the grading rubric** |
+| `{stem}.pdf` | the student | a PDF has one obvious use, so it needs no instruction |
+| `{stem}_OPEN_IN_APP.json` | the student | a `.json` is inert to a student, so it carries the instruction — and it names the destination that is **not** the grading site |
 
-**This renames the existing export download.** What used to arrive as `{stem}_Export.zip` is now
+**Why not `_UPLOAD`** (decided 2026-09-06, after it was the first proposal). The student workflow
+contains **two uploads**: this file into the Submission app, and the finished submission archive into
+Gradescope. "Upload" is therefore the one word that appears at both destinations, which makes it the
+one word that cannot tell them apart — and the failure it invites is a student uploading their
+assignment file to Gradescope, where it is accepted and the autograder fails. `_OPEN_IN_APP` names the
+destination that is not the grading site.
+
+Naming the app instead was considered and rejected: **"GradeBridge" and "Gradescope" are four
+characters apart and both begin "Grade"**, so a filename that names the product discriminates worse
+than one that does not.
+
+**This renamed the export download.** What used to arrive as `{stem}_Export.zip` is now
 `{stem}_INSTRUCTOR_ONLY.zip`; folders already unzipped from an older download keep the name they have.
-`Export` is the word that failed — it named the operation and said nothing about who the file was for, so
-the reader had to already know. The three share the assignment stem and therefore still sort next to each
-other, which is unavoidable and accepted: the distinction has to survive being read side by side, and
-`FOR_STUDENTS` against `INSTRUCTOR_ONLY` does where `Export` against `student` did not.
+`Export` is the word that failed — it named the operation and said nothing about who the file was for,
+so the reader had to already know.
 
-The student ZIP is built by **filtering the same entry map the export ZIP is built from**, never from a
-second list of filenames — two lists is how the two would come to disagree about what is student-facing,
-and the disagreement would be silent in the same way. Before a byte is written it is asserted: every
-entry came from `student/`, none is nested, no instructor file or notice is present, and the contents are
-*exactly* what the mode calls for — `assignment.pdf`, `assignment_spec.json` and `layout_{TemplateID}.csv`
-handwritten, the first two electronic. Anything else **stops the export** rather than emitting an archive
-that goes to a whole class at once and cannot be recalled.
+**The two student files deliberately do not say `FOR_STUDENTS`.** That suffix existed to tell an
+*instructor* which file to post, and the notice's first line does that now. These two names are read
+by a student, to whom "for students" says nothing they do not already know. Exactly one of them
+carries an instruction, and it is the one whose misuse is the failure.
 
-The standalone PDF is the *same* PDF that is inside the ZIP, taken from the same build rather than
-regenerated, so a student who took only the ZIP has everything a student who took only the PDF has.
+The student files are selected by **filtering the same entry map the archive is built from**, never
+from a second list of filenames — two lists is how the two would come to disagree about what is
+student-facing, and the disagreement would be silent. Before a byte is written it is asserted: every
+entry came from `student/`, none is nested, no instructor file or notice is among them, and the
+contents are *exactly* the two files. Anything else **stops the export** rather than producing an
+archive that goes to a whole class at once and cannot be recalled.
 
-**Each download has its own button and its own click, and that is not a style choice.** Measured in
-Chrome 152 on 2026-09-06: three programmatic downloads from a single user gesture delivered **one** file,
-with the other two silently dropped — no exception, nothing in the console — and once Chrome had blocked
-automatic downloads for the site, a *single* download from it failed silently too. One file per gesture is
-the only arrangement in which a missing file is impossible rather than merely loud.
+**One download per user gesture, and that is not a style choice.** Measured in Chrome 152 on
+2026-09-06: three programmatic downloads from a single user gesture delivered **one** file, with the
+other two silently dropped — no exception, nothing in the console — and once Chrome had blocked
+automatic downloads for the site, a *single* download from it failed silently too. An export that
+produces one archive cannot break that rule; a rule saying "never call this twice" is one someone has
+to keep.
 
 ### Which file restores your work
 
@@ -977,7 +1018,7 @@ complete:
 |---|---|---|
 | `{stem}_authoring_backup.json` → Import JSON | **everything** | — |
 | `{stem}.md` → Import Markdown | prompts byte-for-byte, `answerLines`, `handwrittenGradingMode`, `inputMode`, `pageFormatId`, `aiFeedback`, **`targetPoints`, reconstructed from the file's own total** (2026-09-01), and **`coursePublicKey`** (2026-09-05) | `config` |
-| `assignment_spec.json` → Import JSON | what a student needs | `aiGradingPrompt`, `graderNote`, `answerLines`, `handwrittenGradingMode`, `targetPoints` |
+| `{stem}_OPEN_IN_APP.json` → Import JSON | what a student needs | `aiGradingPrompt`, `graderNote`, `answerLines`, `handwrittenGradingMode`, `targetPoints` |
 
 Two of those losses are worse than they look:
 

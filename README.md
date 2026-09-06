@@ -22,28 +22,34 @@ GradeBridge apps share an encryption contract and a Gradescope-Docker autograder
 ### What the export ZIP contains
 
 **The ZIP is for you. It MUST NOT be given to students** — four files in
-`instructor/` contain the answer key. Hand out the contents of `student/`, and
-nothing else. The archive is laid out so that is easy to do correctly, and it
-carries a generated notice at the root naming every file.
+`instructor/` contain the answer key. **Post the two files at the root that are
+not in a folder, and nothing else.** The archive is laid out so that is easy to
+do correctly, and it carries a generated notice at the root naming every file.
 
 `{stem}` below is `{CourseCode}_{Title}`, with spaces replaced by underscores.
 
 | Entry | Mode | What it is |
 |---|---|---|
 | `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` | both | Generated at export time from the actual entry list; names every file and who it is for |
-| `student/assignment_spec.json` | both | The file students load into the Submission app. **Encoded** (`gb1:` envelope) and built from a whitelist, so it carries no grading prompt, grader note or answer key |
-| `student/assignment.pdf` | both | Electronic: the handout. **Handwritten: the sheet itself** — the QR-registered pages the student prints and writes on |
-| `student/layout_{TemplateID}.csv` | **handwritten only** | The map the Submission app crops answers by. **It must travel with the PDF.** The printed QR carries a hash of this map, and the app refuses to crop if the two disagree — so give students both files, and do not rename either |
+| `{stem}.pdf` | both | **GIVE TO STUDENTS.** Electronic: the handout. **Handwritten: the sheet itself** — the QR-registered pages the student prints and writes on |
+| `{stem}_OPEN_IN_APP.json` | both | **GIVE TO STUDENTS.** The one file they load into the Submission app. **Encoded** (`gb1:` envelope) and built from a whitelist, so it carries no grading prompt, grader note or answer key — and on a handwritten assignment it carries the layout map inside it, so there is no second file to load and nothing to open |
+| `instructor/layout_{TemplateID}.csv` | **handwritten only** | **Your copy** of the map the Submission app crops answers by, for setting up the Gradescope outline. The student's copy is inside `{stem}_OPEN_IN_APP.json`, byte for byte. **Do not post this**: students no longer need it, and it is the map their answers are cut from |
 | `instructor/{stem}_authoring_backup.json` | both | **The backup that restores everything.** Unencrypted, the whole authoring object. This is what `Import JSON` should be given |
 | `instructor/{stem}.md` | both | The authored source, for the `.md` round trip |
 | `instructor/{stem}_grading_rubric.json` | both | **Private — for the Gradescope autograder** |
 | `instructor/{stem}_grader_document.html` | both | **Private — rubrics and answer keys**, for you and your TAs |
 | `instructor/assignment.html` | both | Readable copy |
 | `instructor/assignment.tex` | both | Editable LaTeX source |
-| `instructor/template.pdf` | **electronic only** | The boxed answer-region sheet for setting up the Gradescope outline. That is an instructor task, so it is not in `student/`. A handwritten assignment does not produce one — its `student/assignment.pdf` already *is* the answer surface, and a second boxed PDF only invites printing the wrong one |
+| `instructor/template.pdf` | **electronic only** | The boxed answer-region sheet for setting up the Gradescope outline. That is an instructor task, so it is not a student file. A handwritten assignment does not produce one — `{stem}.pdf` already *is* the answer surface, and a second boxed PDF only invites printing the wrong one |
 
 Ten entries in either mode. Built by `buildExportEntries` in
 `services/exportService.ts`; `ASSIGNMENT_MD_SPEC.md` §13 is the contract.
+
+**Changed 2026-09-06:** the student package used to be a `{stem}_FOR_STUDENTS.zip`
+nested in this archive. A student had to open it to reach the sheet they print,
+and that put the layout map — plain text, editable, and the file that decides
+where their answers are cut from — in front of them, along with a second
+candidate to upload. There is no student zip any more.
 
 ---
 
@@ -413,7 +419,7 @@ assignment carries it, and it agrees with `is_drawing` in `layout_{TemplateID}.c
 - **Identity is established by the student's authenticated upload** to their
   institution's learning management system, under the agreement the institution
   already holds. This tool is not part of that step and never sees the result.
-- **The student file carries no grading material.** `assignment_spec.json` is
+- **The student file carries no grading material.** `{stem}_OPEN_IN_APP.json` is
   built from an explicit whitelist, and a content check asserts that no grading
   prompt, grader note or reference answer reaches any student-facing artifact,
   by content rather than by field name.
@@ -442,10 +448,10 @@ the suite. Inter and Merriweather are served from this site under their SIL Open
 Font Licences, which the build emits alongside them.
 
 - **Export your JSON regularly** — data is lost if browser cache is cleared
-- **The export ZIP is instructor-only and MUST NOT be given to students.** Four files in its `instructor/` folder contain answers: `{stem}_grader_document.html`, `{stem}_grading_rubric.json`, `{stem}_authoring_backup.json` and `{stem}.md`. Students receive only the contents of `student/`. The ZIP carries a generated `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` at its root naming every file.
-- **`{stem}_authoring_backup.json` (in `instructor/`) is the file that restores an assignment completely** — the whole authoring object, unencrypted, including the grading prompts, grader notes, answer-space settings, the point target and the course public key. It is what Import JSON should be given. `assignment_spec.json` restores only what a student needs, and Import Markdown misses `config`; both now say so on import rather than losing your work silently. (Import Markdown used to miss `targetPoints` too — fixed 2026-09-01, it now reads the file's own total — and `coursePublicKey`, fixed 2026-09-05, which the `.md` now carries as a fenced `` ```pem `` block.)
-- **`aiGradingPrompt` and `graderNote` are NOT in `assignment_spec.json`.** The student's file is built from an explicit whitelist of the fields the Submission app reads, so no grading prompt, grader note, answer key or reference solution travels to a student's browser. Until 2026-08-31 the spec was the whole assignment object and did carry every prompt — if you hold an export made before then, treat its rubrics as disclosed. Nothing had been distributed.
-- **To reload an assignment as a template, use `Export .md` → `Import Markdown`**, which carries the prompts and grader notes in full. Importing an exported `assignment_spec.json` restores the questions but not the grading material, because that material is no longer in the file.
+- **The export ZIP is instructor-only and MUST NOT be given to students.** Four files in its `instructor/` folder contain answers: `{stem}_grader_document.html`, `{stem}_grading_rubric.json`, `{stem}_authoring_backup.json` and `{stem}.md`. Students receive only the two files at the archive root that are not in a folder: `{stem}.pdf` and `{stem}_OPEN_IN_APP.json`. The ZIP carries a generated `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` at its root naming every file.
+- **`{stem}_authoring_backup.json` (in `instructor/`) is the file that restores an assignment completely** — the whole authoring object, unencrypted, including the grading prompts, grader notes, answer-space settings, the point target and the course public key. It is what Import JSON should be given. `{stem}_OPEN_IN_APP.json` (the student spec) restores only what a student needs, and Import Markdown misses `config`; both now say so on import rather than losing your work silently. (Import Markdown used to miss `targetPoints` too — fixed 2026-09-01, it now reads the file's own total — and `coursePublicKey`, fixed 2026-09-05, which the `.md` now carries as a fenced `` ```pem `` block.)
+- **`aiGradingPrompt` and `graderNote` are NOT in the student spec (`{stem}_OPEN_IN_APP.json`).** The student's file is built from an explicit whitelist of the fields the Submission app reads, so no grading prompt, grader note, answer key or reference solution travels to a student's browser. Until 2026-08-31 the spec was the whole assignment object and did carry every prompt — if you hold an export made before then, treat its rubrics as disclosed. Nothing had been distributed.
+- **To reload an assignment as a template, use `Export .md` → `Import Markdown`**, which carries the prompts and grader notes in full. Importing an exported student spec restores the questions but not the grading material, because that material is no longer in the file.
 - Your rubrics reach the autograder by their proper route, `{Course}_{Title}_grading_rubric.json`, which stays with you
 
 ---
@@ -455,7 +461,7 @@ Font Licences, which the build emits alongside them.
 Optional, per assignment, in the editor under the preamble. Paste the **public**
 key issued for your course — SPKI PEM, starting with
 `-----BEGIN PUBLIC KEY-----` — and it is carried in the exported
-`assignment_spec.json` as `coursePublicKey`, and in the exported `.md` as a
+`{stem}_OPEN_IN_APP.json` as `coursePublicKey`, and in the exported `.md` as a
 fenced `` ```pem `` block at the top of the file, so `Export .md` →
 `Import Markdown` gives the key back. Until 2026-09-05 that round trip dropped
 it in silence and the next export quietly fell back to `gb1`.
