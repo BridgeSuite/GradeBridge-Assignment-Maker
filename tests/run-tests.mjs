@@ -2789,6 +2789,170 @@ ${r.problem_statement}`);
   }
 }
 
+// =====================================================
+// THE COURSE PUBLIC KEY IS IN THE .md, AND SURVIVES THE ROUND TRIP
+// =====================================================
+// The .md is meant to be the source: the instructor authors there and the app
+// imports it. Until 2026-09-05 the format could not express `coursePublicKey`
+// — the one field that turns gb2 on — so `Export .md` → `Import Markdown`
+// dropped it, the NEXT export fell back to the unhardened gb1 encoding, and
+// nothing anywhere said a word. `GB2_INSTRUCTOR_KEY_SETUP.md` step 3 told
+// instructors to work around it by never building a distributable spec from a
+// .md, which is exactly the kind of instruction that gets forgotten under time
+// pressure.
+//
+// A 4096-bit SPKI PEM is fourteen lines and every metadata row in
+// ASSIGNMENT_MD_SPEC.md §2 is single-line by construction, so the key travels
+// as a fenced ```pem block. The fence is inert to everything already in the
+// pipeline: `splitFigures` opens only on ```svg, and the metadata region's body
+// is discarded by both parsers, so the PEM never reaches a description, an
+// escaper or the `$...$` splitter.
+//
+// THE KEY IS GENERATED HERE, NOT READ FROM DISK. What is under test is whether
+// a key survives export and re-import, not which key it is, so a throwaway
+// keypair keeps this self-contained and reproducible on any machine. It is
+// 4096 bits because that is the shape of the real ENG17 Fall key, and a
+// hardcoded 2048 assumption is precisely what took two assertions down on
+// 2026-09-05.
+{
+  const { pem: coursePem } = await genKey(4096);
+  const keyed = makeAssignment({
+    inputMode: 'handwritten',
+    targetPoints: 100,
+    coursePublicKey: coursePem,
+  });
+  const keyless = makeAssignment({ inputMode: 'handwritten', targetPoints: 100 });
+
+  /** The .md with its ```pem block removed — the deliberate negative. */
+  const stripKeyBlock = (md) => {
+    const out = [];
+    let inBlock = false;
+    for (const line of md.split('\n')) {
+      if (!inBlock && /^```pem$/.test(line)) { inBlock = true; continue; }
+      if (inBlock) { if (/^```$/.test(line)) inBlock = false; continue; }
+      out.push(line);
+    }
+    return out.join('\n');
+  };
+
+  check('course key: the generated key really is 4096 bits, like the real one', async () => {
+    const r = await validateCoursePublicKey(coursePem);
+    assert(r.ok, `the generated key did not validate: ${r.error}`);
+    assertEqual(r.bits, 4096, 'the round-trip key is not the shape of the real course key');
+  });
+
+  check('course key: Export .md writes a ```pem block with the armour intact', () => {
+    const md = assignmentToMd(keyed);
+    assert(md.includes('```pem\n-----BEGIN PUBLIC KEY-----\n'),
+      `the .md does not open a pem fence on the armour:\n${md.split('\n').slice(0, 24).join('\n')}`);
+    assert(md.includes('-----END PUBLIC KEY-----\n```\n'), 'the pem fence does not close on the armour');
+    // Verbatim, not reconstructed: the whole armoured key is in the file as the
+    // instructor would paste it anywhere else.
+    assert(md.includes(coursePem), 'the key in the .md is not byte-identical to the key on the assignment');
+  });
+
+  check('course key: Import Markdown reads it back byte-identical', () => {
+    const back = parseMdToAssignment(assignmentToMd(keyed));
+    assertEqual(back.coursePublicKey, normalizeCoursePublicKey(coursePem),
+      'the course key did not survive the .md round trip');
+  });
+
+  check('course key: export → fresh import → export agrees on the key', async () => {
+    // THE ACCEPTANCE TEST. Step 3 is the one that used to fail: the reimport
+    // held no key at all, so the second spec silently fell back to gb1.
+    const first = await buildAssignmentSpec(keyed);
+    const reimported = parseMdToAssignment(assignmentToMd(keyed));
+    const second = await buildAssignmentSpec(reimported);
+    assert('coursePublicKey' in second, 'the second export lost the course key — gb2 reverted to gb1');
+    assertEqual(second.coursePublicKey, first.coursePublicKey,
+      'the two assignment_spec.json files disagree about the course key');
+    assertEqual(second.coursePublicKey, normalizeCoursePublicKey(coursePem),
+      'the key in the spec is not the key that was set');
+  });
+
+  check('course key: strip the block and the spec carries no key at all', async () => {
+    // The deliberate negative — proof the check above can fail. A .md with no
+    // ```pem block must produce a spec with no `coursePublicKey` field, which is
+    // what every file written before 2026-09-05 looks like.
+    const stripped = stripKeyBlock(assignmentToMd(keyed));
+    assert(!stripped.includes('BEGIN PUBLIC KEY'), 'the strip helper left the key in the file');
+    const back = parseMdToAssignment(stripped);
+    assert(!('coursePublicKey' in back), 'importing a keyless .md invented a course key');
+    const spec = await buildAssignmentSpec(back);
+    assert(!('coursePublicKey' in spec), 'a keyless import still wrote a course key into the spec');
+  });
+
+  check('course key: a keyless .md stays keyless in both directions', () => {
+    const md = assignmentToMd(keyless);
+    assert(!md.includes('```pem'), 'a .md gained a pem fence it never had');
+    assert(!('coursePublicKey' in parseMdToAssignment(md)), 'importing a keyless .md invented the field');
+  });
+
+  check('course key: a malformed block warns, drops the key, and never refuses the file', () => {
+    // Rejecting the FILE would lock the author out of the one screen where a
+    // bad key can be replaced. So: the assignment lands intact, without a key,
+    // and the instructor is told — a stated downgrade rather than a silent one.
+    const md = assignmentToMd(keyed).replace(coursePem, 'this is not a key');
+    const warnings = [];
+    const back = parseMdToAssignment(md, warnings);
+    assert(!('coursePublicKey' in back), 'a malformed key was carried onto the assignment');
+    assertEqual(back.problems.length, keyed.problems.length, 'a malformed key cost the file its problems');
+    assertEqual(back.title, keyed.title, 'a malformed key cost the file its title');
+    assert(warnings.some(w => /pem block/.test(w) && /WITHOUT a course key/.test(w)),
+      `nothing warned about the rejected key: ${JSON.stringify(warnings)}`);
+  });
+
+  check('course key: a private key in the block is rejected, not carried', () => {
+    const md = assignmentToMd(keyed).replace(
+      coursePem,
+      '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B\n-----END PRIVATE KEY-----');
+    const warnings = [];
+    assert(!('coursePublicKey' in parseMdToAssignment(md, warnings)),
+      'a private key pasted into the block was accepted as the course key');
+    assert(warnings.length === 1, `expected exactly one warning, got ${JSON.stringify(warnings)}`);
+  });
+
+  check('course key: a PEM below the first problem is prose, not the course key', () => {
+    // The key is read from the metadata region only. A question that quotes a
+    // public key — an assignment about RSA is not far-fetched — is text.
+    const md = assignmentToMd(keyless)
+      .replace(/^(## Problem 1:.*)$/m, `$1\n\n\`\`\`pem\n${coursePem}\n\`\`\``);
+    assert(md.includes('BEGIN PUBLIC KEY'), 'the probe did not place a key in the problem');
+    assert(!('coursePublicKey' in parseMdToAssignment(md)),
+      'a PEM inside a problem was read as the course key');
+  });
+
+  // The two parsers are required to move in lockstep. This holds them to it on
+  // the field whose absence silently downgraded students' encryption.
+  {
+    const python = ['python', 'python3', 'py'].find(exe =>
+      spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
+    const name = 'course key: convert.py reads the same block the app writes';
+    if (!python) results.push(`  SKIP  ${name} (no Python interpreter on PATH)`);
+    else check(name, () => {
+      const work = mkdtempSync(join(tmpdir(), 'gb-course-key-'));
+      const mdPath = join(work, 'CourseKeyProbe.md');
+      writeFileSync(mdPath, assignmentToMd(keyed), 'utf8');
+      const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), mdPath], { encoding: 'utf8' });
+      assert(run.status === 0, `convert.py failed: ${run.stderr || run.stdout}`);
+      const spec = JSON.parse(readFileSync(join(work, 'CourseKeyProbe_spec.json'), 'utf8'));
+      assertEqual(spec.coursePublicKey, parseMdToAssignment(assignmentToMd(keyed)).coursePublicKey,
+        'convert.py and mdParserService disagree about the ```pem block');
+      assertEqual(spec.coursePublicKey, normalizeCoursePublicKey(coursePem),
+        'convert.py did not read the course key');
+
+      // And the same negative, so the two agree about absence too.
+      const barePath = join(work, 'CourseKeyBare.md');
+      writeFileSync(barePath, assignmentToMd(keyless), 'utf8');
+      const bare = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), barePath], { encoding: 'utf8' });
+      assert(bare.status === 0, `convert.py failed on the keyless file: ${bare.stderr || bare.stdout}`);
+      const bareSpec = JSON.parse(readFileSync(join(work, 'CourseKeyBare_spec.json'), 'utf8'));
+      assert(!('coursePublicKey' in bareSpec), 'convert.py invented a course key on a keyless file');
+      rmSync(work, { recursive: true, force: true });
+    });
+  }
+}
+
 // ---------- report ----------
 // Every async check has to land before anything is counted.
 await Promise.all(pending);

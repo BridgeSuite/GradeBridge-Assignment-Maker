@@ -94,6 +94,7 @@ const lay = await loadModule(join(REPO, 'services', 'templateLayout.ts'), 'templ
 const enc = await loadModule(join(REPO, 'services', 'qrEncoder.ts'), 'qrEncoder.mjs');
 const selfTest = await loadModule(join(REPO, 'services', 'templateSelfTest.ts'), 'templateSelfTest.mjs');
 const exportSvcForInstr = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportForInstr.mjs');
+const mdParserForKey = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParserForKey.mjs');
 
 console.log('\nAssignment Maker — GradeBridge page format (QR template)\n');
 
@@ -443,6 +444,43 @@ check('a changed rectangle changes layout_id — the stale-map guard actually bi
   const a = await qrp.computeLayoutId(rows), b = await qrp.computeLayoutId(moved);
   assert(a !== b, 'a moved rectangle produced the same layout_id');
 });
+
+// ---------- the course public key is outside the geometry ----------
+// The key moved into the .md on 2026-09-05 (ASSIGNMENT_MD_SPEC.md §2). It is
+// metadata, not paint: it prints nowhere and page 1 carries no regions, so
+// setting it must not move a rectangle. Asserted rather than assumed, because
+// `layout_id` is in the QR on every printed page and a moved hash makes the
+// Submission app refuse to crop.
+//
+// The key is generated here rather than read from disk: what is under test is
+// that a key changes no geometry, not which key it is. 4096 bits, because that
+// is the shape of the real course key.
+{
+  const pair = await webcrypto.subtle.generateKey(
+    { name: 'RSA-OAEP', modulusLength: 4096, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+    true, ['encrypt', 'decrypt']
+  );
+  const der = Buffer.from(await webcrypto.subtle.exportKey('spki', pair.publicKey)).toString('base64');
+  const COURSE_PEM =
+    `-----BEGIN PUBLIC KEY-----\n${der.replace(/(.{64})/g, '$1\n').trimEnd()}\n-----END PUBLIC KEY-----\n`;
+
+  check('course key: setting one moves neither layout_id nor the page count', async () => {
+    const keyed = await gen.generateTemplate({ ...appendixB, coursePublicKey: COURSE_PEM });
+    assertEqual(keyed.layoutId, t.layoutId, 'setting a course key moved the layout id');
+    assertEqual(keyed.pageCount, t.pageCount, 'setting a course key changed the page count');
+  });
+
+  check('course key: layout_id survives Export .md → Import Markdown', async () => {
+    // The whole point of putting the key in the .md is that the restore route
+    // gives back the same assignment. Same rectangles, same hash, key intact.
+    const md = exportSvcForInstr.assignmentToMd({ ...appendixB, coursePublicKey: COURSE_PEM });
+    const back = mdParserForKey.parseMdToAssignment(md);
+    assertEqual(back.coursePublicKey, COURSE_PEM.trim(), 'the key did not survive the .md round trip');
+    const after = await gen.generateTemplate(back);
+    assertEqual(after.layoutId, t.layoutId, 'the .md round trip moved the layout id');
+    assertEqual(after.pageCount, t.pageCount, 'the .md round trip changed the page count');
+  });
+}
 
 // ---------- pagination and sizing ----------
 check('a long assignment paginates, and every page carries its own correct k of N', async () => {

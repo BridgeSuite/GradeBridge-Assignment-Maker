@@ -846,6 +846,27 @@ export const assignmentToMd = (assignment: Assignment): string => {
     lines.push(`**Submit at:** ${normalized.submissionAddress!.trim()}`);
     lines.push('');
   }
+  // The course public key — the field that turns gb2 on. A 4096-bit SPKI PEM is
+  // fourteen lines, and the metadata rows above are single-line by construction,
+  // so this is a fenced block rather than a row. Nothing else in the pipeline
+  // touches it: `FIGURE_FENCE_OPEN_RE` matches only ```svg, and the metadata
+  // region's body is discarded by both parsers, so the PEM never reaches a
+  // description, an escaper or the `$...$` splitter.
+  //
+  // Emitted only when set, so a keyless file stays byte-identical. Carried at
+  // all because the .md is meant to be the source: until 2026-09-05 `Export .md`
+  // -> `Import Markdown` dropped the key silently, and the next export fell back
+  // to gb1 with nothing reporting it.
+  //
+  // NOT A SECRET. This is the public half; it ships to every student inside
+  // assignment_spec.json already.
+  const coursePem = normalizeCoursePublicKey(normalized.coursePublicKey || '');
+  if (coursePem) {
+    lines.push('```pem');
+    coursePem.split('\n').forEach(l => lines.push(l));
+    lines.push('```');
+    lines.push('');
+  }
   if (normalized.preamble) {
     lines.push(`**Preamble:** ${normalized.preamble}`);
   }

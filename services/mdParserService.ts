@@ -9,6 +9,7 @@ import { Assignment, InputMode, Problem, Subsection, SubmissionType } from '../t
 import { LEGACY_SPACE_LINES } from './templateLayout';
 import { FIGURE_FENCE_CLOSE_RE, FIGURE_FENCE_OPEN_RE, splitFigures } from './figureBlocks';
 import { RETIRED_TYPE_TAGS, keepPromptAsGraderNote, retiredTypeWarning } from './retiredTypes';
+import { looksLikeCoursePublicKey, normalizeCoursePublicKey } from './cryptoService';
 
 const TYPE_MAP: Record<string, SubmissionType> = {
   'text':                 SubmissionType.TEXT,
@@ -95,15 +96,84 @@ function parseProblemHeader(line: string): ProblemHeaderMeta | null {
   return m ? { name: m[1].trim(), maxImages: 1 } : null;
 }
 
-function parseMetadata(lines: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'>
-    & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string } {
+/**
+ * The course public key travels as a fenced ```pem block in the metadata
+ * region — a 4096-bit SPKI PEM is fourteen lines, and every other metadata
+ * field in §2 is single-line by construction.
+ *
+ * The fence is inert to everything already in the pipeline. `splitFigures`
+ * opens only on ```svg, and the metadata region's body is discarded by both
+ * parsers (only `problem` and `subsection` sections are read), so the PEM never
+ * reaches a description, an HTML escaper or the `$...$` splitter. Base64 has no
+ * `$` and no backslash in it either way.
+ */
+const PEM_FENCE_OPEN_RE = /^[ \t]*```[ \t]*pem[ \t]*$/i;
+const PEM_FENCE_CLOSE_RE = /^[ \t]*```[ \t]*$/;
+
+/**
+ * Where the metadata region ends. The key is read from the top of the file
+ * only, so a PEM quoted inside a problem's own text is prose, not a course key.
+ */
+const METADATA_END_RE = /^(##\s+Problem\s+\d+:|###\s+\([a-z]+\))/i;
+
+/**
+ * Shown when a ```pem block is present but is not a usable course public key.
+ *
+ * REJECTS THE KEY, NEVER THE FILE. A malformed key is exactly the state an
+ * author needs the editor to fix, and refusing the import would lock them out
+ * of the one screen where they can paste a good one. The assignment lands
+ * without a key, which means gb1 rather than gb2 — a downgrade, stated, rather
+ * than a downgrade nobody was told about, which is the defect this whole change
+ * exists to close.
+ */
+export const courseKeyWarning = (reason: string): string =>
+  'The ```pem block at the top of the file is not a usable course public key: ' +
+  `${reason} The assignment imported WITHOUT a course key, so exports will use the ` +
+  "standard (gb1) encoding until you paste a valid key into the editor's Course public key box.";
+
+/** The structural reason a ```pem block was rejected, in the author's terms. */
+export const COURSE_KEY_STRUCTURE_REASON =
+  'it is not an SPKI public key — it must begin with "-----BEGIN PUBLIC KEY-----", end with ' +
+  '"-----END PUBLIC KEY-----", and must not be a private key.';
+
+/**
+ * The course public key out of the metadata region, or undefined.
+ *
+ * Screened with `looksLikeCoursePublicKey` — the same cheap structural check
+ * the export already uses, not a second one written here. The full check
+ * (`validateCoursePublicKey`) round-trips through WebCrypto and is therefore
+ * async, so the caller runs it; losing the assignment over a bad key is worse
+ * than losing the key.
+ */
+function parseCourseKeyBlock(lines: string[], warnings?: string[]): string | undefined {
+  for (let i = 0; i < lines.length; i++) {
+    if (METADATA_END_RE.test(lines[i].trim())) return undefined;
+    if (!PEM_FENCE_OPEN_RE.test(lines[i])) continue;
+    // An unterminated fence still yields its body, to the end of the region.
+    // Half a key is a bug in the source; ignoring it in silence is a bug here.
+    let end = i + 1;
+    while (end < lines.length && !PEM_FENCE_CLOSE_RE.test(lines[end])
+           && !METADATA_END_RE.test(lines[end].trim())) end++;
+    const pem = normalizeCoursePublicKey(lines.slice(i + 1, end).join('\n'));
+    if (looksLikeCoursePublicKey(pem)) return pem;
+    warnings?.push(courseKeyWarning(COURSE_KEY_STRUCTURE_REASON));
+    return undefined;
+  }
+  return undefined;
+}
+
+function parseMetadata(lines: string[], warnings?: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'>
+    & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string; coursePublicKey?: string } {
   // Every optional line here defaults to the value a file written before it
   // existed would have had, so older .md files round-trip byte-for-byte:
   // **Input:** absent → electronic, **Template ID:** absent → derived,
-  // **AI Feedback:** absent → off, **Submit at:** absent → no submission section.
+  // **AI Feedback:** absent → off, **Submit at:** absent → no submission section,
+  // ```pem absent → no course key, so gb1.
   const meta: Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode'>
-      & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string } =
+      & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string; coursePublicKey?: string } =
     { courseCode: '', title: '', preamble: '', inputMode: 'electronic' as InputMode, aiFeedback: false };
+  const pem = parseCourseKeyBlock(lines, warnings);
+  if (pem) meta.coursePublicKey = pem;
   for (const line of lines) {
     const l = line.trim();
     let m = l.match(/^#\s+([^:]+):\s+(.+)$/);
@@ -307,7 +377,7 @@ function noteRetiredTag(rawType: string | undefined, label: string, warnings?: s
  */
 export function parseMdToAssignment(content: string, warnings?: string[]): Assignment {
   const lines = content.split('\n');
-  const meta = parseMetadata(lines);
+  const meta = parseMetadata(lines, warnings);
 
   // Split file into labelled sections
   type SecType = 'preamble' | 'problem' | 'subsection';
@@ -494,6 +564,9 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
     ...(authoredTotal > 0 ? { targetPoints: authoredTotal } : {}),
     ...(meta.pageFormatId ? { pageFormatId: meta.pageFormatId } : {}),
     ...(meta.submissionAddress ? { submissionAddress: meta.submissionAddress } : {}),
+    // Only when the .md carried a usable one. Absent means the export falls
+    // back to gb1, which is what a file written before 2026-09-05 means too.
+    ...(meta.coursePublicKey ? { coursePublicKey: meta.coursePublicKey } : {}),
     aiFeedback: meta.aiFeedback,
     preamble: meta.preamble,
     problems,

@@ -119,6 +119,99 @@ FIGURE_FENCE_CLOSE_RE = re.compile(r'^[ \t]*```[ \t]*$')
 FIGURE_IMAGE_RE = re.compile(r'^[ \t]*!\[([^\]]*)\]\(\s*([^)\s]+)\s*\)[ \t]*$')
 
 
+# --- Course public key (gb2) ---------------------------------------------
+#
+# The course public key travels as a fenced ```pem block in the metadata
+# region. A 4096-bit SPKI PEM is fourteen lines and every other metadata field
+# in ASSIGNMENT_MD_SPEC.md section 2 is single-line by construction, so it
+# cannot be one of those rows.
+#
+# The fence is inert to everything else here: FIGURE_FENCE_OPEN_RE opens only
+# on ```svg, and the metadata region's body is discarded (only 'problem' and
+# 'subsection' sections are read), so the PEM never reaches build_description.
+#
+# Mirrors PEM_FENCE_OPEN_RE / METADATA_END_RE / parseCourseKeyBlock in
+# services/mdParserService.ts. Keep the two in lockstep.
+PEM_FENCE_OPEN_RE = re.compile(r'^[ \t]*```[ \t]*pem[ \t]*$', re.IGNORECASE)
+PEM_FENCE_CLOSE_RE = re.compile(r'^[ \t]*```[ \t]*$')
+
+# Where the metadata region ends. The key is read from the top of the file
+# only, so a PEM quoted inside a problem's own text is prose, not a course key.
+METADATA_END_RE = re.compile(r'^(##\s+Problem\s+\d+:|###\s+\([a-z]+\))', re.IGNORECASE)
+
+SPKI_BEGIN = '-----BEGIN PUBLIC KEY-----'
+SPKI_END = '-----END PUBLIC KEY-----'
+
+# The structural reason a ```pem block was rejected, in the author's terms.
+# Mirrors COURSE_KEY_STRUCTURE_REASON in services/mdParserService.ts.
+COURSE_KEY_STRUCTURE_REASON = (
+    'it is not an SPKI public key — it must begin with "-----BEGIN PUBLIC KEY-----", '
+    'end with "-----END PUBLIC KEY-----", and must not be a private key.'
+)
+
+
+def normalize_course_public_key(pem):
+    """Mirrors normalizeCoursePublicKey() in services/cryptoService.ts."""
+    return (pem or '').replace('\r\n', '\n').strip()
+
+
+def looks_like_course_public_key(pem):
+    """Mirrors looksLikeCoursePublicKey() in services/cryptoService.ts."""
+    if not isinstance(pem, str):
+        return False
+    text = normalize_course_public_key(pem)
+    if not text or re.search(r'PRIVATE KEY', text, re.IGNORECASE):
+        return False
+    return text.startswith(SPKI_BEGIN) and SPKI_END in text
+
+
+def course_key_warning(reason):
+    """Mirrors courseKeyWarning() in services/mdParserService.ts.
+
+    REJECTS THE KEY, NEVER THE FILE. A malformed key is exactly the state an
+    author needs the editor to fix, and refusing the import would lock them out
+    of the one screen where they can paste a good one. The assignment converts
+    without a key, which means gb1 rather than gb2 -- a downgrade, stated,
+    rather than a downgrade nobody was told about, which is the defect this
+    whole change exists to close.
+    """
+    return (
+        'The ```pem block at the top of the file is not a usable course public key: '
+        f'{reason} The assignment imported WITHOUT a course key, so exports will use '
+        "the standard (gb1) encoding until you paste a valid key into the editor's "
+        'Course public key box.'
+    )
+
+
+def parse_course_key_block(lines):
+    """
+    The course public key out of the metadata region, or None.
+
+    Screened structurally only. The full check (validateCoursePublicKey) needs
+    WebCrypto and lives in the app; a converter that refused the file over a bad
+    key would leave the author with nothing to open and fix.
+    """
+    i = 0
+    while i < len(lines):
+        if METADATA_END_RE.match(lines[i].strip()):
+            return None
+        if not PEM_FENCE_OPEN_RE.match(lines[i]):
+            i += 1
+            continue
+        # An unterminated fence still yields its body, to the end of the region.
+        # Half a key is a bug in the source; silently ignoring it is a bug here.
+        end = i + 1
+        while (end < len(lines) and not PEM_FENCE_CLOSE_RE.match(lines[end])
+               and not METADATA_END_RE.match(lines[end].strip())):
+            end += 1
+        pem = normalize_course_public_key('\n'.join(lines[i + 1:end]))
+        if looks_like_course_public_key(pem):
+            return pem
+        PARSE_WARNINGS.append(course_key_warning(COURSE_KEY_STRUCTURE_REASON))
+        return None
+    return None
+
+
 def split_figures(lines):
     """
     Split a list of body lines into ('text', [lines]) and ('figure', [lines])
@@ -282,7 +375,7 @@ def parse_metadata(lines):
     """
     Parse the title line and metadata fields from the top of the file.
     Returns dict with courseCode, title, preamble, inputMode, pageFormatId,
-    aiFeedback, submissionAddress.
+    aiFeedback, submissionAddress, coursePublicKey.
     Due date is intentionally ignored — managed in Canvas.
     """
     meta = {
@@ -300,8 +393,14 @@ def parse_metadata(lines):
         # **Submit at:** absent means page 1 prints no submission section at
         # all — not a placeholder and not a gapped sentence. See
         # Assignment.submissionAddress in types.ts.
-        'submissionAddress': None
+        'submissionAddress': None,
+        # ```pem absent means no course key, so exports fall back to the
+        # standard (gb1) encoding -- which is what a file written before
+        # 2026-09-05 means too.
+        'coursePublicKey': None
     }
+
+    meta['coursePublicKey'] = parse_course_key_block(lines)
 
     for line in lines:
         line = line.strip()
@@ -638,6 +737,10 @@ def parse_md(filepath):
         # Only present when the .md carried it; absent means page 1 prints no
         # submission section rather than a gapped one.
         **({'submissionAddress': meta['submissionAddress']} if meta.get('submissionAddress') else {}),
+        # Only present when the .md carried a usable one; absent means the
+        # export falls back to gb1. NOT A SECRET -- this is the public half,
+        # and it ships to every student inside assignment_spec.json.
+        **({'coursePublicKey': meta['coursePublicKey']} if meta.get('coursePublicKey') else {}),
         'createdAt': now_ms,
         'updatedAt': now_ms
     }
