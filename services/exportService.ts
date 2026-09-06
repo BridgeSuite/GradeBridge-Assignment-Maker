@@ -1796,11 +1796,24 @@ export const embeddedLayoutProblems = async (
  * **Its RULES are covered; its WIRING is not, and that is measured rather than
  * assumed.** Stubbing the call out of `buildOuterEntries` fails no check —
  * because packaging is a faithful copy today, so the packaged names and the
- * entry-map names are always the same and the stub is an equivalent mutant.
- * There is no input that distinguishes them. That is precisely the condition
- * under which this check earns its keep in future and not today: it is here for
- * the first change that makes packaging do something, and on that day it starts
- * being reachable. Do not read its five direct checks as covering the call.
+ * entry-map names cannot disagree and every upstream refusal fires before this
+ * runs. There is no input that distinguishes a build that calls this from one
+ * that does not: the stub is an **equivalent mutant**, not a missing test.
+ * **Do not read its five direct checks as covering the call**, and do not
+ * manufacture a test that goes green for a different reason in order to make
+ * the gap look closed.
+ *
+ * **WHEN THE GAP CLOSES, AND WHOSE JOB IT IS.** This guard becomes
+ * independently testable the moment packaging stops being a faithful copy —
+ * that is, the first time any **transform, rename, filter or re-ordering** is
+ * introduced between the entry map and the packaged bytes. On that day the
+ * packaged names can differ from the entry-map names, a distinguishing input
+ * exists, and the stub stops being equivalent.
+ *
+ * **Whoever writes that transform is the person who must add the mutation
+ * test.** Not a later cleanup, not whoever next reads this file: the change that
+ * creates the reachability is the change that owns proving it. If you are here
+ * because you are about to make packaging do something, that is you.
  */
 export const packagedStudentZipProblems = async (
   innerBytes: Uint8Array,
