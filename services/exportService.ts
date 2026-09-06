@@ -1253,7 +1253,7 @@ const buildDistributionNotice = (
   const STUDENT_ORDER = [student.studentPdf, student.studentUpload];
   const studentWhat = (b: string) =>
       b === student.studentPdf ? 'the sheet they print and write on'
-    : b === student.studentUpload ? 'the one file they upload; the layout map is inside it'
+    : b === student.studentUpload ? 'they load this into the Submission app; the map is inside it'
     : '';
   const rank = (b: string) => {
     const i = STUDENT_ORDER.indexOf(b);
@@ -1596,7 +1596,7 @@ export const buildStudentEntries = (
 //
 //     {stem}_INSTRUCTOR_ONLY.zip    the one download; contains the grading rubric
 //       ├── {stem}.pdf                give to students. They print it.
-//       ├── {stem}_UPLOAD.json        give to students. They upload it.
+//       ├── {stem}_OPEN_IN_APP.json   give to students. They load it into the app.
 //       └── instructor/               everything else
 //
 // REVERSED 2026-09-06. Until that day these were separate downloads, one per
@@ -1614,17 +1614,29 @@ export const buildStudentEntries = (
 // first line that does that now. These two names are read by a student, to whom
 // "for students" says nothing they do not already know; what a student needs
 // from a filename is which of the two to act on and how. So exactly one of them
-// carries an instruction, `_UPLOAD`, and it is the one whose misuse is the
-// failure: a `.pdf` has one obvious use and a `.json` has none.
+// carries an instruction, and it is the one whose misuse is the failure: a
+// `.pdf` has one obvious use and a `.json` has none.
 //
 // This RENAMES the existing export download: what used to arrive as
 // `{stem}_Export.zip` is now `{stem}_INSTRUCTOR_ONLY.zip`. Folders unzipped from
 // older downloads keep their old name. Recorded in ASSIGNMENT_MD_SPEC.md §13.
 //
-// **`_UPLOAD` IS PROVISIONAL AND AWAITS ANDRE'S APPROVAL** (work order
-// `WORKORDER_BOTH_ONE_UPLOAD_FILE_2026-09-06.md` B2). Both names are decided
-// here and nowhere else, so a change is a change to this function.
-const UPLOAD_SUFFIX = 'UPLOAD';
+// **WHY `_OPEN_IN_APP` AND NOT `_UPLOAD`** (Andre, 2026-09-06, deciding the
+// work order's open question). The student workflow contains TWO uploads: this
+// file into the Submission app, and the finished submission archive into
+// Gradescope. "Upload" is therefore the one word that appears at both
+// destinations, which makes it the one word that cannot tell them apart — and
+// the failure it invites is a student uploading their assignment file to
+// Gradescope, where it is accepted and the autograder fails. `_OPEN_IN_APP`
+// names the destination that is not the grading site.
+//
+// Naming the app instead was considered and rejected: **"GradeBridge" and
+// "Gradescope" are four characters apart and both begin "Grade"**, so a filename
+// that names the product discriminates worse than one that does not.
+//
+// Both names are decided here and nowhere else, so a change is a change to this
+// function.
+const STUDENT_SPEC_SUFFIX = 'OPEN_IN_APP';
 const INSTRUCTOR_SUFFIX = 'INSTRUCTOR_ONLY';
 
 const stemOf = (assignment: Assignment) =>
@@ -1637,7 +1649,7 @@ export const exportFilenames = (assignment: Assignment) => {
     // The two loose student files at the instructor archive's root. Neither is a
     // download of its own; the instructor posts them from inside the archive.
     studentPdf: `${stem}.pdf`,
-    studentUpload: `${stem}_${UPLOAD_SUFFIX}.json`,
+    studentUpload: `${stem}_${STUDENT_SPEC_SUFFIX}.json`,
   };
 };
 

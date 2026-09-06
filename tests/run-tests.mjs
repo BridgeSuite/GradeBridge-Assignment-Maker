@@ -2521,7 +2521,13 @@ ${r.problem_statement}`);
     assert(hwNames.studentPdf.endsWith('.pdf'), `the sheet is not a PDF: ${hwNames.studentPdf}`);
     assert(hwNames.studentUpload.endsWith('.json'), `the upload file is not JSON: ${hwNames.studentUpload}`);
     assert(hwNames.studentPdf !== hwNames.studentUpload, 'the two student files share a name');
-    assert(/UPLOAD/.test(hwNames.studentUpload), `the upload file does not say what to do with it: ${hwNames.studentUpload}`);
+    assert(/OPEN_IN_APP/.test(hwNames.studentUpload),
+      `the upload file does not say what to do with it: ${hwNames.studentUpload}`);
+    // NOT "upload": the workflow has two uploads in it — this file into the
+    // Submission app, and the finished submission into Gradescope — so it is the
+    // one word that cannot tell the two destinations apart.
+    assert(!/UPLOAD/i.test(hwNames.studentUpload),
+      `the upload file uses the word that names both destinations: ${hwNames.studentUpload}`);
   });
 
   check('student files: every entry is at the root, with no student/ prefix and no separator', () => {
@@ -2726,7 +2732,7 @@ ${r.problem_statement}`);
     // nothing about the audience.
     assertEqual(n.instructorZip,  'EEC1_Lab_1_In-Lab_INSTRUCTOR_ONLY.zip', 'instructor ZIP name');
     assertEqual(n.studentPdf,     'EEC1_Lab_1_In-Lab.pdf',                 'student sheet name');
-    assertEqual(n.studentUpload,  'EEC1_Lab_1_In-Lab_UPLOAD.json',         'student upload name');
+    assertEqual(n.studentUpload,  'EEC1_Lab_1_In-Lab_OPEN_IN_APP.json',    'student upload name');
 
     // The student ZIP is gone: the package is two loose files now. A name left
     // behind for an artifact nobody builds is how a removed shape comes back.

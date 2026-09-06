@@ -449,7 +449,7 @@ For a handwritten assignment, **the page-format sheet is the assignment**. Expor
 | File in the ZIP | Handwritten | Electronic |
 |---|---|---|
 | `{stem}.pdf` | **The page-format sheet**: four corner marks, the QR, the question text and one ruled answer area per part, on every page. Print this. | The usual assignment paper. |
-| `{stem}_UPLOAD.json` | The spec the Submission app loads, **with the layout map inside it** (§13). | The spec the Submission app loads. |
+| `{stem}_OPEN_IN_APP.json` | The spec the Submission app loads, **with the layout map inside it** (§13). | The spec the Submission app loads. |
 | `instructor/layout_{TemplateID}.csv` | The instructor's copy of the sidecar map, for setting up the Gradescope outline. Its content hash is written into every page's QR. **Not a student file** — the student's copy travels inside the upload file. | — |
 | `instructor/template.pdf` | — *(not exported: the sheet above already is the answer surface, and a second boxed one only invites printing the wrong PDF)* | The boxed answer-region sheet, for setting up the Gradescope outline — an instructor task, so it is not a student file. |
 
@@ -457,7 +457,7 @@ The two readable documents, the grading rubric, the grader document, the authori
 
 The editor's **QR Template** button emits the same sheet plus its map as a standalone ZIP, for regenerating after a layout edit without rebuilding the whole export.
 
-**The PDF and the map must travel together, and since 2026-09-06 they cannot come apart**: the map is embedded verbatim in `{stem}_UPLOAD.json` rather than shipped beside the sheet (§13). The PDF is useless without the map its QR hashes to, and the Submission app refuses to crop when the hash does not match — which is the point: a stale map would otherwise register perfectly and cut the wrong rectangles with no error anywhere. Handing a student two files that must match was the arrangement in which they could be mismatched; one file cannot be.
+**The PDF and the map must travel together, and since 2026-09-06 they cannot come apart**: the map is embedded verbatim in `{stem}_OPEN_IN_APP.json` rather than shipped beside the sheet (§13). The PDF is useless without the map its QR hashes to, and the Submission app refuses to crop when the hash does not match — which is the point: a stale map would otherwise register perfectly and cut the wrong rectangles with no error anywhere. Handing a student two files that must match was the arrangement in which they could be mismatched; one file cannot be.
 
 The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Page/GradeBridge_Page_Format_v1.md`, transcribed into `services/pageFormat.ts`, and enforced by the spec 8.7 self-test that runs on every generation — a template that fails any check is not emitted at all.
 
@@ -760,9 +760,9 @@ the artifacts never said who reads them. So, per artifact:
 
 | Artifact | Read by | Authoritative for | Never carries |
 |---|---|---|---|
-| `{stem}_UPLOAD.json` (the student spec) | the Student Submission app | what the student is asked, how they are allowed to answer it, and — handwritten only — **the layout map, embedded verbatim** (§13) | **grading prompts, grader notes, answer keys, reference solutions, grading-resource settings** — anything a student must not see |
+| `{stem}_OPEN_IN_APP.json` (the student spec) | the Student Submission app | what the student is asked, how they are allowed to answer it, and — handwritten only — **the layout map, embedded verbatim** (§13) | **grading prompts, grader notes, answer keys, reference solutions, grading-resource settings** — anything a student must not see |
 | `instructor/{stem}_authoring_backup.json` | this app, on Import JSON | **restoring an assignment completely** — it is the only artifact that does | *(no restriction: it is the whole assignment, and it is why the ZIP must never be given to students)* |
-| `layout_{TemplateID}.csv` | the page consumer that crops (§10) — reached through `{stem}_UPLOAD.json`, or as the instructor's own copy under `instructor/` | **where** each region is on the page — nothing else | anything a grader needs in order to grade |
+| `layout_{TemplateID}.csv` | the page consumer that crops (§10) — reached through `{stem}_OPEN_IN_APP.json`, or as the instructor's own copy under `instructor/` | **where** each region is on the page — nothing else | anything a grader needs in order to grade |
 | `{stem}_grading_rubric.json` | the grading system | what each item asks, what it is worth, what a grader is told, and the answer's **modality** | **model names, temperature, token budgets, or any other grading-system resource decision** |
 | `{stem}_grader_document.html` | a human TA, on screen or on paper | the answer key and the rubric in readable form | anything machine-parsed — nothing may depend on its markup |
 | `{stem}.pdf` | the student, on paper | the whole assignment | identity fields — no name, ID or date blank (§10) |
@@ -906,7 +906,7 @@ the answer key. It is laid out so that saying so is unnecessary:
 ```
 00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt   generated at export time, names every file
 {stem}.pdf                                  GIVE TO STUDENTS — they print it and write on it
-{stem}_UPLOAD.json                          GIVE TO STUDENTS — the one file they upload
+{stem}_OPEN_IN_APP.json                     GIVE TO STUDENTS — the one file they load into the app
 instructor/
   {stem}_authoring_backup.json              THE BACKUP — restores everything
   {stem}.md                                 the authored source
@@ -939,7 +939,7 @@ loose files replace it:
 | File | What a student does with it |
 |---|---|
 | `{stem}.pdf` | Print it. On a handwritten assignment this *is* the answer surface. |
-| `{stem}_UPLOAD.json` | Upload it. One file, nothing to open, and the layout map is inside it. |
+| `{stem}_OPEN_IN_APP.json` | Load it into the Submission app. One file, nothing to open, and the layout map is inside it. |
 
 **The map travels inside the spec, verbatim.** The spec payload gained two optional fields,
 `layoutCsvName` and `layoutCsv` — both present or both absent, never one — and `layoutCsv` holds **the
@@ -970,7 +970,18 @@ and nothing downstream would object.
 |---|---|---|
 | `{stem}_INSTRUCTOR_ONLY.zip` | the instructor | the one download; **contains the grading rubric** |
 | `{stem}.pdf` | the student | a PDF has one obvious use, so it needs no instruction |
-| `{stem}_UPLOAD.json` | the student | a `.json` is inert to a student, so it carries the instruction |
+| `{stem}_OPEN_IN_APP.json` | the student | a `.json` is inert to a student, so it carries the instruction — and it names the destination that is **not** the grading site |
+
+**Why not `_UPLOAD`** (decided 2026-09-06, after it was the first proposal). The student workflow
+contains **two uploads**: this file into the Submission app, and the finished submission archive into
+Gradescope. "Upload" is therefore the one word that appears at both destinations, which makes it the
+one word that cannot tell them apart — and the failure it invites is a student uploading their
+assignment file to Gradescope, where it is accepted and the autograder fails. `_OPEN_IN_APP` names the
+destination that is not the grading site.
+
+Naming the app instead was considered and rejected: **"GradeBridge" and "Gradescope" are four
+characters apart and both begin "Grade"**, so a filename that names the product discriminates worse
+than one that does not.
 
 **This renamed the export download.** What used to arrive as `{stem}_Export.zip` is now
 `{stem}_INSTRUCTOR_ONLY.zip`; folders already unzipped from an older download keep the name they have.
@@ -1007,7 +1018,7 @@ complete:
 |---|---|---|
 | `{stem}_authoring_backup.json` → Import JSON | **everything** | — |
 | `{stem}.md` → Import Markdown | prompts byte-for-byte, `answerLines`, `handwrittenGradingMode`, `inputMode`, `pageFormatId`, `aiFeedback`, **`targetPoints`, reconstructed from the file's own total** (2026-09-01), and **`coursePublicKey`** (2026-09-05) | `config` |
-| `{stem}_UPLOAD.json` → Import JSON | what a student needs | `aiGradingPrompt`, `graderNote`, `answerLines`, `handwrittenGradingMode`, `targetPoints` |
+| `{stem}_OPEN_IN_APP.json` → Import JSON | what a student needs | `aiGradingPrompt`, `graderNote`, `answerLines`, `handwrittenGradingMode`, `targetPoints` |
 
 Two of those losses are worse than they look:
 
