@@ -18,7 +18,7 @@
 
 import { build } from 'esbuild';
 import { deflateSync } from 'node:zlib';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -39,7 +39,13 @@ const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
 // 'react'` resolves against this repo's node_modules. A bundle in the system
 // temp directory cannot see them, and react is left external on purpose: the
 // point is to render the real component, not a copy of React.
-const outDir = mkdtempSync(join(REPO, 'node_modules', '.cache', 'gb-render-'));
+// `node_modules/.cache` is CREATED, not assumed. It exists on a developer's
+// machine because Vite has been run there, and does NOT exist on a fresh CI
+// checkout after `npm ci` -- so this suite passed locally and failed on CI,
+// which is exactly the class of green-here-red-there the deploy gate is for.
+const cacheDir = join(REPO, 'node_modules', '.cache');
+mkdirSync(cacheDir, { recursive: true });
+const outDir = mkdtempSync(join(cacheDir, 'gb-render-'));
 const requireFromRepo = createRequire(join(REPO, 'package.json'));
 
 /**
