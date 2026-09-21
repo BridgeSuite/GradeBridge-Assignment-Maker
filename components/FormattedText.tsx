@@ -1,6 +1,8 @@
 
 import React from 'react';
 import { splitMath, renderTex, splitFigures, trimAroundFigures, figureToHtml } from '../services/mathRender';
+import { resolveFigureRefsInText } from '../services/figureRefs';
+import { useFigureMap } from './FigureMapContext';
 
 /**
  * The app preview. It calls the same splitter and the same KaTeX renderer the
@@ -15,12 +17,22 @@ import { splitMath, renderTex, splitFigures, trimAroundFigures, figureToHtml } f
  */
 export const FormattedText: React.FC<{ text: string, className?: string }> = ({ text, className = '' }) => {
   const uid = React.useId().replace(/[^a-zA-Z0-9]/g, '');
+  const figures = useFigureMap();
   if (!text) return null;
+
+  // FIGURE BLOCKS BECOME DRAWINGS BEFORE ANYTHING ELSE LOOKS AT THE TEXT.
+  //
+  // A ```figure block refers to a drawing rather than containing one, and
+  // `splitFigures` — which is mirrored into the student app and does not know
+  // this fence — would hand the block's own lines to the math splitter as
+  // prose. Resolving here means every on-screen surface shows the drawing,
+  // including the ones written before figure blocks existed.
+  const resolved = resolveFigureRefsInText(text, figures);
 
   let figureIndex = 0;
   return (
     <div className={`whitespace-pre-wrap ${className}`}>
-      {trimAroundFigures(splitFigures(text)).map((seg, index) => {
+      {trimAroundFigures(splitFigures(resolved)).map((seg, index) => {
         if (seg.kind === 'figure') {
           const html = figureToHtml(seg.figure, `f${uid}-${figureIndex++}-`);
           return <div key={index} dangerouslySetInnerHTML={{ __html: html }} />;

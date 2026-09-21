@@ -7,6 +7,7 @@ import { Layout, Card, Button } from './Common';
 import { Download, ArrowLeft, Edit2 } from 'lucide-react';
 import { SubmissionType } from '../types';
 import { FormattedText } from './FormattedText';
+import { FigureMapProvider } from './FigureMapContext';
 
 const Preview: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -47,6 +48,9 @@ const Preview: React.FC = () => {
   }
 
   return (
+    // Wrapped once, so every stem, preamble and part description inside
+    // resolves its figure blocks. See components/FigureMapContext.tsx.
+    <FigureMapProvider figures={assignment.figures}>
     <Layout 
       title={`${assignment.courseCode}: ${assignment.title}`}
       action={
@@ -126,6 +130,7 @@ const Preview: React.FC = () => {
          </Card>
       </div>
     </Layout>
+    </FigureMapProvider>
   );
 };
 

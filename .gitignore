@@ -81,3 +81,7 @@ specs-internal/
 # Mutation copies written beside a source file by the guard tests, removed
 # in a finally. Ignored so a crashed run cannot leave one to be committed.
 services/__mutant-*.ts
+
+# Temporary render entry points written by tests/figure-render-tests.mjs,
+# removed in a finally. Ignored so a crashed run cannot leave one behind.
+__render-entry-*.tsx

@@ -25,6 +25,7 @@ import { parseFigureFilename } from '../services/figureImport';
 import { REOPEN_WARNING, finalizeAssignment, reopenAssignment } from '../services/finalize';
 import { apportionPoints } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
+import { FigureMapProvider } from '../components/FigureMapContext';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, PenLine, Keyboard, QrCode } from 'lucide-react';
 
 const AI_GRADED_TYPES = new Set([
@@ -561,6 +562,12 @@ const Editor: React.FC = () => {
   const pointsAtTarget = totalPoints === targetPoints;
 
   return (
+    // Wrapped once, so every preview inside — stems, part descriptions, the
+    // preamble — resolves its figure blocks into drawings. Threading a prop
+    // instead would fix today's call sites and leave tomorrow's broken, which
+    // is the defect this repeats rather than the one it fixes. See
+    // components/FigureMapContext.tsx.
+    <FigureMapProvider figures={assignment.figures}>
     <Layout
       title={isEdit ? "Edit Assignment" : "Create Assignment"}
       action={
@@ -1358,6 +1365,7 @@ const Editor: React.FC = () => {
         </div>
       </div>
     </Layout>
+    </FigureMapProvider>
   );
 };
 

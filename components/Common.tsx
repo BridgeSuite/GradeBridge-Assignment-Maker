@@ -4,6 +4,7 @@ import { HelpCircle } from 'lucide-react';
 import { FormattedText } from './FormattedText';
 import { LaTeXCheatsheet } from './LaTeXCheatsheet';
 import { hasFigure } from '../services/figureBlocks';
+import { hasFigureRef } from '../services/figureRefs';
 
 export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' }> = ({ variant = 'primary', className = '', ...props }) => {
   const baseStyle = "inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors";
@@ -106,7 +107,12 @@ export const TextAreaWithPreview: React.FC<React.TextareaHTMLAttributes<HTMLText
   const textVal = (value || '') as string;
   // A figure block carries neither a `$` nor a backslash, so it needs asking
   // for by name — otherwise a stem that is nothing but a circuit shows no preview.
-  const hasLatex = textVal.includes('$') || textVal.includes('\\') || hasFigure(textVal);
+  // A figure block carries neither a `$` nor a backslash, and it is not a
+  // figure as far as `figureBlocks.ts` is concerned either, so both have to be
+  // asked — otherwise a stem that is nothing but a referenced circuit shows no
+  // preview at all.
+  const hasLatex = textVal.includes('$') || textVal.includes('\\')
+    || hasFigure(textVal) || hasFigureRef(textVal);
   const showPreview = textVal.trim().length > 0 && hasLatex;
 
   return (
