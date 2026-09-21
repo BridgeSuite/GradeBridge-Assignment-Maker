@@ -9,7 +9,7 @@
     "test": "node tests/run-all.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "predeploy": "npm run build",
+    "predeploy": "node scripts/check-ci-green.mjs && npm run build",
     "deploy": "gh-pages -d dist --dotfiles"
   },
   "dependencies": {
