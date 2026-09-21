@@ -505,9 +505,13 @@ const Editor: React.FC = () => {
               Delete
             </Button>
           )}
-          <Button variant="secondary" onClick={() => {
+          <Button variant="secondary" onClick={async () => {
+            // Async since 2026-09-21: with figure blocks this route writes a zip
+            // holding the .md and its figures/ folder, because a .md handed over
+            // without the files it refers to is a document whose figures have
+            // quietly gone.
             try {
-              exportService.downloadMd(assignment);
+              await exportService.downloadMd(assignment);
             } catch (err) {
               if (isRescaleDeclined(err)) return;
               console.error(err);

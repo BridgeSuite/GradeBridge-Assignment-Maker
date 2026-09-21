@@ -5,7 +5,7 @@ import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, to
 import { stemForGrader } from './figureText';
 import { generateTemplate } from './templateGenerator';
 import { assignmentKindProblem } from './inputModeService';
-import { resolveAssignmentFigures } from './figureRefs';
+import { figureDataUri, referencedFigureIds, resolveAssignmentFigures } from './figureRefs';
 import { finalizeLockProblem } from './finalize';
 import { partIdentifiers } from './templateLayout';
 import { buildAuthoringBackup } from './authoringBackup';
@@ -1411,6 +1411,26 @@ const buildDistributionNotice = (
  * ones renamed later. `STUDENT_DIR` is only a marker for who may receive an
  * entry; the filename is decided in one place, `exportFilenames`.
  */
+/**
+ * `figures/<id>.<ext>` for every figure the assignment actually refers to.
+ *
+ * Driven by the references rather than by the map, so a file left behind by an
+ * edit — a figure whose block was deleted — is not shipped to anyone. The map
+ * may legitimately hold more than the text uses; the folder should not.
+ */
+const figureEntries = (assignment: Assignment, prefix: string): Record<string, Blob> => {
+  const out: Record<string, Blob> = {};
+  const figures = assignment.figures || {};
+  for (const id of referencedFigureIds(assignment)) {
+    const file = figures[id];
+    if (!file) continue;
+    const bytes = Uint8Array.from(atob(file.base64), c => c.charCodeAt(0));
+    out[`${prefix}${id}.${file.format}`] =
+      new Blob([bytes.buffer as ArrayBuffer], { type: figureDataUri(file).slice(5).split(';')[0] });
+  }
+  return out;
+};
+
 export const buildExportEntries = async (
   assignment: Assignment
 ): Promise<Record<string, Blob | string>> => {
@@ -1444,6 +1464,12 @@ export const buildExportEntries = async (
     // meant the backup the app recommends did not contain the more complete of
     // the two restore routes.
     [`${INSTRUCTOR_DIR}${stem}.md`]: assignmentToMd(assignment),
+    // The figure files the .md above refers to. Instructor-side, beside the
+    // `.md`, because that pair IS the authored source: a `.md` shipped without
+    // the files it refers to is a route that silently loses content, which is a
+    // pattern this repo has already paid for twice. Students never receive
+    // these — their copy carries the drawings inlined, not referred to.
+    ...figureEntries(assignment, `${INSTRUCTOR_DIR}figures/`),
     [`${INSTRUCTOR_DIR}assignment.html`]: await generateHTML(assignment),
     // Editable LaTeX source, for an instructor who wants to hand-tune the paper.
     [`${INSTRUCTOR_DIR}assignment.tex`]: generateLaTeX(assignment),
@@ -2055,18 +2081,32 @@ export const exportService = {
   // entry inside the instructor archive, and the PDF is inside that. Nothing is
   // lost; what is gone is the opportunity to download the wrong one.
 
-  downloadMd: (assignment: Assignment) => {
+  downloadMd: async (assignment: Assignment) => {
     // `assignmentToMd` normalises internally, and the .md carries the scaled
     // values forward — this is the route whose damage shows up one cycle later,
     // so it asks like the rest.
-    const md = assignmentToMd(normalizePointsConfirmed(assignment));
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const normalized = normalizePointsConfirmed(assignment);
+    const md = assignmentToMd(normalized);
+    const stem = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}`;
+
+    // A BARE .md ONLY WHEN THERE IS NOTHING ELSE TO CARRY.
+    //
+    // With figure blocks the `.md` is no longer self-contained: it refers to
+    // files, and a `.md` handed over without them is a document whose figures
+    // have quietly gone. So the moment an assignment refers to a figure, this
+    // route produces the pair — the `.md` and its `figures/` folder — in one
+    // zip. An assignment with no blocks downloads exactly as it always has, so
+    // nothing changes for the files that exist today.
+    const entries = figureEntries(normalized, 'figures/');
+    if (Object.keys(entries).length === 0) {
+      saveOne(new Blob([md], { type: 'text/markdown' }), `${stem}.md`);
+      return;
+    }
+
+    const zip = new JSZip();
+    zip.file(`${stem}.md`, md);
+    for (const [name, blob] of Object.entries(entries)) zip.file(name, blob);
+    saveOne(await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }), `${stem}_md.zip`);
   },
 
   downloadGraderDoc: async (assignment: Assignment) => {

@@ -198,13 +198,21 @@ await check('the report names every file written and every figure left behind', 
 // ---------------------------------------------------------------------------
 // Against the real sources, not a fixture: this project's rule is never to
 // validate against data you generated yourself.
-const ENG17 = 'C:/Users/aknoesen/Documents/Knoesen/ENG17-Assignments/New HWKs';
+// The directory holding the real ENG17 `.md` sources, supplied by the operator:
+//
+//   GB_ENG17_DIR=/path/to/New\ HWKs npm test
+//
+// NOT a path in this file. The sources live outside the repository, this
+// repository is going public, and a real path would carry a person's home
+// directory into it -- which `no-personal-names.mjs` catches, and did.
+const ENG17 = process.env.GB_ENG17_DIR;
 const FROZEN = { 1: '95438EDF', 2: '8505F1E5', 3: 'B549DC53' };
 
 for (const n of [1, 2, 3]) {
-  const path = join(ENG17, `HWK${n}`, `ENG17_HW${n}_assignment.md`);
   const name = `CRITERION 2 (ENG17 HW${n}): spec byte-identical, and layout_id unmoved, after extraction`;
-  if (!existsSync(path)) { skip(name, 'the ENG17 sources are not on this machine'); continue; }
+  if (!ENG17) { skip(name, 'set GB_ENG17_DIR to the folder holding the ENG17 sources'); continue; }
+  const path = join(ENG17, `HWK${n}`, `ENG17_HW${n}_assignment.md`);
+  if (!existsSync(path)) { skip(name, `no ENG17 HW${n} source under GB_ENG17_DIR`); continue; }
 
   await check(name, async () => {
     const before = mdParser.parseMdToAssignment(readFileSync(path, 'utf8'));
