@@ -37,6 +37,23 @@ export const courseKeyRemovedNotice = (): string =>
   + 'can delete the key from the file.';
 
 /**
+ * Shown when an imported file still carries a submission address.
+ *
+ * Removed 2026-09-22. Students are told to use the Submission app when they
+ * receive the assignment, so the printed sheet does not need to repeat it, and
+ * the field confused the first instructor who met it.
+ *
+ * Reported for the same reason a leftover course key is: an instructor who set
+ * an address and can still see it in their own file would otherwise expect it
+ * on the sheet, and find out it was not there by printing a hundred copies.
+ */
+export const submissionAddressRemovedNotice = (): string =>
+  'This file carries a submission address. That setting has been removed — the '
+  + 'printed sheet no longer has a "When you have finished writing" section — so '
+  + 'the address has been discarded. Students are told how to hand work in when '
+  + 'they open the assignment in the Submission app. Nothing is required of you.';
+
+/**
  * Shown when a loaded assignment predates `assignmentKind` and is taken to be
  * conventional.
  *
@@ -74,6 +91,7 @@ export const assignmentKindDefaultedNotice = (): string =>
 /** Fields dropped from `Assignment` that a file written earlier may still carry. */
 const RETIRED_ASSIGNMENT_FIELDS: ReadonlyArray<[string, () => string]> = [
   ['coursePublicKey', courseKeyRemovedNotice],
+  ['submissionAddress', submissionAddressRemovedNotice],
 ];
 
 /**

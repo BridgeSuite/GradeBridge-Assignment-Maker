@@ -921,14 +921,6 @@ export const assignmentToMd = (assignment: Assignment): string => {
     lines.push('');
   }
   // Where students hand the work in, printed on page 1 of the handwritten sheet.
-  // Emitted only when set, so a file written before it existed round-trips
-  // byte-for-byte — and carried at all because `Export .md` → `Import Markdown`
-  // is a documented restore route, and a field that vanishes on that round trip
-  // is the silent-loss defect this suite has already paid for twice.
-  if ((normalized.submissionAddress || '').trim()) {
-    lines.push(`**Submit at:** ${normalized.submissionAddress!.trim()}`);
-    lines.push('');
-  }
   if (normalized.preamble) {
     lines.push(`**Preamble:** ${normalized.preamble}`);
   }

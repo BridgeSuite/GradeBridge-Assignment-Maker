@@ -187,30 +187,12 @@ export interface Assignment {
    * silently ignored on import.
    */
   targetPoints?: number; // Target total for point scaling (default 100)
-  /**
-   * Where a student goes to hand this assignment in — printed on page 1 of the
-   * handwritten sheet, under "When you have finished writing".
-   *
-   * **A value, never a constant.** `templateLayout.ts` is explicit that the
-   * standing text names no institution, because the tool is meant for use beyond
-   * the campus that commissioned it and the text has to be true wherever it
-   * prints. A hardcoded deployment URL is the same violation one step along:
-   * this suite has already been renamed and moved hosts once, in August 2026,
-   * and a URL baked into the generator would have printed a dead address onto
-   * every sheet of that term. So the address is the instructor's to set, and the
-   * tool only says what to do with it.
-   *
-   * **Absent means the whole submission section is not printed** — no
-   * placeholder, no example, no sentence with a gap in it. A sheet reading "go
-   * to ______" is worse than one that says nothing, because a hundred copies of
-   * it are printed before anyone notices. See `submissionSection`.
-   *
-   * Handwritten only, in practice: an electronic student is already inside the
-   * app by the time they read anything, so there is nothing to tell them. It is
-   * carried on any assignment, like `pageFormatId`, rather than being made
-   * conditional on a mode that can change.
-   */
-  submissionAddress?: string;
+  // No submissionAddress, deliberately (removed 2026-09-22). Students are told
+  // to use the Student Submission app when they receive the assignment, so the
+  // printed sheet does not need to repeat it, and the field confused the first
+  // instructor who met it. It was never set on any real assignment — HW1 to HW3
+  // print identically without it, which is why removing it moves no layout —
+  // and the page-1 section it conditioned went with it.
   createdAt: number;
   updatedAt: number;
 }

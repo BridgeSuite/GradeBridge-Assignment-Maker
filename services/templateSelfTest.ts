@@ -32,7 +32,7 @@ import {
 import {
   BORDER_MM, COLUMN_X0_MM, COLUMN_X1_MM, LayoutRow, MIN_ANSWER_LINES, MIN_BOX_MM,
   REGION_BOTTOM_MM, STANDING_CLOSING, STANDING_INSTRUCTIONS, TemplateLayout, WRITING_LINE_MM,
-  answerBoxMm, csvUnsafeFields, enumerateParts, printableSubmissionAddress, submissionItems,
+  answerBoxMm, csvUnsafeFields, enumerateParts,
 } from './templateLayout';
 import { splitFigures } from './figureBlocks';
 import { encodeQr } from './qrEncoder';
@@ -437,11 +437,11 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
   // Guard 3. The tool must not print an instruction the author's preamble also
   // prints. See `duplicatedStandingInstructions` — the duplication is the reason
   // the split exists, so it is checked rather than trusted.
-  const submissionAddress = printableSubmissionAddress(assignment);
+  // The submission section was removed on 2026-09-22, so there are no
+  // conditional items left for a preamble to duplicate — only the standing
+  // ones, which `duplicatedStandingInstructions` reads for itself.
   add(0, 'the preamble does not repeat a standing instruction',
-    duplicatedStandingInstructions(
-      assignment.preamble || '',
-      submissionAddress ? submissionItems(submissionAddress) : []));
+    duplicatedStandingInstructions(assignment.preamble || '', []));
 
   // Guard 4. "Problems begin on page 2, always" breaks if the standing
   // instructions plus a long preamble overflow the page, so an overflow refuses
@@ -469,20 +469,13 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
 
   const failures = checks.filter(c => !c.passed).map(c => `check ${c.id || '–'} — ${c.name}: ${c.detail}`);
 
-  // WARNED, NOT REFUSED, and the severity is the decision rather than an
-  // oversight. A sheet with no submission address is a legitimate assignment —
-  // an instructor who collects on paper, or through Canvas, or who has not
-  // deployed the Submission app, has a working workflow and refusing it would
-  // make the tool unusable for them. But printing nothing silently is precisely
-  // the defect this section was added to remove, and the instructor is the only
-  // person who can tell the two apart. So: say it once, at the moment they are
-  // about to print, and let them proceed.
-  const warnings = submissionAddress ? [] : [
-    'No submission address is set, so page 1 does not tell students how to hand this in. ' +
-    'The sheet says nothing about it at all rather than printing a gap. Set the submission ' +
-    'address on the assignment if students submit through the app; ignore this if you collect ' +
-    'the pages some other way.',
-  ];
+  // The "no submission address is set" warning was removed with the section it
+  // was about, on 2026-09-22. It fired on every assignment that had no address,
+  // which was all of them, and told the instructor to set a field that no
+  // longer exists. `warnings` stays an array rather than being deleted: it is
+  // part of this function's contract and consumers already render it, so the
+  // next warning has somewhere to go.
+  const warnings: string[] = [];
 
   return { passed: failures.length === 0, checks, failures, warnings };
 };

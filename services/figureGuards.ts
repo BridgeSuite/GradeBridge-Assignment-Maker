@@ -314,8 +314,7 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
   if (!FIGURE_FORMATS.includes(file.format as FigureFormat)) {
     return [{
       guard: 'format',
-      message: `${file.filename}: this is not a figure format the app accepts. `
-        + `Use SVG, PNG or JPG.`,
+      message: 'This file is not a kind of image the app can use. Choose an SVG, PNG or JPG.',
     }];
   }
 
@@ -324,9 +323,9 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
   if (bytes.length > FIGURE_MAX_BYTES) {
     problems.push({
       guard: 'size',
-      message: `${file.filename} is ${(bytes.length / 1024 / 1024).toFixed(2)} MB, over the `
-        + `${(FIGURE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB limit for one figure. Every figure is `
-        + `copied into the file each student downloads, so a large one is paid for by every student.`,
+      message: `This image is too large (${(bytes.length / 1024 / 1024).toFixed(1)} MB; the limit `
+        + `is ${(FIGURE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB). Save it at a smaller file size `
+        + 'and try again.',
     });
   }
 
@@ -338,10 +337,8 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
     if (colours.length) {
       problems.push({
         guard: 'colour',
-        message: `${file.filename} paints in colour (${colours.slice(0, 4).join(', ')}`
-          + `${colours.length > 4 ? `, and ${colours.length - 4} more` : ''}). Figures must be `
-          + `greyscale: the scans are greyscale, and that is what proves the marking stage never `
-          + `altered a student's work.`,
+        convertible: true,
+        message: 'This drawing has colour in it. Figures must be black, white and grey only.',
       });
     }
     return problems;
@@ -352,8 +349,8 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
   if (!hdr || !(hdr.width > 0) || !(hdr.height > 0)) {
     problems.push({
       guard: 'unreadable',
-      message: `${file.filename} could not be read as a ${file.format.toUpperCase()}. `
-        + `It may be truncated, or saved in a different format from its extension.`,
+      message: `This file could not be opened as a ${file.format.toUpperCase()}. It may be `
+        + 'damaged, or saved in a different format from the one its name says.',
     });
     return problems;
   }
@@ -363,15 +360,19 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
     const printed = figurePrintedSizeMm(hdr.width, hdr.height);
     problems.push({
       guard: 'resolution',
-      message: `${file.filename} is ${hdr.width}x${hdr.height} pixels, which is `
-        + `${Math.round(dpi)} dpi at the size it prints (${printed.width.toFixed(0)}x`
-        + `${printed.height.toFixed(0)} mm). Figures must be at least ${FIGURE_MIN_DPI} dpi at `
-        + `printed size, or the scanner reads a blur. Rescan or re-export it larger.`,
+      message: `This image is too small: it would print blurry (${Math.round(dpi)} dpi; at `
+        + `least ${FIGURE_MIN_DPI} is needed). Use a larger version of the image.`,
     });
   }
 
-  const colourMessage = `${file.filename} is not greyscale. Figures must be: the scans are `
-    + `greyscale, and that is what proves the marking stage never altered a student's work.`;
+  // WRITTEN FOR AN INSTRUCTOR, not for whoever maintains the pipeline.
+  //
+  // This used to explain that the scans are greyscale and that this is what
+  // proves the marking stage never altered a student's work. All true, all in
+  // `figureGuards.ts` and the spec where it belongs, and none of it is
+  // something the person holding a colour PNG can act on. What they need is
+  // what is wrong and what to do about it.
+  const colourMessage = 'This image has colour in it. Figures must be black, white and grey only.';
 
   if (file.format === 'jpg') {
     // THE ONE PLACE A HEADER STANDS IN FOR THE PIXELS, and it is deliberate.
@@ -383,8 +384,7 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
     // the convert action re-encodes it as greyscale, which is the form the
     // pipeline wants anyway.
     if (hdr.channels !== 1) {
-      problems.push({ guard: 'greyscale', convertible: true, message: colourMessage
-        + ` This JPEG is encoded with ${hdr.channels} colour channels; convert it to greyscale.` });
+      problems.push({ guard: 'greyscale', convertible: true, message: colourMessage });
     }
     return problems;
   }
@@ -398,8 +398,7 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
   if (colorType === 3) {
     const offending = pngPalette(bytes).filter(([r, g, b]) => !isGrey(r, g, b));
     if (offending.length) {
-      problems.push({ guard: 'greyscale', convertible: true, message: colourMessage
-        + ` Its palette has ${offending.length} colour entr${offending.length === 1 ? 'y' : 'ies'}.` });
+      problems.push({ guard: 'greyscale', convertible: true, message: colourMessage });
     }
     return problems;
   }
@@ -407,9 +406,8 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
   if (hdr.interlaced || bitDepth !== 8) {
     problems.push({
       guard: 'unreadable',
-      message: `${file.filename} is an ${hdr.interlaced ? 'interlaced' : `${bitDepth}-bit`} PNG, `
-        + `which this check cannot read pixel by pixel. Re-save it as a non-interlaced 8-bit PNG, `
-        + `or as greyscale, so the colour check can be carried out rather than assumed.`,
+      message: 'This PNG is saved in a form the app cannot check for colour. Re-save it as a '
+        + 'standard PNG, or as a greyscale one, and try again.',
     });
     return problems;
   }
@@ -418,16 +416,13 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
     const pixels = await pngTruecolourPixels(bytes, { ...hdr, colorType, bitDepth });
     const offending = pixels.filter(([r, g, b]) => !isGrey(r, g, b));
     if (offending.length) {
-      const pct = ((offending.length / pixels.length) * 100).toFixed(1);
-      problems.push({ guard: 'greyscale', convertible: true, message: colourMessage
-        + ` ${offending.length} of ${pixels.length} pixels are coloured (${pct}%).` });
+      problems.push({ guard: 'greyscale', convertible: true, message: colourMessage });
     }
   } catch (err) {
     problems.push({
       guard: 'unreadable',
-      message: `${file.filename} could not be decoded to check its colour `
-        + `(${err instanceof Error ? err.message : String(err)}). A figure whose colour cannot be `
-        + `checked is refused rather than assumed grey.`,
+      message: 'This image could not be checked for colour, so it has not been used. '
+        + 'Re-save it as a standard PNG and try again.',
     });
   }
 

@@ -26,6 +26,8 @@ import { REOPEN_WARNING, finalizeAssignment, reopenAssignment } from '../service
 import { apportionPoints } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { FigureMapProvider } from '../components/FigureMapContext';
+import { FigureCard } from '../components/FigureCard';
+import { convertToGreyscale } from '../services/figureConvert';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, PenLine, Keyboard, QrCode } from 'lucide-react';
 
 const AI_GRADED_TYPES = new Set([
@@ -283,8 +285,20 @@ const Editor: React.FC = () => {
 
   const figureRefs = useMemo(
     () => assignment.problems.flatMap((p, i) =>
-      parseFigureRefs(p.description || '').map(({ ref }) => ({ ...ref, problemNumber: i + 1 }))),
+      parseFigureRefs(p.description || '').map(({ ref }, n) => ({
+        ...ref, problemNumber: i + 1, figureNumber: n + 1,
+      }))),
     [assignment.problems]);
+
+  /**
+   * How a figure is named to an instructor: "Figure 1 in Problem 1", never
+   * `p1-fig1`. The id names a file and is the app's business; the position is
+   * what the person looking at the page can see.
+   */
+  const figureLabelFor = (id: string): string => {
+    const found = figureRefs.find(f => f.id === id);
+    return found ? `Figure ${found.figureNumber} in Problem ${found.problemNumber}` : id;
+  };
 
   /**
    * Replace one figure's file, keeping its id, title and desc.
@@ -294,31 +308,54 @@ const Editor: React.FC = () => {
    * replacing it here cannot produce different assignments.
    */
   const handleReplaceFigure = async (id: string, file: File) => {
+    const where = figureLabelFor(id);
     const parsed = parseFigureFilename(file.name);
     if (!parsed) {
-      alert(`${file.name} is not a figure format the app accepts. Use SVG, PNG or JPG.`);
+      alert('This file is not a kind of image the app can use. Choose an SVG, PNG or JPG.');
       return;
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
     let binary = '';
     for (const b of bytes) binary += String.fromCharCode(b);
-    const next = { format: parsed.format, base64: btoa(binary), filename: file.name };
+    let next = { format: parsed.format, base64: btoa(binary), filename: file.name };
 
-    const problems = await figureFileProblems(next);
+    let problems = await figureFileProblems(next);
+
+    // THE CONVERSION OFFER (work order Item 5).
+    //
+    // Refusing a colour image and leaving the instructor to find an image
+    // editor is only half of what was asked for. An instructor pressing a
+    // button labelled "Convert to greyscale" is not a silent conversion: the
+    // refusal comes first, the offer is a separate decision, and the converted
+    // drawing appears in the thumbnail before they accept it.
+    if (problems.some(p => p.convertible)) {
+      const ok = window.confirm(
+        [problems.map(p => p.message).join('\n'), '',
+         'Convert it to greyscale now?', '',
+         'OK \u2014 convert it and use the greyscale version.',
+         'Cancel \u2014 leave the figure as it is and choose another file.'].join('\n'));
+      if (!ok) return;
+
+      const converted = await convertToGreyscale(next);
+      if (!converted.file) {
+        // The converted file goes through EVERY guard, not only the colour one:
+        // converting changes the bytes, so it can come out over the size cap.
+        alert(['The converted image still cannot be used:', '',
+          ...converted.problems.map(p => `  \u2022 ${p.message}`)].join('\n'));
+        return;
+      }
+      next = converted.file;
+      problems = [];
+    }
+
     if (problems.length) {
-      alert([`${file.name} was not used:`, '', ...problems.map(p => `  \u2022 ${p.message}`),
-        ...(problems.some(p => p.convertible)
-          ? ['', 'Convert it to greyscale in your image editor and try again. The app will not '
-             + 'convert it for you: a figure that changed silently on upload is a figure whose '
-             + 'printed form nobody chose.']
-          : []),
-      ].join('\n'));
+      alert(['This image was not used:', '',
+        ...problems.map(p => `  \u2022 ${p.message}`)].join('\n'));
       return;
     }
 
     setAssignment(prev => ({ ...prev, figures: { ...(prev.figures || {}), [id]: next } }));
-    alert(`${file.name} is now the drawing for "${id}". Its title and description are unchanged, `
-      + 'so the grader sees exactly what it did before.');
+    alert(`${where} now uses ${next.filename}.`);
   };
 
   /** Edit a block's title or desc in place, in the stem text that holds it. */
@@ -761,96 +798,22 @@ const Editor: React.FC = () => {
                       to find this assignment's layout map. Leave blank to derive one automatically.
                     </p>
 
-                    {/* Where students hand the work in. A value, never a
-                        constant: the standing text on page 1 names no
-                        institution and no deployment, so this is the one place
-                        an address can come from. Blank prints nothing at all —
-                        see Assignment.submissionAddress. */}
-                    <label className="block text-xs font-medium text-academic-700 mt-4 mb-1">
-                      Submission address <span className="font-normal text-academic-500">— printed on page 1</span>
-                    </label>
-                    <input
-                      value={assignment.submissionAddress ?? ''}
-                      placeholder="e.g. submit.example.edu/eng17"
-                      onChange={e => setAssignment({
-                        ...assignment,
-                        submissionAddress: e.target.value.replace(/\s+/g, ' ').trimStart() || undefined,
-                      })}
-                      className="w-full max-w-md text-sm border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
-                    />
-                    <p className="text-xs text-academic-500 mt-1 leading-relaxed">
-                      Where students go to photograph and upload their pages. Students type this from paper, so keep it
-                      short and leave off <code className="font-mono">https://</code>.
-                      {' '}
-                      {(assignment.submissionAddress || '').trim()
-                        ? 'Page 1 will tell students how to submit.'
-                        : <span className="text-amber-700">
-                            Leave it blank and page 1 says nothing about submitting — no placeholder and no gap.
-                            Blank is right if you collect the pages some other way.
-                          </span>}
-                    </p>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* THE FIGURES THIS ASSIGNMENT REFERS TO.
-
-                Shown only when there are any, so an assignment whose figures
-                are inline — which is every assignment authored before
-                2026-09-21 — sees no new furniture at all. Extract figures is
-                what puts one here. */}
+            {/* The figures used to be listed here, in the settings area, a long
+                way from the questions they appear in. They are now shown inside
+                their own problem — see FigureCard — and this is a count with
+                nothing to click, so an instructor can see at a glance that the
+                assignment has figures without this becoming a second place to
+                manage them. Controls for a thing belong next to the thing. */}
             {figureRefs.length > 0 && (
-              <div className="md:col-span-2 rounded border border-academic-200 bg-academic-50/60 p-4">
-                <p className="text-sm font-medium text-academic-800 mb-1">
-                  Figures ({figureRefs.length})
-                </p>
-                <p className="text-xs text-academic-500 mb-3 leading-relaxed">
-                  Each drawing is a file this assignment refers to. Replacing one, in any accepted
-                  format, changes nothing else — the title and description stay, so the grader
-                  sees exactly what it did before. Figures must be greyscale and at least 300 dpi
-                  at printed size.
-                </p>
-                <div className="space-y-3">
-                  {figureRefs.map(ref => {
-                    const file = (assignment.figures || {})[ref.id];
-                    return (
-                      <div key={ref.id} className="rounded border border-academic-200 bg-white p-3">
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <span className="text-xs font-mono text-academic-700">
-                            figures/{ref.id}.{file?.format ?? '?'}
-                            <span className="text-academic-400"> · Problem {ref.problemNumber}</span>
-                          </span>
-                          <label className="text-xs px-3 py-1.5 rounded-full border border-academic-300 bg-white text-academic-600 hover:border-academic-500 hover:text-academic-800 cursor-pointer">
-                            Replace
-                            <input
-                              type="file"
-                              accept=".svg,.png,.jpg,.jpeg"
-                              className="hidden"
-                              onChange={e => {
-                                const f = e.target.files?.[0];
-                                e.target.value = '';
-                                if (f) void handleReplaceFigure(ref.id, f);
-                              }}
-                            />
-                          </label>
-                        </div>
-                        <Input
-                          label="Title"
-                          value={ref.title}
-                          onChange={e => updateFigureWords(ref.id, 'title', e.target.value)}
-                        />
-                        <TextArea
-                          label="Description — the only thing the grader sees of this figure"
-                          rows={2}
-                          value={ref.desc}
-                          onChange={e => updateFigureWords(ref.id, 'desc', e.target.value)}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              <p className="md:col-span-2 text-xs text-academic-500">
+                {figureRefs.length} figure{figureRefs.length === 1 ? '' : 's'} in this assignment.
+                Each one is shown in its own problem below, where you can replace it.
+              </p>
             )}
 
             {/* THE ASSIGNMENT KIND. Two values, no third, and no blank once set.
@@ -1056,6 +1019,24 @@ const Editor: React.FC = () => {
                           onChange={e => updateProblem(pIndex, { description: e.target.value })}
                           rows={2}
                        />
+                       {/* THE FIGURES IN THIS PROBLEM, with their controls, here
+                           rather than in a panel elsewhere on the page. */}
+                       {parseFigureRefs(problem.description || '').length > 0 && (
+                         <div className="mt-3 space-y-3">
+                           {parseFigureRefs(problem.description || '').map(({ ref }, fIndex) => (
+                             <FigureCard
+                               key={ref.id || fIndex}
+                               figureNumber={fIndex + 1}
+                               problemNumber={pIndex + 1}
+                               refBlock={ref}
+                               file={(assignment.figures || {})[ref.id]}
+                               onReplace={f => void handleReplaceFigure(ref.id, f)}
+                               onTitleChange={v => updateFigureWords(ref.id, 'title', v)}
+                               onDescChange={v => updateFigureWords(ref.id, 'desc', v)}
+                             />
+                           ))}
+                         </div>
+                       )}
                     </div>
                  </div>
                  <Button variant="ghost" onClick={() => removeProblem(pIndex)} className="text-red-500 hover:bg-red-50 hover:text-red-700">

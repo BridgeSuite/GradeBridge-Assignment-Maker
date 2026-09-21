@@ -5,7 +5,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { courseKeyRemovedNotice } from './importNotices';
+import { courseKeyRemovedNotice, submissionAddressRemovedNotice } from './importNotices';
 import { figureRefProblems, parseFigureRefs, splitFigureRefs } from './figureRefs';
 import { Assignment, AssignmentKind, FinalizeStamp, InputMode, Problem, Subsection, SubmissionType } from '../types';
 import { LEGACY_SPACE_LINES } from './templateLayout';
@@ -134,15 +134,14 @@ function hasCourseKeyBlock(lines: string[]): boolean {
 }
 
 function parseMetadata(lines: string[], warnings?: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode' | 'assignmentKind'>
-    & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string;
+    & { pageFormatId?: string; aiFeedback: boolean;
         finalized?: FinalizeStamp; finalizeHistory?: FinalizeStamp[] } {
   // Every optional line here defaults to the value a file written before it
   // existed would have had, so older .md files round-trip byte-for-byte:
   // **Input:** absent → electronic, **Template ID:** absent → derived,
-  // **AI Feedback:** absent → off, **Submit at:** absent → no submission section,
-  // **Kind:** absent → conventional.
+  // **AI Feedback:** absent → off, **Kind:** absent → conventional.
   const meta: Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode' | 'assignmentKind'>
-      & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string;
+      & { pageFormatId?: string; aiFeedback: boolean;
           finalized?: FinalizeStamp; finalizeHistory?: FinalizeStamp[] } =
     { courseCode: '', title: '', preamble: '', inputMode: 'electronic' as InputMode,
       aiFeedback: false, assignmentKind: 'conventional' as AssignmentKind };
@@ -182,13 +181,14 @@ function parseMetadata(lines: string[], warnings?: string[]): Pick<Assignment, '
     // feature, so an ambiguous value should not switch it on.
     m = l.match(/^\*\*AI Feedback:\*\*\s+(.+)$/i);
     if (m) { meta.aiFeedback = /^(on|yes|true|enabled?)$/i.test(m[1].trim()); continue; }
-    // Collapsed to one line: the value is printed into a block whose height is
-    // measured as a single line, and a newline inside it would be drawn but not
-    // reserved.
+    // `**Submit at:**` was removed on 2026-09-22. A file written before then
+    // still carries it; the value is discarded and the import says so, the same
+    // way a leftover course key is handled. Not refused — the file is fine
+    // without it — and not silent, because an instructor who set an address
+    // would otherwise expect it on the printed sheet.
     m = l.match(/^\*\*Submit at:\*\*\s+(.+)$/i);
     if (m) {
-      const address = m[1].replace(/\s+/g, ' ').trim();
-      if (address) meta.submissionAddress = address;
+      if (m[1].trim()) warnings?.push(submissionAddressRemovedNotice());
       continue;
     }
   }
@@ -567,7 +567,6 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
     // Zero is not a target. An .md with no points anywhere keeps the default.
     ...(authoredTotal > 0 ? { targetPoints: authoredTotal } : {}),
     ...(meta.pageFormatId ? { pageFormatId: meta.pageFormatId } : {}),
-    ...(meta.submissionAddress ? { submissionAddress: meta.submissionAddress } : {}),
     aiFeedback: meta.aiFeedback,
     preamble: meta.preamble,
     problems,

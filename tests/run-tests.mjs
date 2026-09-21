@@ -2954,63 +2954,96 @@ ${r.problem_statement}`);
 }
 
 // =====================================================
-// THE SUBMISSION ADDRESS SURVIVES EVERY ROUND TRIP
+// A LEFTOVER SUBMISSION ADDRESS IS REPORTED, NOT SWALLOWED
 // =====================================================
-// It prints onto paper and nowhere else, so losing it silently produces a sheet
-// that does not tell students how to hand the work in — which is the whole
-// defect the section was added to remove, reintroduced by the restore path.
+// The field was removed on 2026-09-22. Students are told to use the Submission
+// app when they receive the assignment, so the printed sheet does not need to
+// repeat it, and the field confused the first instructor who met it.
+//
+// **What was here before was the opposite suite** — it asserted the address
+// survived every round trip, because losing it silently would have produced a
+// sheet that did not tell students how to hand work in. That reasoning was
+// sound for a field that printed. Now that nothing prints, the same care goes
+// into making sure an instructor who SET one is told it has gone, rather than
+// finding out by printing a hundred sheets without it.
 {
-  const withAddress = makeAssignment({
-    inputMode: 'handwritten',
-    targetPoints: 100,
-    submissionAddress: 'submit.example.edu/eng17',
+  const withAddress = () => {
+    const a = makeAssignment({ inputMode: 'handwritten', targetPoints: 100 });
+    a.submissionAddress = 'submit.example.edu/eng17';
+    return a;
+  };
+
+  check('submission address: Export .md no longer writes the line', () => {
+    const md = assignmentToMd(withAddress());
+    assert(!/Submit at:/.test(md),
+      `Export .md still writes a Submit at line:\n${md.split('\n').slice(0, 12).join('\n')}`);
   });
 
-  check('submission address: Export .md → Import Markdown carries it', () => {
-    const md = assignmentToMd(withAddress);
-    assert(/\*\*Submit at:\*\* submit\.example\.edu\/eng17/.test(md),
-      `the .md does not carry the address:\n${md.split('\n').slice(0, 12).join('\n')}`);
-    assertEqual(parseMdToAssignment(md).submissionAddress, 'submit.example.edu/eng17',
-      'the address did not survive the .md round trip');
+  check('CRITERION 4: an .md carrying **Submit at:** still imports', () => {
+    const md = assignmentToMd(makeAssignment({ targetPoints: 100 }))
+      .replace('**Preamble:**', '**Submit at:** submit.example.edu/eng17\n\n**Preamble:**');
+    const back = parseMdToAssignment(md);
+    assertEqual(back.courseCode, 'EEC1', 'the import was refused or mangled by the line');
+    assertEqual(back.problems.length, 1, 'the line disturbed the problems');
   });
 
-  check('submission address: an .md without one produces no field at all', () => {
-    // Absence must stay absence: a file written before this existed round-trips
-    // byte-for-byte, and an empty string would print an empty submission section.
-    const md = assignmentToMd(makeAssignment({ targetPoints: 100 }));
-    assert(!/Submit at:/.test(md), 'a .md gained a Submit at line it never had');
+  check('CRITERION 4: the value is discarded, not carried onto the assignment', () => {
+    const md = assignmentToMd(makeAssignment({ targetPoints: 100 }))
+      .replace('**Preamble:**', '**Submit at:** submit.example.edu/eng17\n\n**Preamble:**');
     assert(!('submissionAddress' in parseMdToAssignment(md)),
-      'importing an .md with no address invented the field');
+      'a retired submission address was carried onto the assignment');
   });
 
-  check('submission address: it is NOT in the student spec', async () => {
-    // The whitelist excludes by default and this stays excluded: the student is
-    // already inside the app by the time they can read the spec, so it would be
-    // a field that reaches students and is read by nothing.
-    const spec = await buildAssignmentSpec(withAddress);
-    assert(!('submissionAddress' in spec), 'the submission address reached the student spec');
+  check('CRITERION 4: the import says so, in words an instructor can act on', () => {
+    const md = assignmentToMd(makeAssignment({ targetPoints: 100 }))
+      .replace('**Preamble:**', '**Submit at:** submit.example.edu/eng17\n\n**Preamble:**');
+    const warnings = [];
+    parseMdToAssignment(md, warnings);
+    const joined = warnings.join(' | ');
+    assert(joined.length > 0, 'the address was dropped silently');
+    assert(/submission address/i.test(joined), `the notice does not name what was found: ${joined}`);
+    assert(/discard|removed|no longer/i.test(joined),
+      `the notice does not say it was discarded: ${joined}`);
+  });
+
+  check('submission address: an .md without one is not warned about', () => {
+    const warnings = [];
+    parseMdToAssignment(assignmentToMd(makeAssignment({ targetPoints: 100 })), warnings);
+    assertEqual(warnings, [], `a file with no address was warned about: ${warnings.join(' | ')}`);
+  });
+
+  check('CRITERION 4: a JSON file carrying the field is stripped and reported', () => {
+    const imported = { ...makeAssignment(), submissionAddress: 'submit.example.edu/eng17' };
+    const notices = stripRetiredFields(imported);
+    assert(!('submissionAddress' in imported), 'the retired field survived the strip');
+    assertEqual(notices.length, 1, 'the strip did not report exactly one notice');
+    assert(/submission address/i.test(notices[0]), `unexpected notice: ${notices[0]}`);
+  });
+
+  check('submission address: it is still not on the student whitelist', () => {
     assert(!STUDENT_SPEC_FIELDS.assignment.includes('submissionAddress'),
-      'the submission address was added to the student whitelist');
+      'the retired submission address is on the student whitelist');
   });
 
-  // The two parsers are required to move in lockstep; this holds them to it on
-  // the one field this work order added.
+  // convert.py is the format's second implementation and must agree that the
+  // line is now discarded rather than read.
   {
     const python = ['python', 'python3', 'py'].find(exe =>
       spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
-    const name = 'submission address: convert.py reads the same line the app writes';
+    const name = 'CRITERION 4: convert.py discards the line and says so';
     if (!python) results.push(`  SKIP  ${name} (no Python interpreter on PATH)`);
     else check(name, () => {
       const work = mkdtempSync(join(tmpdir(), 'gb-submit-at-'));
+      const md = assignmentToMd(makeAssignment({ targetPoints: 100 }))
+        .replace('**Preamble:**', '**Submit at:** submit.example.edu/eng17\n\n**Preamble:**');
       const mdPath = join(work, 'SubmitAtProbe.md');
-      writeFileSync(mdPath, assignmentToMd(withAddress), 'utf8');
+      writeFileSync(mdPath, md, 'utf8');
       const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), mdPath], { encoding: 'utf8' });
       assert(run.status === 0, `convert.py failed: ${run.stderr || run.stdout}`);
       const spec = JSON.parse(readFileSync(join(work, 'SubmitAtProbe_spec.json'), 'utf8'));
-      assertEqual(spec.submissionAddress, parseMdToAssignment(assignmentToMd(withAddress)).submissionAddress,
-        'convert.py and mdParserService disagree about **Submit at:**');
-      assertEqual(spec.submissionAddress, 'submit.example.edu/eng17',
-        'convert.py did not read the address');
+      assert(!('submissionAddress' in spec), 'convert.py still carries the retired field');
+      assert(/submission address/i.test(run.stdout),
+        `convert.py discarded it silently:\n${run.stdout}`);
       rmSync(work, { recursive: true, force: true });
     });
   }

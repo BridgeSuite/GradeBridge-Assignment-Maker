@@ -153,6 +153,13 @@ PEM_FENCE_OPEN_RE = re.compile(r'^[ \t]*```[ \t]*pem[ \t]*$', re.IGNORECASE)
 # leftover course key.
 METADATA_END_RE = re.compile(r'^(##\s+Problem\s+\d+:|###\s+\([a-z]+\))', re.IGNORECASE)
 
+SUBMISSION_ADDRESS_REMOVED_NOTICE = (
+    'This file carries a submission address. That setting has been removed -- the '
+    'printed sheet no longer has a "When you have finished writing" section -- so '
+    'the address has been discarded. Students are told how to hand work in when '
+    'they open the assignment in the Submission app. Nothing is required of you.'
+)
+
 COURSE_KEY_REMOVED_NOTICE = (
     'This file carries a course public key (the ```pem block at the top). '
     'Submission encryption has been removed from the pipeline, so the key no '
@@ -404,7 +411,7 @@ def parse_metadata(lines):
     """
     Parse the title line and metadata fields from the top of the file.
     Returns dict with courseCode, title, preamble, inputMode, assignmentKind,
-    pageFormatId, aiFeedback, submissionAddress.
+    pageFormatId, aiFeedback.
     Due date is intentionally ignored — managed in Canvas.
     """
     meta = {
@@ -422,10 +429,6 @@ def parse_metadata(lines):
         # **AI Feedback:** absent means off, so files written before the flag
         # existed stay valid and feedback-off.
         'aiFeedback': False,
-        # **Submit at:** absent means page 1 prints no submission section at
-        # all — not a placeholder and not a gapped sentence. See
-        # Assignment.submissionAddress in types.ts.
-        'submissionAddress': None,
     }
 
     if has_course_key_block(lines):
@@ -475,13 +478,14 @@ def parse_metadata(lines):
             meta['aiFeedback'] = bool(re.match(r'^(on|yes|true|enabled?)$', m.group(1).strip(), re.IGNORECASE))
             continue
 
-        # Where students hand the work in: **Submit at:** gradebridge.example.edu
-        # Collapsed to one line, as the printed block reserves one.
+        # **Submit at:** was removed on 2026-09-22. A file written before then
+        # still carries it; the value is discarded and the converter says so,
+        # the same way a leftover course key is handled. Mirrors
+        # submissionAddressRemovedNotice() in services/importNotices.ts.
         m = re.match(r'^\*\*Submit at:\*\*\s+(.+)$', line, re.IGNORECASE)
         if m:
-            address = re.sub(r'\s+', ' ', m.group(1)).strip()
-            if address:
-                meta['submissionAddress'] = address
+            if m.group(1).strip():
+                PARSE_WARNINGS.append(SUBMISSION_ADDRESS_REMOVED_NOTICE)
             continue
 
     return meta
@@ -770,9 +774,6 @@ def parse_md(filepath):
         # Only present when the .md pinned one; otherwise the QR template
         # generator derives it from the course code and title.
         **({'pageFormatId': meta['pageFormatId']} if meta.get('pageFormatId') else {}),
-        # Only present when the .md carried it; absent means page 1 prints no
-        # submission section rather than a gapped one.
-        **({'submissionAddress': meta['submissionAddress']} if meta.get('submissionAddress') else {}),
         'createdAt': now_ms,
         'updatedAt': now_ms
     }

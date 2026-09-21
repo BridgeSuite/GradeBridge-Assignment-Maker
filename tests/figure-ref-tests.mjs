@@ -474,7 +474,7 @@ check('referencedFigureIds finds every id an assignment refers to', () => {
     const r = await figImport.collectFigures(withOneBlock,
       [{ path: 'figures/p1-divider.svg', bytes: colour }]);
     assertEqual(Object.keys(r.figures), [], 'a colour figure was collected');
-    assert(/greyscale/.test(r.problems.join(' ')), `the guard message is missing: ${r.problems}`);
+    assert(/colour in it/.test(r.problems.join(' ')), `the guard message is missing: ${r.problems}`);
   });
 
   check('a file nobody refers to is REPORTED and not stored', async () => {

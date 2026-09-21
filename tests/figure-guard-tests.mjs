@@ -28,6 +28,12 @@ const check = async (name, fn) => {
   catch (err) { failed++; results.push(`  FAIL  ${name}\n          ${err.message}`); }
 };
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+const assertEqual = (a, b, msg) => {
+  const x = JSON.stringify(a), y = JSON.stringify(b);
+  if (x !== y) throw new Error(`${msg}
+          expected: ${y}
+          actual:   ${x}`);
+};
 
 const outDir = mkdtempSync(join(tmpdir(), 'gb-guard-'));
 const requireFromRepo = createRequire(join(REPO, 'package.json'));
@@ -164,9 +170,14 @@ await check('GREYSCALE: a colour PNG is refused, and the refusal is convertible'
   const grey = found.find(p => p.guard === 'greyscale');
   assert(grey, `a colour PNG passed: ${found.map(p => p.guard).join(', ') || '(no problems)'}`);
   assert(grey.convertible === true, 'the refusal does not offer conversion');
-  assert(/scans are greyscale/.test(grey.message), `the message does not say why: ${grey.message}`);
-  assert(/1 of \d+ pixels are coloured/.test(grey.message),
-    `the message does not count the offending pixels: ${grey.message}`);
+  // WRITTEN FOR AN INSTRUCTOR. These messages used to carry the reasoning —
+  // that the scans are greyscale, and that this is what proves the marking
+  // stage never altered a student's work. All true, and none of it something
+  // the person holding a colour PNG can act on. It lives in the code and the
+  // spec now; what is on screen is what is wrong and what to do.
+  assert(/colour in it/.test(grey.message), `the message does not say what is wrong: ${grey.message}`);
+  assert(/black, white and grey/.test(grey.message),
+    `the message does not say what is allowed: ${grey.message}`);
 });
 
 await check('GREYSCALE: near-grey pixels inside the tolerance are accepted', async () => {
@@ -189,8 +200,10 @@ await check('RESOLUTION: a PNG below 300 dpi at printed size is refused', async 
   const found = await guards.figureFileProblems(asFile(smallPng, 'png', 'small.png'));
   const res = found.find(p => p.guard === 'resolution');
   assert(res, `a 200x50 figure passed the resolution guard`);
-  assert(/200x50 pixels/.test(res.message), `the message does not name the size: ${res.message}`);
-  assert(/at least 300 dpi/.test(res.message), `the message does not name the floor: ${res.message}`);
+  // The two numbers an instructor can act on: what it is, and what is needed.
+  assert(/\d+ dpi/.test(res.message), `the message does not give the dpi: ${res.message}`);
+  assert(/at least 300/.test(res.message), `the message does not name the floor: ${res.message}`);
+  assert(/larger/.test(res.message), `the message does not say what to do: ${res.message}`);
 });
 
 await check('SIZE: a figure over the cap is refused', async () => {
@@ -198,11 +211,13 @@ await check('SIZE: a figure over the cap is refused', async () => {
   assert((await guardsHit(big)).includes('size'), 'an oversized figure passed the size guard');
 });
 
-await check('SIZE: the refusal explains who pays for it', async () => {
+await check('SIZE: the refusal gives the size, the limit, and what to do', async () => {
   const big = { format: 'png', base64: Buffer.alloc(guards.FIGURE_MAX_BYTES + 1).toString('base64'), filename: 'huge.png' };
   const found = await guards.figureFileProblems(big);
   const size = found.find(p => p.guard === 'size');
-  assert(/every student/.test(size.message), `the message does not say why: ${size.message}`);
+  assert(/MB/.test(size.message), `the message does not give a size: ${size.message}`);
+  assert(/limit/.test(size.message), `the message does not name the limit: ${size.message}`);
+  assert(/smaller/.test(size.message), `the message does not say what to do: ${size.message}`);
 });
 
 await check('FORMAT: anything but SVG, PNG or JPG is refused, and the message lists them', async () => {
@@ -216,7 +231,10 @@ await check('COLOUR: an SVG that paints in colour is refused', async () => {
   const found = await guards.figureFileProblems(asFile(Buffer.from(svg), 'svg', 'c.svg'));
   const colour = found.find(p => p.guard === 'colour');
   assert(colour, 'a colour SVG passed');
-  assert(/#cc2222/.test(colour.message), `the offending colour is not named: ${colour.message}`);
+  assert(/colour in it/.test(colour.message), `the message does not say what is wrong: ${colour.message}`);
+  // Convertible, so the instructor is offered the fix rather than sent to find
+  // an image editor — the half of the original work order that was missing.
+  assert(colour.convertible === true, 'a colour drawing does not offer conversion');
 });
 
 await check('COLOUR: a greyscale SVG passes', async () => {
@@ -266,6 +284,154 @@ await check('UNREADABLE: an interlaced PNG is refused rather than passed uncheck
   assert(found.some(p => p.guard === 'unreadable'),
     'an interlaced PNG was judged without its pixels being read');
 });
+
+// ---------------------------------------------------------------------------
+// The messages are written for an instructor
+// ---------------------------------------------------------------------------
+// Andre's first hands-on test found the refusals unreadable: they explained the
+// pipeline instead of the problem, and one of them was a broken sentence. The
+// reasoning belongs in the code and the spec. **This check is what stops it
+// coming back**, because the natural instinct when touching a guard is to
+// explain the guard.
+await check('no refusal message explains the pipeline to the instructor', async () => {
+  const JARGON = [
+    /marking stage/i, /scans are/i, /pipeline/i, /autograder/i, /student spec/i,
+    /whitelist/i, /printed size/i, /interlaced/i, /base64/i, /gb1|gb2/i,
+    /layout_id/i, /dpi at/i,
+  ];
+  const messages = [];
+  for (const file of [
+    asFile(colourPng, 'png', 'colour.png'),
+    asFile(smallPng, 'png', 'small.png'),
+    { format: 'png', base64: Buffer.alloc(guards.FIGURE_MAX_BYTES + 1).toString('base64'), filename: 'h.png' },
+    { format: 'gif', base64: 'AA==', filename: 'x.gif' },
+    asFile(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><path stroke="#cc2222"/></svg>'), 'svg', 'c.svg'),
+    asFile(Buffer.from('not a png at all, really not'), 'png', 'x.png'),
+  ]) {
+    for (const p of await guards.figureFileProblems(file)) messages.push(p.message);
+  }
+  assert(messages.length >= 6, `only ${messages.length} messages were collected`);
+  for (const m of messages) {
+    for (const bad of JARGON) {
+      assert(!bad.test(m), `a refusal explains the pipeline instead of the problem:\n          ${m}`);
+    }
+    assert(m.length < 200, `a refusal is too long to read in a dialog (${m.length} chars):\n          ${m}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Item 5: the conversion that was promised and not built
+// ---------------------------------------------------------------------------
+// `WORKORDER_AM_FIGURES_AND_FINALIZE_2026-09-21` §5 said: refuse a colour image
+// **and offer an explicit convert-to-greyscale action; never convert silently.**
+// The build refused and then declined to convert at all, leaving the instructor
+// to find an image editor. That is half of what was asked for.
+//
+// **An instructor pressing a button labelled "Convert to greyscale" is not a
+// silent conversion.** The refusal comes first, the offer is a separate
+// decision, and the result is shown before it counts as done.
+//
+// The SVG path is exercised here. The raster path needs a canvas and is
+// exercised in the browser; `convertToGreyscale` fails loudly rather than
+// silently when there is no canvas, which is asserted below.
+{
+  const convert = await load(join(REPO, 'services', 'figureConvert.ts'), 'convert.mjs');
+
+  const COLOUR_SVG = '<svg xmlns="http://www.w3.org/2000/svg">'
+    + '<path d="M0 0" stroke="#cc2222"/><rect fill="rgb(20, 40, 200)"/>'
+    + '<circle stroke="#0f0"/></svg>';
+
+  await check('ITEM 5: a colour drawing converts, and the result passes the greyscale guard', async () => {
+    const before = asFile(Buffer.from(COLOUR_SVG), 'svg', 'colour.svg');
+    assert((await guardsHit(before)).includes('colour'), 'the probe is not actually colour');
+
+    const result = await convert.convertToGreyscale(before);
+    assert(result.file, `the conversion failed: ${result.problems.map(p => p.message).join(' | ')}`);
+    assertEqual(await guardsHit(result.file), [],
+      'the converted drawing still fails a guard');
+  });
+
+  await check('ITEM 5: the converted drawing keeps its shapes, only its colours change', async () => {
+    const result = await convert.convertToGreyscale(asFile(Buffer.from(COLOUR_SVG), 'svg', 'c.svg'));
+    const out = Buffer.from(result.file.base64, 'base64').toString('utf8');
+    assert(out.includes('<path d="M0 0"'), 'the conversion lost a shape');
+    assert(out.includes('<circle'), 'the conversion lost a shape');
+    assert(!/#cc2222|rgb\(20, 40, 200\)|#0f0/.test(out), `a colour survived: ${out}`);
+  });
+
+  await check('ITEM 5: luma, not a flat average — a red and a blue do not become the same grey', async () => {
+    // A circuit diagram uses colour to tell two traces apart. A flat average of
+    // R, G and B turns pure red and pure blue into the identical mid grey and
+    // throws that distinction away; luma keeps them apart, which is the best a
+    // greyscale copy can do.
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+      + '<path stroke="#ff0000"/><path stroke="#0000ff"/></svg>';
+    const result = await convert.convertToGreyscale(asFile(Buffer.from(svg), 'svg', 'rb.svg'));
+    const out = Buffer.from(result.file.base64, 'base64').toString('utf8');
+    const greys = [...out.matchAll(/stroke="#([0-9a-f]{6})"/g)].map(m => m[1]);
+    assertEqual(greys.length, 2, `expected two converted strokes, got ${greys.join(', ')}`);
+    assert(greys[0] !== greys[1],
+      `red and blue converted to the same grey (${greys[0]}) — a flat average, not luma`);
+  });
+
+  await check('ITEM 5: the converted file goes through EVERY guard, not just the colour one', async () => {
+    // Conversion changes the bytes, so it changes the size, and a re-encode can
+    // come out over the cap even though it is now grey. Returning it on the
+    // strength of the colour check alone would hand the instructor a file they
+    // had just been told was fixed, to be refused a moment later.
+    const src = readFileSync(join(REPO, 'services', 'figureConvert.ts'), 'utf8');
+    assert(/figureFileProblems\(converted\)/.test(src),
+      'convertToGreyscale does not re-run the full guard set on its own output');
+    assert(/problems\.length \? \{ problems \} : \{ file: converted/.test(src),
+      'convertToGreyscale returns a file even when the converted result still fails');
+  });
+
+  await check('ITEM 5: a conversion that cannot run fails loudly rather than silently', async () => {
+    // No canvas in Node, so the raster path must report rather than return a
+    // file nobody converted.
+    const png = asFile(colourPng, 'png', 'colour.png');
+    const result = await convert.convertToGreyscale(png);
+    assert(!result.file, 'a raster was "converted" without a canvas');
+    assert(result.problems.length > 0, 'the failure was silent');
+    assert(/browser/i.test(result.problems[0].message),
+      `the failure does not say what is missing: ${result.problems[0].message}`);
+  });
+
+  await check('MUTATION (conversion): a flat average would fail the luma check', async () => {
+    const src = readFileSync(join(REPO, 'services', 'figureConvert.ts'), 'utf8');
+    const from = 'const LUMA = (r: number, g: number, b: number) => 0.299 * r + 0.587 * g + 0.114 * b;';
+    assert(src.includes(from), 'the LUMA anchor is gone from the source');
+    const broken = await load(join(REPO, 'services', 'figureConvert.ts'), 'mutant-luma.mjs',
+      src.replace(from, 'const LUMA = (r: number, g: number, b: number) => (r + g + b) / 3;'));
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg">'
+      + '<path stroke="#ff0000"/><path stroke="#0000ff"/></svg>';
+    const result = await broken.convertToGreyscale(asFile(Buffer.from(svg), 'svg', 'rb.svg'));
+    const out = Buffer.from(result.file.base64, 'base64').toString('utf8');
+    const greys = [...out.matchAll(/stroke="#([0-9a-f]{6})"/g)].map(m => m[1]);
+    assertEqual(greys[0], greys[1],
+      'the mutant kept them apart, so the luma check above does not exercise the weighting');
+  });
+
+  await check('MUTATION (conversion): skipping the re-check would return an unusable file', async () => {
+    const src = readFileSync(join(REPO, 'services', 'figureConvert.ts'), 'utf8');
+    const broken = await load(join(REPO, 'services', 'figureConvert.ts'), 'mutant-recheck.mjs',
+      src.replace('const problems = await figureFileProblems(converted);',
+        'const problems: FigureProblem[] = [];'));
+    // A drawing that is colour AND too large: converting fixes the colour and
+    // leaves it over the cap. The shipped version refuses; the mutant does not.
+    const padding = 'x'.repeat(guards.FIGURE_MAX_BYTES);
+    const huge = `<svg xmlns="http://www.w3.org/2000/svg"><title>${padding}</title>`
+      + '<path stroke="#cc2222"/></svg>';
+    const file = asFile(Buffer.from(huge), 'svg', 'huge-colour.svg');
+    assert((await guardsHit(file)).includes('size'), 'the probe is not actually oversized');
+
+    const shipped = await convert.convertToGreyscale(file);
+    assert(!shipped.file, 'the shipped conversion returned a file that is still too large');
+
+    const mutant = await broken.convertToGreyscale(file);
+    assert(mutant.file, 'the mutant did not reproduce the defect');
+  });
+}
 
 // ---------------------------------------------------------------------------
 // MUTATION TESTS — break each check and confirm a test fails

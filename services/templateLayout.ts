@@ -382,9 +382,9 @@ export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: read
  * split, and an author who tried would trip the duplicate-instruction guard.
  *
  * **Printed only when the author has set an address, and omitted entirely
- * otherwise** — see `Assignment.submissionAddress` for why the address cannot be
- * a constant and why a gapped sentence is worse than silence. That makes this
- * the one conditional section on the page.
+ * otherwise** — the address could not be a constant, because the tool is meant
+ * for use beyond the campus that commissioned it, and a sheet reading "go to
+ * ______" is worse than one that says nothing. Removed entirely on 2026-09-22.
  *
  * Each line is held to the governing rule above — advice that only helps the
  * automatic reader does not belong in front of students:
@@ -399,46 +399,33 @@ export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: read
  *
  * No mark anywhere depends on any of it.
  */
-export const SUBMISSION_HEADING = 'When you have finished writing';
+// REMOVED 2026-09-22: the "When you have finished writing" section, and the
+// submission address that conditioned it.
+//
+// It was the one conditional section on page 1, printed only when the author
+// had set an address. No real assignment ever set one -- HW1 to HW3 print
+// identically without it -- and students are told to use the Submission app
+// when they receive the assignment, so the sheet does not need to say so.
+//
+// What it was for is worth keeping in view: an early ENG17 sheet said nothing
+// at all about submitting, and a student printed sixteen pages, did the work,
+// and was left holding paper with no stated next step. That gap is now closed
+// where the student actually meets it, in the app, rather than on the paper.
 
 /**
- * The four steps are **numbered and the last line is not**, which is the one
- * formatting difference from every other section on the page and is carrying
- * meaning: these happen in order, and a student who photographs before loading
- * the assignment file has to start again. The sections above are independent
- * statements and are deliberately left unnumbered.
- */
-export const submissionItems = (address: string): string[] => [
-  `1. Go to ${address} on your phone or laptop.`,
-  '2. Load the assignment file: the .zip you downloaded with this assignment.',
-  '3. Photograph each page when the app asks.',
-  '4. Check each photograph in the app before you submit. If a page is dark or blurred, take it again.',
-  'Keep your printed pages until your grade is posted.',
-];
-
-/**
- * The address as it will print, or `''` when there is none. Trimmed and reduced
- * to one line: the field is a single address and a newline inside it would be
- * reserved as one line and drawn as another, which is how a block silently
- * overruns the space measured for it.
- */
-export const printableSubmissionAddress = (assignment: Assignment): string =>
-  (assignment.submissionAddress || '').replace(/\s+/g, ' ').trim();
-
-/**
- * The standing sections in printed order, including the conditional submission
- * section. **Every consumer must read this rather than `STANDING_INSTRUCTIONS`**
- * — the layout, the duplicate-instruction guard and the tests alike — or a
- * sentence the tool prints stops being one the guards know about.
+ * The standing sections in printed order. **Every consumer must read this
+ * rather than `STANDING_INSTRUCTIONS`** — the layout, the duplicate-instruction
+ * guard and the tests alike — or a sentence the tool prints stops being one the
+ * guards know about.
+ *
+ * There is nothing conditional left on page 1 since the submission section was
+ * removed on 2026-09-22, so this is now the same list for every assignment. The
+ * indirection stays because it is what the guards read: collapsing it would
+ * mean the next conditional section arrives with nowhere to be registered.
  */
 export const standingSections = (
-  assignment: Assignment
-): ReadonlyArray<{ heading: string; items: readonly string[] }> => {
-  const address = printableSubmissionAddress(assignment);
-  return address
-    ? [...STANDING_INSTRUCTIONS, { heading: SUBMISSION_HEADING, items: submissionItems(address) }]
-    : STANDING_INSTRUCTIONS;
-};
+  _assignment: Assignment
+): ReadonlyArray<{ heading: string; items: readonly string[] }> => STANDING_INSTRUCTIONS;
 
 /**
  * Not decoration. Students read "your work is scanned" as "my handwriting is
