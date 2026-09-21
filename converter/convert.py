@@ -115,6 +115,14 @@ AI_GRADED_TYPES = set(TYPE_MAP[k] for k in TYPE_MAP if k.startswith('ai-graded:'
 # would shred a drawing whose path data happens to hold a dollar sign.
 
 FIGURE_FENCE_OPEN_RE = re.compile(r'^[ \t]*```[ \t]*svg[ \t]*$')
+
+# A ```figure block refers to a drawing by id instead of containing it; the
+# drawing lives in figures/<id>.svg|.png|.jpg beside the .md. Mirrors
+# FIGURE_REF_OPEN_RE and splitFigureRefs in services/figureRefs.ts -- this file
+# is the second implementation of the format and has to keep agreeing with the
+# first.
+FIGURE_REF_OPEN_RE = re.compile(r'^[ \t]*```[ \t]*figure[ \t]*$', re.IGNORECASE)
+FIGURE_ID_RE = re.compile(r'^[a-z0-9-]{1,40}$')
 FIGURE_FENCE_CLOSE_RE = re.compile(r'^[ \t]*```[ \t]*$')
 FIGURE_IMAGE_RE = re.compile(r'^[ \t]*!\[([^\]]*)\]\(\s*([^)\s]+)\s*\)[ \t]*$')
 
@@ -162,6 +170,68 @@ def has_course_key_block(lines):
         if PEM_FENCE_OPEN_RE.match(line):
             return True
     return False
+
+
+def split_figure_refs(lines):
+    """
+    Split lines into ('ref', block_lines) and ('text', lines), parallel to
+    split_figures. Mirrors splitFigureRefs() in services/figureRefs.ts.
+
+    A figure block is not a figure as far as split_figures is concerned, so
+    without this its id/title/desc lines would be filtered as prose.
+    """
+    out = []
+    buf = []
+    i = 0
+    while i < len(lines):
+        if not FIGURE_REF_OPEN_RE.match(lines[i]):
+            buf.append(lines[i])
+            i += 1
+            continue
+        end = i + 1
+        while end < len(lines) and not FIGURE_FENCE_CLOSE_RE.match(lines[end]):
+            end += 1
+        closed = end < len(lines)
+        if buf:
+            out.append(('text', buf))
+            buf = []
+        out.append(('ref', lines[i:end + 1] if closed else lines[i:end]))
+        i = end + 1 if closed else len(lines)
+    if buf:
+        out.append(('text', buf))
+    return out
+
+
+def parse_figure_ref(block_lines):
+    """One ```figure block as {'id', 'title', 'desc'}. Mirrors parseFigureRefs()."""
+    ref = {'id': '', 'title': '', 'desc': ''}
+    for line in block_lines[1:]:
+        if FIGURE_FENCE_CLOSE_RE.match(line):
+            break
+        m = re.match(r'^[ \t]*([a-zA-Z]+)[ \t]*:[ \t]*(.*)$', line)
+        if not m:
+            continue
+        key = m.group(1).lower()
+        if key in ref:
+            ref[key] = m.group(2).strip()
+    return ref
+
+
+def figure_ref_problems(ref):
+    """What is wrong with a block, in the author's terms. Mirrors figureRefProblems()."""
+    problems = []
+    if not ref['id']:
+        problems.append('it has no `id:` line')
+    elif not FIGURE_ID_RE.match(ref['id']):
+        problems.append(
+            'its id %r is not usable as a filename '
+            '(lowercase letters, digits and hyphens, 1 to 40 characters)' % ref['id'])
+    if not ref['title']:
+        problems.append('it has no `title:` line')
+    if not ref['desc']:
+        problems.append('it has no `desc:` line, which is the only thing the grader '
+                        'sees of the figure')
+    return problems
 
 
 def split_figures(lines):
@@ -224,7 +294,14 @@ def build_description(body, keep_line, on_heading_line=None):
     Mirrors buildDescription() in services/mdParserService.ts.
     """
     parts = []
-    for kind, lines in split_figures(body):
+    segments = []
+    for kind, chunk in split_figure_refs(body):
+        if kind == 'ref':
+            segments.append(('figure', chunk))
+        else:
+            segments.extend(split_figures(chunk))
+
+    for kind, lines in segments:
         if kind == 'figure':
             parts.append('\n'.join(lines))
             continue

@@ -14,7 +14,8 @@
 
 import { build } from 'esbuild';
 import { webcrypto } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -84,6 +85,7 @@ const blocks = await load(join(REPO, 'services', 'figureBlocks.ts'), 'figureBloc
 const mdParser = await load(join(REPO, 'services', 'mdParserService.ts'), 'mdParser.mjs');
 const exportSvc = await load(join(REPO, 'services', 'exportService.ts'), 'exportSvc.mjs',
   [assetImports, stubHeavy]);
+const backupSvc = await load(join(REPO, 'services', 'authoringBackup.ts'), 'backup.mjs');
 
 console.log('\nFigure blocks — reference, resolve, and leave the mirror alone\n');
 
@@ -326,6 +328,92 @@ check('referencedFigureIds finds every id an assignment refers to', () => {
   const a = makeAssignment();
   assertEqual(refs.referencedFigureIds(a), ['p1-divider'], 'the referenced ids are wrong');
 });
+
+// ---------------------------------------------------------------------------
+// CRITERION 4 — the three round trips of §4.3
+// ---------------------------------------------------------------------------
+// Each carries an assignment with figure blocks all the way out and back, and
+// compares the FILES as well as the blocks. A route that kept the reference and
+// lost the drawing would pass a blocks-only check and ship an assignment whose
+// figures are gone.
+{
+  const withFigures = makeAssignment({
+    figures: {
+      'p1-divider': svgFile,
+      'p1-photo': pngFile,
+    },
+  });
+  // A second block, so a route that carries one figure and drops the rest is
+  // caught. Two formats, so a route that handles only SVG is caught too.
+  withFigures.problems[0].description =
+    `Given the network.\n\n${BLOCK}\n\nAnd the bench photograph.\n\n`
+    + ['```figure', 'id: p1-photo', 'title: The bench', 'desc: A breadboard on a bench.', '```'].join('\n');
+
+  const idsAndFiles = (a) => {
+    const ids = refs.referencedFigureIds(a);
+    return {
+      ids,
+      files: ids.map(id => (a.figures || {})[id] ? {
+        id,
+        format: a.figures[id].format,
+        base64: a.figures[id].base64,
+      } : { id, missing: true }),
+    };
+  };
+  const expected = idsAndFiles(withFigures);
+
+  check('CRITERION 4 (1): Export .md -> Import -> Export again keeps blocks and files', () => {
+    const md = exportSvc.assignmentToMd(withFigures);
+    const back = mdParser.parseMdToAssignment(md);
+    // The .md carries the blocks; the files travel beside it, so they are put
+    // back the way the import route does it.
+    back.figures = withFigures.figures;
+
+    assertEqual(refs.referencedFigureIds(back), expected.ids, 'the .md lost or reordered a block');
+    assertEqual(idsAndFiles(back).files, expected.files, 'a figure file was lost or changed');
+
+    const again = exportSvc.assignmentToMd(back);
+    assertEqual(again, md, 'the second .md differs from the first');
+
+    for (const { ref } of refs.parseFigureRefs(back.problems[0].description)) {
+      assertEqual(refs.figureRefProblems(ref), [], `the block for ${ref.id} came back incomplete`);
+    }
+  });
+
+  check('CRITERION 4 (2): authoring backup -> Import JSON keeps blocks and files', () => {
+    const restored = backupSvc.readAuthoringBackup(JSON.parse(backupSvc.buildAuthoringBackup(withFigures)));
+    assertEqual(refs.referencedFigureIds(restored), expected.ids, 'the backup lost a block');
+    assertEqual(idsAndFiles(restored).files, expected.files,
+      'the backup lost or altered a figure file');
+    assertEqual(restored.problems[0].description, withFigures.problems[0].description,
+      'the backup reflowed the stem');
+  });
+
+  // (3) is convert.py, below: it needs a real interpreter and a temp file.
+  {
+    const python = ['python', 'python3', 'py'].find(exe =>
+      spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
+    const name = 'CRITERION 4 (3): convert.py parses the same blocks as the app';
+    if (!python) results.push(`  SKIP  ${name} (no Python interpreter on PATH)`);
+    else check(name, () => {
+      const work = mkdtempSync(join(tmpdir(), 'gb-figmd-'));
+      const mdPath = join(work, 'FigureProbe.md');
+      writeFileSync(mdPath, exportSvc.assignmentToMd(withFigures), 'utf8');
+      const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), mdPath], { encoding: 'utf8' });
+      assert(run.status === 0, `convert.py failed: ${run.stderr || run.stdout}`);
+      const spec = JSON.parse(readFileSync(join(work, 'FigureProbe_spec.json'), 'utf8'));
+
+      const fromPython = refs.parseFigureRefs(spec.problems[0].description).map(s => s.ref);
+      const fromApp = refs.parseFigureRefs(
+        mdParser.parseMdToAssignment(exportSvc.assignmentToMd(withFigures)).problems[0].description,
+      ).map(s => s.ref);
+      assertEqual(fromPython, fromApp,
+        'convert.py and mdParserService disagree about the figure blocks');
+      assertEqual(fromPython.map(r => r.id), expected.ids, 'convert.py read the wrong ids');
+      rmSync(work, { recursive: true, force: true });
+    });
+  }
+}
 
 // ---------- report ----------
 await Promise.all(pending);
