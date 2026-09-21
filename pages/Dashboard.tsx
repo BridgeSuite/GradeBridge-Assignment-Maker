@@ -11,6 +11,9 @@ import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssig
 import { parseMdToAssignment } from '../services/mdParserService';
 import { adoptAssignmentKind, stripRetiredFields } from '../services/importNotices';
 import { assignmentKindProblem } from '../services/inputModeService';
+import { collectFigures, unreferencedNotice } from '../services/figureImport';
+import { hasFigureRef, referencedFigureIds } from '../services/figureRefs';
+import JSZip from 'jszip';
 import { degradeRetiredTypes } from '../services/retiredTypes';
 import { isEncoded, decryptJson } from '../services/cryptoService';
 
@@ -165,18 +168,72 @@ const Dashboard: React.FC = () => {
     mdFileInputRef.current?.click();
   };
 
+  /**
+   * Import a `.md`, and the `figures/` it refers to when it refers to any.
+   *
+   * THREE WAYS IN, ONE PATH THROUGH. The input takes a single `.md`, a zip
+   * holding the `.md` and `figures/`, or a multi-selection of both. Whichever
+   * arrives, it is reduced to one markdown text plus a list of candidate files
+   * before anything is parsed, so there is one import to reason about rather
+   * than three.
+   *
+   * A `.md` with no figure blocks needs nothing else and imports alone, exactly
+   * as it always has.
+   */
   const handleMdFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
+    const chosen = Array.from(event.target.files || []);
+    if (!chosen.length) return;
+    void (async () => {
       try {
-        const content = e.target?.result as string;
+        const candidates: Array<{ path: string; bytes: Uint8Array }> = [];
+        let content: string | null = null;
+
+        for (const f of chosen) {
+          const name = ((f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name);
+          if (/\.zip$/i.test(name)) {
+            const zip = await JSZip.loadAsync(await f.arrayBuffer());
+            for (const entry of Object.values(zip.files)) {
+              if (entry.dir) continue;
+              if (/\.md$/i.test(entry.name)) {
+                if (content !== null) throw new Error(
+                  'That zip holds more than one .md file. It should hold exactly one assignment.');
+                content = await entry.async('string');
+              } else {
+                candidates.push({ path: entry.name, bytes: await entry.async('uint8array') });
+              }
+            }
+          } else if (/\.md$/i.test(name)) {
+            if (content !== null) throw new Error('Choose one .md file at a time.');
+            content = await f.text();
+          } else {
+            candidates.push({ path: name, bytes: new Uint8Array(await f.arrayBuffer()) });
+          }
+        }
+
+        if (content === null) throw new Error('No .md file was selected.');
         // Retired type tags degrade to Text rather than failing the import; the
         // warning names the sub-part so the instructor can re-pick its type.
         const warnings: string[] = [];
         const assignment = parseMdToAssignment(content, warnings);
+
+        // The figures the file refers to, matched to the files that came with
+        // it. Refused rather than guessed: a block with no file, two files for
+        // one id, or a file that fails a guard all stop the import, and every
+        // problem is listed at once so the folder is fixed in one pass.
+        if (hasFigureRef(assignment.problems.map(p => p.description || '').join('\n'))) {
+          const { figures, problems, unreferenced } = await collectFigures(assignment, candidates);
+          if (problems.length) {
+            alert(['This file was not imported.', '',
+              `It refers to ${referencedFigureIds(assignment).length} figure(s), and:`, '',
+              ...problems.map(p => `  \u2022 ${p}`), '',
+              'Choose the .md together with its figures/ folder, or a zip holding both.',
+            ].join('\n'));
+            if (mdFileInputRef.current) mdFileInputRef.current.value = '';
+            return;
+          }
+          assignment.figures = figures;
+          if (unreferenced.length) warnings.push(unreferencedNotice(unreferenced));
+        }
 
         // A reader assignment must be handwritten. Refused rather than
         // corrected: the file says two things that cannot both be true, and
@@ -212,11 +269,12 @@ const Dashboard: React.FC = () => {
         navigate(`/edit/${assignment.id}`);
       } catch (error) {
         console.error(error);
-        alert('Failed to parse markdown file. Please check the file format matches the GradeBridge assignment spec.');
+        alert(error instanceof Error && error.message
+          ? `Failed to import: ${error.message}`
+          : 'Failed to parse markdown file. Please check the file format matches the GradeBridge assignment spec.');
       }
       if (mdFileInputRef.current) mdFileInputRef.current.value = '';
-    };
-    reader.readAsText(file);
+    })();
   };
 
   const handleDuplicate = (e: React.MouseEvent, assignment: Assignment) => {
@@ -259,7 +317,7 @@ const Dashboard: React.FC = () => {
           />
           <input
             type="file"
-            accept=".md"
+            accept=".md,.zip,.svg,.png,.jpg,.jpeg" multiple
             ref={mdFileInputRef}
             className="hidden"
             onChange={handleMdFileUpload}

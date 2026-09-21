@@ -34,6 +34,7 @@ Sketch the transverse E-field and justify the maximum.
 |---|---|---|
 | `# {COURSE}: {TITLE}` | **yes** | Course code and assignment title. Exactly one, first. Format: `# EEC130A: Homework 3`. |
 | `**Input:** handwritten` | no | Marks the whole assignment as handwritten. Any other value, or the line being absent, means **electronic**. Emitted by Export only for handwritten assignments, so older electronic files have no such line. |
+| `**Finalized:** {date} layout {id} content {fingerprint}` | no | Present once the instructor has issued the assignment. After that an export that would change the student-facing content or the printed layout is refused until it is reopened. `**Finalized-was:**` lines, zero or more, are the history of earlier issues. See **Finalized assignments** below. |
 | `**Kind:** reader` | no | Which of the two kinds of assignment this is. `reader` or `conventional`; **absent means `conventional`**, which is what every file written before 2026-09-21 is. Emitted by Export only for reader assignments, so older files stay byte-identical. Whole-assignment: there is no per-problem kind. **`reader` REQUIRES `**Input:** handwritten`** — see below. **Never travels to the student** — see §13. |
 | `**Template ID:** {ID}` | no | Handwritten only. Goes in the printed QR as the layout key (`[A-Z0-9]{1,12}`, unique across the course). Emitted only when the author pinned one; absent means it is derived from the course code and title. |
 | `**AI Feedback:** on` | no | Whether students may request AI feedback on any problem in this assignment. `on` or `off`; absent means **off**. Emitted by Export only when on, so older files stay byte-identical. |
@@ -141,6 +142,86 @@ and must never be given it** (§13): the student's browser has no use for it, an
 that file is a claim rather than a fact, because the gb1 key ships inside the bundle. Nothing
 student-facing carries the kind at all, so there is no claim for anything downstream to
 validate. A test asserts it stays off the whitelist.
+
+---
+
+### Figure blocks
+
+A **figure block** refers to a figure by id instead of containing it, so the drawing can be
+replaced without editing the `.md`:
+
+````
+```figure
+id: p1-divider
+title: Voltage divider for Problem 1
+desc: Two resistors R1 and R2 in series across a 12 V source; output taken across R2.
+```
+````
+
+The figure itself lives in `figures/<id>.svg`, `.png` or `.jpg`, next to the `.md`. **Exactly one
+file per id.** Replacing the drawing, including changing its format, means replacing the file; the
+`.md` does not change.
+
+**`title` and `desc` are required and live in the block, not in the image**, so they survive a
+format change. The grader never sees the drawing, only these words — a block and the inline SVG
+it replaces produce the identical `[Figure — title: desc]` line — so a `desc` is written the
+same way as an SVG `<desc>`: describe only what a sighted student can see. A PNG has no `<title>`
+and no `<desc>`, which is the whole reason the words are here.
+
+**Ids** are lowercase letters, digits and hyphens, 1 to 40 characters. They name a file, so nothing
+that changes meaning in a path is allowed.
+
+**A `.md` containing figure blocks is not complete without its `figures/` folder.** Export writes
+both together, as a zip. Import refuses a block whose file is missing, refuses two files with the
+same id, and reports — without refusing — a file no block refers to.
+
+**Raster figures must be greyscale and at least 300 dpi at printed size**, and no figure may exceed
+1 MB. Colour is refused for the same reason colour SVG is: the scans are greyscale, and that is
+what proves the marking stage never altered a student's work. The dpi floor is computed from the
+space the page format actually reserves for a figure, not from a fixed pixel count. Nothing is ever
+converted silently — a colour image is refused and an explicit convert-to-greyscale is offered.
+
+**The two inline forms, the ` ```svg ` fence and the `data:` image line, remain valid and are
+unchanged.** **Extract figures** converts inline SVG into blocks plus files and changes nothing a
+student sees: the file holds the SVG verbatim, resolution puts it back, and the exported student
+spec is byte-identical before and after. An inline SVG with no `<title>` or no `<desc>` is left
+inline and reported, because a block without a `desc` would take away the grader's only view of it.
+
+`assignment_spec.json` never contains a figure block. Blocks are resolved into inline figures on
+the way out, so the student's file carries drawings and no references, exactly as before figure
+blocks existed.
+
+---
+
+### Finalized assignments
+
+An assignment is **finalized** when the instructor issues it. Finalizing stamps the assignment's
+`layout_id`, computed fresh at that moment, and a fingerprint of its student-facing content, and
+records the date:
+
+```
+**Finalized:** 2026-09-21 layout 95438EDF content A1B2C3D4E5F60718
+```
+
+After that, an export that would change either is **refused** until the assignment is explicitly
+reopened. **Grader material remains editable**: grading prompts, grader notes and rubrics are not
+student-facing and are not covered.
+
+**Two stamps because they catch different things.** `layout_id` catches changes that move answer
+regions — the printed sheet and the scanner would disagree about where the answers are. The
+fingerprint catches changes that move nothing and still change what a student sees; the clearest
+case is a figure replaced after students have printed, where every rectangle is exactly where it
+was.
+
+**Reopening appends to a history** of `**Finalized-was:**` lines and never overwrites it, so the
+record shows an assignment was changed after issue even though doing so was allowed.
+
+The stamp survives the `.md` round trip and the authoring backup. It **never** appears in
+`assignment_spec.json`.
+
+**This is a guard against accident, not a security control.** Removing the `**Finalized:**` line
+from the `.md` turns the lock off, deliberately. Nothing here resists an edit by someone who means
+it, and nothing should be built on the assumption that it does.
 
 ---
 
@@ -842,6 +923,13 @@ blacklist is silent; the failure mode of a whitelist is a missing feature that s
 | Level | Always written | Written only when present |
 |---|---|---|
 | assignment | `id`, `courseCode`, `title`, `preamble`, `problems`, `createdAt`, `updatedAt` | `inputMode`, `aiFeedback` |
+
+**Never in the student spec, and each for its own reason:** `assignmentKind` (the student's browser has no use for it, and nothing student-facing carries the kind at all, so there is no claim for anything downstream to validate); `figures` (the map is resolved away — the student receives drawings, not references); `finalized` and `finalizeHistory` (a fact about the instructor's workflow). Tests assert each stays off the whitelist.
+
+| artifact | who reads it | never contains |
+|---|---|---|
+| `figures/<id>.svg\|.png\|.jpg` | the Assignment Maker, on import; nobody downstream | — |
+| the `**Finalized:**` line | the Assignment Maker, to enforce the lock | — |
 | problem | `id`, `name`, `description`, `subsections` | — |
 | sub-part | `id`, `name`, `description`, `points`, `submissionType` | `minWords`, `maxImages`, `config` |
 

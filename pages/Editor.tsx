@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { Assignment, AssignmentKind, InputMode, Problem, Subsection, SubmissionType } from '../types';
@@ -18,6 +18,11 @@ import { DEFAULT_ANSWER_LINES, answerLinesFor } from '../services/templateLayout
 import { derivePageFormatId } from '../services/qrPayload';
 import { describeImportGaps, isAuthoringBackup, readAuthoringBackup } from '../services/authoringBackup';
 import { assignmentKindDefaultedNotice } from '../services/importNotices';
+import { describeExtraction, extractFigures } from '../services/figureExtract';
+import { parseFigureRefs, referencedFigureIds } from '../services/figureRefs';
+import { figureFileProblems } from '../services/figureGuards';
+import { parseFigureFilename } from '../services/figureImport';
+import { REOPEN_WARNING, finalizeAssignment, reopenAssignment } from '../services/finalize';
 import { apportionPoints } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, PenLine, Keyboard, QrCode } from 'lucide-react';
@@ -256,6 +261,104 @@ const Editor: React.FC = () => {
     setAssignment(toSave);
     storageService.save(toSave);
     navigate('/');
+  };
+
+  /**
+   * Turn this assignment's inline SVGs into files it refers to.
+   *
+   * An explicit action, never automatic: every assignment authored so far has
+   * inline figures and must keep working untouched. What this buys is files a
+   * colleague can swap without editing a `.md`.
+   */
+  const handleExtractFigures = () => {
+    const result = extractFigures(assignment);
+    if (!result.extracted.length && !result.leftInline.length) {
+      alert('This assignment has no inline drawings to extract.');
+      return;
+    }
+    setAssignment(result.assignment);
+    alert(describeExtraction(result));
+  };
+
+  const figureRefs = useMemo(
+    () => assignment.problems.flatMap((p, i) =>
+      parseFigureRefs(p.description || '').map(({ ref }) => ({ ...ref, problemNumber: i + 1 }))),
+    [assignment.problems]);
+
+  /**
+   * Replace one figure's file, keeping its id, title and desc.
+   *
+   * The upload goes through exactly the guards the folder route uses — one
+   * stored form, one set of rules, so replacing a file in the folder and
+   * replacing it here cannot produce different assignments.
+   */
+  const handleReplaceFigure = async (id: string, file: File) => {
+    const parsed = parseFigureFilename(file.name);
+    if (!parsed) {
+      alert(`${file.name} is not a figure format the app accepts. Use SVG, PNG or JPG.`);
+      return;
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    for (const b of bytes) binary += String.fromCharCode(b);
+    const next = { format: parsed.format, base64: btoa(binary), filename: file.name };
+
+    const problems = await figureFileProblems(next);
+    if (problems.length) {
+      alert([`${file.name} was not used:`, '', ...problems.map(p => `  \u2022 ${p.message}`),
+        ...(problems.some(p => p.convertible)
+          ? ['', 'Convert it to greyscale in your image editor and try again. The app will not '
+             + 'convert it for you: a figure that changed silently on upload is a figure whose '
+             + 'printed form nobody chose.']
+          : []),
+      ].join('\n'));
+      return;
+    }
+
+    setAssignment(prev => ({ ...prev, figures: { ...(prev.figures || {}), [id]: next } }));
+    alert(`${file.name} is now the drawing for "${id}". Its title and description are unchanged, `
+      + 'so the grader sees exactly what it did before.');
+  };
+
+  /** Edit a block's title or desc in place, in the stem text that holds it. */
+  const updateFigureWords = (id: string, field: 'title' | 'desc', value: string) => {
+    setAssignment(prev => ({
+      ...prev,
+      problems: prev.problems.map(p => ({
+        ...p,
+        description: (p.description || '').replace(
+          new RegExp(`(\\n${field}:)[^\\n]*`, 'i'),
+          (whole, lead) => (parseFigureRefs(p.description || '').some(s => s.ref.id === id)
+            ? `${lead} ${value}` : whole)),
+      })),
+    }));
+  };
+
+  const handleFinalize = async () => {
+    if (!assignment.courseCode || !assignment.title) {
+      alert('Fill in Course Code and Title before finalizing.');
+      return;
+    }
+    try {
+      const stamped = await finalizeAssignment(assignment);
+      setAssignment(stamped);
+      storageService.save(stamped);
+      alert(`Finalized ${stamped.finalized!.date}.\n\n`
+        + `Layout ${stamped.finalized!.layoutId || '(electronic — no printed layout)'}\n`
+        + `Content ${stamped.finalized!.fingerprint}\n\n`
+        + 'From now on an export that would change what students see, or move the printed '
+        + 'layout, is refused until you reopen this assignment. Grading prompts and grader '
+        + 'notes are not covered and can still be edited.');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Could not finalize this assignment.');
+    }
+  };
+
+  const handleReopen = () => {
+    if (!window.confirm(REOPEN_WARNING)) return;
+    const reopened = reopenAssignment(assignment);
+    setAssignment(reopened);
+    storageService.save(reopened);
   };
 
   const handleDeleteAssignment = () => {
@@ -505,6 +608,21 @@ const Editor: React.FC = () => {
               Delete
             </Button>
           )}
+          <Button variant="secondary" onClick={handleExtractFigures}>
+            <FileDown className="w-4 h-4 mr-2" />
+            Extract figures
+          </Button>
+          {assignment.finalized ? (
+            <Button variant="secondary" onClick={handleReopen} className="mr-2">
+              <Lock className="w-4 h-4 mr-2" />
+              Reopen
+            </Button>
+          ) : (
+            <Button variant="secondary" onClick={handleFinalize} className="mr-2">
+              <Lock className="w-4 h-4 mr-2" />
+              Finalize
+            </Button>
+          )}
           <Button variant="secondary" onClick={async () => {
             // Async since 2026-09-21: with figure blocks this route writes a zip
             // holding the .md and its figures/ folder, because a .md handed over
@@ -549,6 +667,38 @@ const Editor: React.FC = () => {
         {/* Metadata Section */}
         <Card>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* THE LOCK, said before an hour is spent rather than after.
+
+                The banner enforces nothing — `buildAssignmentSpec` does, and
+                it is the only place that can, since a student can only receive
+                changed content through an export. What this is for is that an
+                instructor learns the rule before editing, not when their
+                export is refused. */}
+            {assignment.finalized && (
+              <div className="md:col-span-2 rounded-lg border border-amber-300 bg-amber-50 p-4">
+                <p className="text-sm font-medium text-amber-900">
+                  Finalized {assignment.finalized.date} — issued to students.
+                </p>
+                <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                  <strong>You can still edit grading prompts, grader notes and rubrics.</strong>{' '}
+                  Anything students see — the questions, the figures, the preamble, the points,
+                  the answer space, the assignment kind — is locked: an export that changed it
+                  would be refused. Use <em>Reopen</em> if you mean to change it. Reopening is
+                  recorded.
+                </p>
+                <p className="text-xs text-amber-700 mt-1 font-mono">
+                  layout {assignment.finalized.layoutId || '(electronic)'} · content{' '}
+                  {assignment.finalized.fingerprint}
+                </p>
+                {!!assignment.finalizeHistory?.length && (
+                  <p className="text-xs text-amber-700 mt-1">
+                    Reopened and re-issued {assignment.finalizeHistory.length} time
+                    {assignment.finalizeHistory.length === 1 ? '' : 's'} before this.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Input mode — governs which mediums the questions below may use */}
             <div className="md:col-span-2">
               <div className={`rounded border p-4 space-y-2 ${
@@ -636,6 +786,65 @@ const Editor: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* THE FIGURES THIS ASSIGNMENT REFERS TO.
+
+                Shown only when there are any, so an assignment whose figures
+                are inline — which is every assignment authored before
+                2026-09-21 — sees no new furniture at all. Extract figures is
+                what puts one here. */}
+            {figureRefs.length > 0 && (
+              <div className="md:col-span-2 rounded border border-academic-200 bg-academic-50/60 p-4">
+                <p className="text-sm font-medium text-academic-800 mb-1">
+                  Figures ({figureRefs.length})
+                </p>
+                <p className="text-xs text-academic-500 mb-3 leading-relaxed">
+                  Each drawing is a file this assignment refers to. Replacing one, in any accepted
+                  format, changes nothing else — the title and description stay, so the grader
+                  sees exactly what it did before. Figures must be greyscale and at least 300 dpi
+                  at printed size.
+                </p>
+                <div className="space-y-3">
+                  {figureRefs.map(ref => {
+                    const file = (assignment.figures || {})[ref.id];
+                    return (
+                      <div key={ref.id} className="rounded border border-academic-200 bg-white p-3">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <span className="text-xs font-mono text-academic-700">
+                            figures/{ref.id}.{file?.format ?? '?'}
+                            <span className="text-academic-400"> · Problem {ref.problemNumber}</span>
+                          </span>
+                          <label className="text-xs px-3 py-1.5 rounded-full border border-academic-300 bg-white text-academic-600 hover:border-academic-500 hover:text-academic-800 cursor-pointer">
+                            Replace
+                            <input
+                              type="file"
+                              accept=".svg,.png,.jpg,.jpeg"
+                              className="hidden"
+                              onChange={e => {
+                                const f = e.target.files?.[0];
+                                e.target.value = '';
+                                if (f) void handleReplaceFigure(ref.id, f);
+                              }}
+                            />
+                          </label>
+                        </div>
+                        <Input
+                          label="Title"
+                          value={ref.title}
+                          onChange={e => updateFigureWords(ref.id, 'title', e.target.value)}
+                        />
+                        <TextArea
+                          label="Description — the only thing the grader sees of this figure"
+                          rows={2}
+                          value={ref.desc}
+                          onChange={e => updateFigureWords(ref.id, 'desc', e.target.value)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* THE ASSIGNMENT KIND. Two values, no third, and no blank once set.
 

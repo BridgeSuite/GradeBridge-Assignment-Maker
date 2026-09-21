@@ -86,6 +86,7 @@ const mdParser = await load(join(REPO, 'services', 'mdParserService.ts'), 'mdPar
 const exportSvc = await load(join(REPO, 'services', 'exportService.ts'), 'exportSvc.mjs',
   [assetImports, stubHeavy]);
 const backupSvc = await load(join(REPO, 'services', 'authoringBackup.ts'), 'backup.mjs');
+const figImport = await load(join(REPO, 'services', 'figureImport.ts'), 'figImport.mjs');
 
 console.log('\nFigure blocks — reference, resolve, and leave the mirror alone\n');
 
@@ -413,6 +414,89 @@ check('referencedFigureIds finds every id an assignment refers to', () => {
       rmSync(work, { recursive: true, force: true });
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Matching a .md to the figures/ folder it arrived with (§4.1)
+// ---------------------------------------------------------------------------
+// Three refusals, all the same principle: NEVER PICK ONE. A block with no file
+// has nothing to fall back to; two files for one id is a coin toss that would
+// be printed onto paper; a file that fails a guard is covered elsewhere and
+// reported here with the rest, so a folder is fixed in one pass rather than one
+// item per attempt.
+{
+  const bytesOf = (s) => new Uint8Array(Buffer.from(s, 'utf8'));
+  const GOOD_SVG = bytesOf('<svg xmlns="http://www.w3.org/2000/svg"><path stroke="#000"/></svg>');
+  const withOneBlock = makeAssignment();
+
+  check('a filename is parsed into an id and a format', () => {
+    assertEqual(figImport.parseFigureFilename('figures/p1-divider.svg'),
+      { id: 'p1-divider', format: 'svg' }, 'the path was misread');
+    assertEqual(figImport.parseFigureFilename('p1-divider.PNG'),
+      { id: 'p1-divider', format: 'png' }, 'an upper-case extension was misread');
+    // One spelling stored, so an id is not ambiguous purely because of how a
+    // camera happened to name the file.
+    assertEqual(figImport.parseFigureFilename('x.jpeg'), { id: 'x', format: 'jpg' },
+      '.jpeg should be stored as jpg');
+    assertEqual(figImport.parseFigureFilename('notes.txt'), null, 'a non-figure was accepted');
+  });
+
+  check('a matching file is collected', async () => {
+    const r = await figImport.collectFigures(withOneBlock,
+      [{ path: 'figures/p1-divider.svg', bytes: GOOD_SVG }]);
+    assertEqual(r.problems, [], `a good folder was refused: ${r.problems.join(' | ')}`);
+    assertEqual(Object.keys(r.figures), ['p1-divider'], 'the figure was not collected');
+    assertEqual(r.figures['p1-divider'].format, 'svg', 'the format is wrong');
+  });
+
+  check('a block with NO file is refused, naming the id and what was expected', async () => {
+    const r = await figImport.collectFigures(withOneBlock, []);
+    assertEqual(Object.keys(r.figures), [], 'a figure was invented');
+    assert(r.problems.length === 1, `expected one problem, got ${r.problems.length}`);
+    assert(/"p1-divider" has no file/.test(r.problems[0]), `the id is not named: ${r.problems[0]}`);
+    assert(/figures\/p1-divider\.svg/.test(r.problems[0]),
+      `the expected filename is not named: ${r.problems[0]}`);
+  });
+
+  check('TWO files for one id are refused as ambiguous, never resolved', async () => {
+    const r = await figImport.collectFigures(withOneBlock, [
+      { path: 'figures/p1-divider.svg', bytes: GOOD_SVG },
+      { path: 'figures/p1-divider.png', bytes: bytesOf('not really a png') },
+    ]);
+    assertEqual(Object.keys(r.figures), [], 'one of two ambiguous files was chosen');
+    assert(/has 2 files/.test(r.problems[0]), `the count is not named: ${r.problems[0]}`);
+    assert(/will not choose/.test(r.problems[0]),
+      `the message does not say it refuses to choose: ${r.problems[0]}`);
+  });
+
+  check('a file that fails a guard is refused, with the guard\'s own message', async () => {
+    const colour = bytesOf('<svg xmlns="http://www.w3.org/2000/svg"><path stroke="#cc2222"/></svg>');
+    const r = await figImport.collectFigures(withOneBlock,
+      [{ path: 'figures/p1-divider.svg', bytes: colour }]);
+    assertEqual(Object.keys(r.figures), [], 'a colour figure was collected');
+    assert(/greyscale/.test(r.problems.join(' ')), `the guard message is missing: ${r.problems}`);
+  });
+
+  check('a file nobody refers to is REPORTED and not stored', async () => {
+    const r = await figImport.collectFigures(withOneBlock, [
+      { path: 'figures/p1-divider.svg', bytes: GOOD_SVG },
+      { path: 'figures/spare-sketch.svg', bytes: GOOD_SVG },
+    ]);
+    assertEqual(r.problems, [], 'a spare file was treated as an error');
+    assertEqual(Object.keys(r.figures), ['p1-divider'], 'the spare file was stored');
+    assert(r.unreferenced.length === 1, 'the spare file was not reported');
+    assert(/not referred to/.test(figImport.unreferencedNotice(r.unreferenced)),
+      'the notice does not explain what it is about');
+  });
+
+  check('every problem in a folder is reported at once, not one per attempt', async () => {
+    const two = makeAssignment();
+    two.problems[0].description = `${BLOCK}\n\n`
+      + ['```figure', 'id: p1-second', 'title: Second', 'desc: Another drawing.', '```'].join('\n');
+    const r = await figImport.collectFigures(two, []);
+    assertEqual(r.problems.length, 2,
+      'only some of the missing figures were reported — an instructor would fix them one at a time');
+  });
 }
 
 // ---------- report ----------
