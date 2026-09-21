@@ -3,6 +3,7 @@ import { FigureFile } from '../types';
 import { FigureRef, figureDataUri, figureSvgSource } from '../services/figureRefs';
 import { Input, TextArea } from './Common';
 import { Image as ImageIcon, RefreshCw } from 'lucide-react';
+import { HelpLink, useOpenHelp } from './HelpGuide';
 
 /**
  * A refused upload, waiting on the instructor.
@@ -42,6 +43,7 @@ export const FigureCard: React.FC<{
 }> = ({ figureNumber, problemNumber, refBlock, file, refusal, busy,
         onReplace, onConvert, onDismissRefusal, onTitleChange, onDescChange }) => {
   const label = `Figure ${figureNumber} in Problem ${problemNumber}`;
+  const openHelp = useOpenHelp();
 
   return (
     <div className="rounded-lg border border-academic-200 bg-academic-50/60 p-3 sm:p-4">
@@ -49,6 +51,7 @@ export const FigureCard: React.FC<{
         <div className="flex items-center gap-2 min-w-0">
           <ImageIcon className="w-4 h-4 text-academic-500 shrink-0" />
           <span className="text-sm font-medium text-academic-800">{label}</span>
+          <HelpLink section="figures" onOpen={openHelp} label="Help: replacing a figure" />
           {file && (
             <span className="text-xs text-academic-500 font-mono truncate">{file.filename}</span>
           )}

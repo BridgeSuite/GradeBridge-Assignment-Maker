@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { HelpCircle } from 'lucide-react';
 import { FormattedText } from './FormattedText';
-import { LaTeXCheatsheet } from './LaTeXCheatsheet';
 import { hasFigure } from '../services/figureBlocks';
+import { useOpenHelp } from './HelpGuide';
 import { hasFigureRef } from '../services/figureRefs';
 
 export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' }> = ({ variant = 'primary', className = '', ...props }) => {
@@ -50,7 +50,10 @@ export const Card: React.FC<{ children: React.ReactNode; className?: string }> =
 );
 
 export const Layout: React.FC<{ children: React.ReactNode; title?: string; action?: React.ReactNode }> = ({ children, title, action }) => {
-  const [showLatexHelp, setShowLatexHelp] = useState(false);
+  // The panel and its state live at the app root (`HelpProvider`), so every
+  // page gets the same one and a page's own `?` links work as well as the
+  // header's. The header just asks for it to open.
+  const openHelp = useOpenHelp();
 
   return (
     <div className="min-h-screen bg-academic-50 flex flex-col">
@@ -63,22 +66,26 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
                 <span className="text-xs text-academic-500">Assignment Manager</span>
               </div>
             </Link>
-            {/* LaTeX Help Button */}
+            {/* ONE PLACE TO LOOK. This was "LaTeX Help", which is the only
+                thing the app ever offered an instructor and covers the
+                smallest of their questions. LaTeX is now a section of the
+                guide rather than the whole of the help. */}
             <button
-              onClick={() => setShowLatexHelp(true)}
+              onClick={() => openHelp()}
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-sm text-academic-600 hover:text-academic-900 hover:bg-academic-100 rounded-md transition-colors"
-              title="LaTeX Math Help"
+              title="How to use the Assignment Maker"
             >
               <HelpCircle className="w-4 h-4" />
-              <span>LaTeX Help</span>
+              <span>Help</span>
             </button>
           </div>
           <div className="flex items-center gap-2">
-            {/* Mobile LaTeX Help Button */}
+            {/* The same button on a narrow window, where the label will not fit. */}
             <button
-              onClick={() => setShowLatexHelp(true)}
+              onClick={() => openHelp()}
               className="sm:hidden p-2 text-academic-600 hover:text-academic-900 hover:bg-academic-100 rounded-md transition-colors"
-              title="LaTeX Math Help"
+              title="How to use the Assignment Maker"
+              aria-label="Help"
             >
               <HelpCircle className="w-5 h-5" />
             </button>
@@ -96,8 +103,6 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
         </div>
       </footer>
 
-      {/* LaTeX Cheatsheet Modal */}
-      <LaTeXCheatsheet isOpen={showLatexHelp} onClose={() => setShowLatexHelp(false)} />
     </div>
   );
 };

@@ -27,6 +27,7 @@ import { apportionPoints } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { FigureMapProvider } from '../components/FigureMapContext';
 import { FigureCard } from '../components/FigureCard';
+import { HelpLink, useOpenHelp } from '../components/HelpGuide';
 import { convertToGreyscale } from '../services/figureConvert';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, PenLine, Keyboard, QrCode } from 'lucide-react';
 
@@ -137,6 +138,7 @@ const Editor: React.FC = () => {
    * Anything loaded or imported has been answered, either by the file or by the
    * migration default, which announces itself.
    */
+  const openHelp = useOpenHelp();
   const [kindAnswered, setKindAnswered] = useState(isEdit);
   const assignmentKind: AssignmentKind = assignment.assignmentKind ?? 'conventional';
 
@@ -700,6 +702,7 @@ const Editor: React.FC = () => {
               Finalize
             </Button>
           )}
+          <HelpLink section="finalize" onOpen={openHelp} label="Help: finalizing an assignment" />
           <Button variant="secondary" onClick={async () => {
             // Async since 2026-09-21: with figure blocks this route writes a zip
             // holding the .md and its figures/ folder, because a .md handed over
@@ -875,6 +878,7 @@ const Editor: React.FC = () => {
                 <div>
                   <p className="text-sm font-medium text-academic-800 flex items-center gap-2">
                     What kind of assignment is this?
+                    <HelpLink section="kind" onOpen={openHelp} label="Help: conventional or reader" />
                   </p>
                   {!kindAnswered && (
                     <p className="text-xs text-amber-700 mt-0.5 font-medium">
