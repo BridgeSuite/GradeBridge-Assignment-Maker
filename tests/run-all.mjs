@@ -34,6 +34,7 @@ const SUITES = [
   'figure-ref-tests.mjs',
   'figure-guard-tests.mjs',
   'finalize-tests.mjs',
+  'figure-extract-tests.mjs',
 ];
 
 const results = [];
