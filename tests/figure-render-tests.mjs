@@ -197,6 +197,108 @@ await check('the shipped component is restored after the mutations', () => {
     'FormattedText.tsx was left mutated — the resolve call is missing');
 });
 
+// ---------------------------------------------------------------------------
+// The conversion offer is a panel with two buttons (Supplement 1, Item 4)
+// ---------------------------------------------------------------------------
+// It was `window.confirm`, with the two choices spelled out inside the message
+// as "OK — convert it" and "Cancel — leave it". The browser's box labels its
+// buttons OK and Cancel whatever the message says they mean, so the instructor
+// has to hold the mapping in their head — and it blocks the page while they do.
+//
+// Rendered through the real `FigureCard`, so the buttons asserted here are the
+// buttons an instructor sees.
+{
+  const cardEntry = (refusalLiteral) => `
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { FigureCard } from './components/FigureCard';
+
+export const renderIt = () => renderToStaticMarkup(
+  React.createElement(FigureCard, {
+    figureNumber: 1,
+    problemNumber: 1,
+    refBlock: { id: 'p1-fig1', title: 'Voltage divider', desc: 'Two resistors.' },
+    file: undefined,
+    refusal: ${refusalLiteral},
+    busy: false,
+    onReplace: () => {}, onConvert: () => {}, onDismissRefusal: () => {},
+    onTitleChange: () => {}, onDescChange: () => {},
+  }));
+`;
+
+  const COLOUR = "{ messages: ['This image has colour in it. Figures must be black, white and grey only.'], convertible: true }";
+
+  await check('ITEM 4: a refused colour image shows both buttons, by label', async () => {
+    const html = await renderWith('refusal-colour', cardEntry(COLOUR));
+    assert(html.includes('Convert to greyscale'),
+      `no "Convert to greyscale" button in the card:\n${html.slice(0, 500)}`);
+    assert(html.includes('Cancel'), 'no "Cancel" button in the card');
+    assert(html.includes('This image has colour in it.'),
+      'the refusal message is not shown in the card');
+    // Both are real buttons, not text: an instructor has to be able to press them.
+    assert((html.match(/<button/g) || []).length >= 2,
+      'the two choices are not rendered as buttons');
+  });
+
+  await check('ITEM 4: a refusal that conversion cannot fix offers only Cancel', async () => {
+    const html = await renderWith('refusal-plain',
+      cardEntry("{ messages: ['This image is too small: it would print blurry (40 dpi; at least 300 is needed). Use a larger version of the image.'], convertible: false }"));
+    assert(!html.includes('Convert to greyscale'),
+      'a conversion was offered for something conversion cannot fix');
+    assert(html.includes('Cancel'), 'no way to dismiss the refusal');
+    assert(html.includes('too small'), 'the refusal message is not shown');
+  });
+
+  await check('ITEM 4: a card with no refusal shows neither button', async () => {
+    const html = await renderWith('refusal-none', cardEntry('undefined'));
+    assert(!html.includes('Convert to greyscale'), 'a conversion is offered with nothing refused');
+    assert(html.includes('Replace image'), 'the card lost its Replace control');
+  });
+
+  await check('ITEM 4: while converting, the buttons say so and are disabled', async () => {
+    const html = await renderWith('refusal-busy', `
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { FigureCard } from './components/FigureCard';
+export const renderIt = () => renderToStaticMarkup(
+  React.createElement(FigureCard, {
+    figureNumber: 1, problemNumber: 1,
+    refBlock: { id: 'p1-fig1', title: 'T', desc: 'D' },
+    refusal: ${COLOUR}, busy: true,
+    onReplace: () => {}, onConvert: () => {}, onDismissRefusal: () => {},
+    onTitleChange: () => {}, onDescChange: () => {},
+  }));
+`);
+    assert(/Converting/.test(html), 'the button does not say it is working');
+    assert(/disabled/.test(html), 'the buttons are not disabled while converting');
+  });
+
+  await check('ITEM 4: no window.confirm remains on the figure path', () => {
+    // Comments stripped: the reason the confirm went is recorded in one, and a
+    // raw scan would match that and pass or fail for the wrong reason.
+    const code = readFileSync(join(REPO, 'pages', 'Editor.tsx'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    const handler = code.slice(code.indexOf('const handleReplaceFigure'),
+      code.indexOf('const updateFigureWords'));
+    assert(handler.length > 200, 'the replace handler could not be located to check it');
+    assert(!/window\.confirm|window\.alert\(/.test(handler),
+      'the figure replace path still blocks on a browser dialog');
+  });
+
+  await check('ITEM 4 MUTATION: removing the panel removes both buttons', async () => {
+    const html = await renderWith('refusal-mutant', cardEntry(COLOUR), [[
+      'components/FigureCard.tsx',
+      '{refusal && (',
+      '{false && refusal && (',
+    ]]);
+    assert(!html.includes('Convert to greyscale'),
+      'the mutant still rendered the convert button, so this suite does not exercise the panel');
+    assert(!html.includes('This image has colour in it.'),
+      'the mutant still rendered the refusal message');
+  });
+}
+
 // ---------- report ----------
 for (const f of scratch) { try { rmSync(f, { force: true }); } catch { /* ignore */ } }
 console.log(results.join('\n'));

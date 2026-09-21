@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { Assignment, AssignmentKind, InputMode, Problem, Subsection, SubmissionType } from '../types';
+import { Assignment, AssignmentKind, FigureFile, InputMode, Problem, Subsection, SubmissionType } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService, isRescaleDeclined } from '../services/exportService';
 import {
@@ -313,55 +313,81 @@ const Editor: React.FC = () => {
    * stored form, one set of rules, so replacing a file in the folder and
    * replacing it here cannot produce different assignments.
    */
+  /**
+   * A refused upload, per figure, kept so the card can show it.
+   *
+   * **No `window.confirm` on this path.** The browser's box labels its buttons
+   * OK and Cancel whatever the message says they mean, so the instructor has to
+   * hold the mapping in their head — and it blocks the page while they do.
+   * The refusal and the offer live in the card, where the figure is.
+   */
+  const [figureRefusals, setFigureRefusals] = useState<Record<string, {
+    messages: string[]; convertible: boolean; pending?: FigureFile;
+  }>>({});
+  const [convertingId, setConvertingId] = useState<string | null>(null);
+
+  const setRefusal = (id: string, value?: { messages: string[]; convertible: boolean; pending?: FigureFile }) =>
+    setFigureRefusals(prev => {
+      const next = { ...prev };
+      if (value) next[id] = value; else delete next[id];
+      return next;
+    });
+
+  /** Accept a file that has passed every guard. */
+  const useFigureFile = (id: string, next: FigureFile) => {
+    setAssignment(prev => ({ ...prev, figures: { ...(prev.figures || {}), [id]: next } }));
+    setRefusal(id);
+    alert(`${figureLabelFor(id)} now uses ${next.filename}.`);
+  };
+
   const handleReplaceFigure = async (id: string, file: File) => {
-    const where = figureLabelFor(id);
     const parsed = parseFigureFilename(file.name);
     if (!parsed) {
-      alert('This file is not a kind of image the app can use. Choose an SVG, PNG or JPG.');
+      setRefusal(id, {
+        messages: ['This file is not a kind of image the app can use. Choose an SVG, PNG or JPG.'],
+        convertible: false,
+      });
       return;
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
     let binary = '';
     for (const b of bytes) binary += String.fromCharCode(b);
-    let next = { format: parsed.format, base64: btoa(binary), filename: file.name };
+    const next: FigureFile = { format: parsed.format, base64: btoa(binary), filename: file.name };
 
-    let problems = await figureFileProblems(next);
+    const problems = await figureFileProblems(next);
+    if (!problems.length) { useFigureFile(id, next); return; }
 
-    // THE CONVERSION OFFER (work order Item 5).
-    //
-    // Refusing a colour image and leaving the instructor to find an image
-    // editor is only half of what was asked for. An instructor pressing a
-    // button labelled "Convert to greyscale" is not a silent conversion: the
-    // refusal comes first, the offer is a separate decision, and the converted
-    // drawing appears in the thumbnail before they accept it.
-    if (problems.some(p => p.convertible)) {
-      const ok = window.confirm(
-        [problems.map(p => p.message).join('\n'), '',
-         'Convert it to greyscale now?', '',
-         'OK \u2014 convert it and use the greyscale version.',
-         'Cancel \u2014 leave the figure as it is and choose another file.'].join('\n'));
-      if (!ok) return;
+    setRefusal(id, {
+      messages: problems.map(p => p.message),
+      convertible: problems.some(p => p.convertible),
+      pending: next,
+    });
+  };
 
-      const converted = await convertToGreyscale(next);
+  /**
+   * Convert the refused file, then judge the result by every rule a fresh
+   * upload is judged by — `convertToGreyscale` does that and returns a file
+   * only when it passes, so a conversion that merely fixed the colour cannot
+   * be accepted here by accident.
+   */
+  const handleConvertFigure = async (id: string) => {
+    const refusal = figureRefusals[id];
+    if (!refusal?.pending) return;
+    setConvertingId(id);
+    try {
+      const converted = await convertToGreyscale(refusal.pending);
       if (!converted.file) {
-        // The converted file goes through EVERY guard, not only the colour one:
-        // converting changes the bytes, so it can come out over the size cap.
-        alert(['The converted image still cannot be used:', '',
-          ...converted.problems.map(p => `  \u2022 ${p.message}`)].join('\n'));
+        setRefusal(id, {
+          messages: ['The converted image still cannot be used:',
+            ...converted.problems.map(p => p.message)],
+          convertible: false,
+        });
         return;
       }
-      next = converted.file;
-      problems = [];
+      useFigureFile(id, converted.file);
+    } finally {
+      setConvertingId(null);
     }
-
-    if (problems.length) {
-      alert(['This image was not used:', '',
-        ...problems.map(p => `  \u2022 ${p.message}`)].join('\n'));
-      return;
-    }
-
-    setAssignment(prev => ({ ...prev, figures: { ...(prev.figures || {}), [id]: next } }));
-    alert(`${where} now uses ${next.filename}.`);
   };
 
   /** Edit a block's title or desc in place, in the stem text that holds it. */
@@ -847,7 +873,7 @@ const Editor: React.FC = () => {
             }`}>
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
-                  <p className="text-sm font-medium text-academic-800">
+                  <p className="text-sm font-medium text-academic-800 flex items-center gap-2">
                     What kind of assignment is this?
                   </p>
                   {!kindAnswered && (
@@ -1037,7 +1063,11 @@ const Editor: React.FC = () => {
                                problemNumber={pIndex + 1}
                                refBlock={ref}
                                file={(assignment.figures || {})[ref.id]}
+                               refusal={figureRefusals[ref.id]}
+                               busy={convertingId === ref.id}
                                onReplace={f => void handleReplaceFigure(ref.id, f)}
+                               onConvert={() => void handleConvertFigure(ref.id)}
+                               onDismissRefusal={() => setRefusal(ref.id)}
                                onTitleChange={v => updateFigureWords(ref.id, 'title', v)}
                                onDescChange={v => updateFigureWords(ref.id, 'desc', v)}
                              />

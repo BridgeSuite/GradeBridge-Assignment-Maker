@@ -5,6 +5,16 @@ import { Input, TextArea } from './Common';
 import { Image as ImageIcon, RefreshCw } from 'lucide-react';
 
 /**
+ * A refused upload, waiting on the instructor.
+ *
+ * `convertible` is what turns the panel from a plain refusal into an offer.
+ */
+export interface FigureRefusal {
+  messages: string[];
+  convertible: boolean;
+}
+
+/**
  * One figure's controls, shown INSIDE the problem the figure belongs to.
  *
  * They used to live in a Figures panel up in the settings area, a long way from
@@ -22,10 +32,15 @@ export const FigureCard: React.FC<{
   problemNumber: number;
   refBlock: FigureRef;
   file?: FigureFile;
+  refusal?: FigureRefusal;
+  busy?: boolean;
   onReplace: (file: File) => void;
+  onConvert: () => void;
+  onDismissRefusal: () => void;
   onTitleChange: (value: string) => void;
   onDescChange: (value: string) => void;
-}> = ({ figureNumber, problemNumber, refBlock, file, onReplace, onTitleChange, onDescChange }) => {
+}> = ({ figureNumber, problemNumber, refBlock, file, refusal, busy,
+        onReplace, onConvert, onDismissRefusal, onTitleChange, onDescChange }) => {
   const label = `Figure ${figureNumber} in Problem ${problemNumber}`;
 
   return (
@@ -58,6 +73,44 @@ export const FigureCard: React.FC<{
           />
         </label>
       </div>
+
+      {/* THE REFUSAL, IN THE CARD, WITH REAL BUTTONS.
+          It was `window.confirm`, with the two choices spelled out inside the
+          message as "OK — convert it" and "Cancel — leave it". Andre found
+          that kind of pop-up hard to follow: the browser's box labels its
+          buttons OK and Cancel whatever the message says they mean, so the
+          instructor has to hold the mapping in their head. Buttons that say
+          what they do need no mapping. */}
+      {refusal && (
+        <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3">
+          {refusal.messages.map((m, i) => (
+            <p key={i} className="text-sm text-amber-900 leading-relaxed">{m}</p>
+          ))}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {refusal.convertible && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onConvert}
+                className="rounded-md bg-academic-700 px-3 py-2 text-xs font-semibold text-white
+                           hover:bg-academic-800 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {busy ? 'Converting…' : 'Convert to greyscale'}
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onDismissRefusal}
+              className="rounded-md border border-academic-300 bg-white px-3 py-2 text-xs
+                         font-semibold text-academic-700 hover:border-academic-500
+                         disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stacks on a narrow window; side by side once there is room. */}
       <div className="mt-3 flex flex-col sm:flex-row gap-4">
