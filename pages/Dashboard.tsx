@@ -10,6 +10,7 @@ import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, F
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
 import { parseMdToAssignment } from '../services/mdParserService';
 import { adoptAssignmentKind, stripRetiredFields } from '../services/importNotices';
+import { assignmentKindProblem } from '../services/inputModeService';
 import { degradeRetiredTypes } from '../services/retiredTypes';
 import { isEncoded, decryptJson } from '../services/cryptoService';
 
@@ -103,6 +104,14 @@ const Dashboard: React.FC = () => {
         // It is dropped rather than kept, and said rather than dropped quietly:
         // an instructor looking at a key in their own backup file has no other
         // way to learn it stopped meaning anything. See `importNotices.ts`.
+        // Same rule as the .md route, and the authoring backup comes through
+        // here too. Checked after the retired-field strip and the kind
+        // migration below would be too late, so it is checked on what the file
+        // actually says: a file that never had a kind is migrated to
+        // conventional, which is valid in either mode and cannot trip this.
+        const importedProblem = assignmentKindProblem(importedAssignment);
+        if (importedProblem) throw new Error(importedProblem);
+
         const asRecord = importedAssignment as unknown as Record<string, unknown>;
         const legacy = [
           ...stripRetiredFields(asRecord),
@@ -168,6 +177,19 @@ const Dashboard: React.FC = () => {
         // warning names the sub-part so the instructor can re-pick its type.
         const warnings: string[] = [];
         const assignment = parseMdToAssignment(content, warnings);
+
+        // A reader assignment must be handwritten. Refused rather than
+        // corrected: the file says two things that cannot both be true, and
+        // picking one for the author is how a choice they made on purpose
+        // disappears. The message names the line to change.
+        const kindProblem = assignmentKindProblem(assignment);
+        if (kindProblem) {
+          alert(`This file was not imported.\n\n${kindProblem}\n\n`
+            + 'In the file: **Kind:** reader needs **Input:** handwritten above it. '
+            + 'An assignment with no **Input:** line is electronic.');
+          if (mdFileInputRef.current) mdFileInputRef.current.value = '';
+          return;
+        }
 
         // Check for existing assignment with same courseCode + title
         const existing = storageService.getAll().find(

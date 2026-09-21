@@ -167,7 +167,8 @@ const { encryptJson, decryptJson } = crypto_;
 const { buildAssignmentSpec, assignmentToMd, generateGradingRubric, convertSubmissionType,
         generateHTML, generateLaTeX, generateGraderHTML, STUDENT_SPEC_FIELDS } = exportSvc;
 const { parseMdToAssignment } = mdParser;
-const { typeAllowedInMode, defaultTypeForMode, convertSubsectionToMode, strandedSubsectionLabels } = inputModeSvc;
+const { typeAllowedInMode, defaultTypeForMode, convertSubsectionToMode, strandedSubsectionLabels,
+        assignmentKindProblem, isElectronicReader } = inputModeSvc;
 const { splitMath, toHtml, toLatexBody, toPlainUnicode, toPdfText, hasMath } = mathRender;
 const { apportionPoints, tooManyPartsForTarget } = pointsSvc;
 const { splitFigures, figureSegsToSource, hasFigure, trimAroundFigures, figureLabel,
@@ -3218,6 +3219,136 @@ ${r.problem_statement}`);
       assert(notice.includes(`Assignment kind: ${a.assignmentKind}.`),
         `the notice does not state the kind for a ${a.assignmentKind} assignment`);
     }
+  });
+}
+
+// =====================================================
+// A READER ASSIGNMENT MUST BE HANDWRITTEN
+// =====================================================
+// Supplement 1. Three combinations are valid and one is refused: the reader
+// transcribes photographed handwriting, and an electronic submission has
+// nothing to transcribe.
+//
+// THE CASE THESE TESTS EXIST FOR is a reader assignment with `inputMode`
+// ABSENT rather than explicitly 'electronic'. Absent means electronic, so that
+// is an electronic reader assignment and must be refused — and it is the one
+// case a check written as `inputMode !== 'electronic'` would wave straight
+// through. Every refusal below is asserted twice for that reason: once with
+// `inputMode: 'electronic'` and once with no `inputMode` at all.
+{
+  const reader = (extra = {}) => makeAssignment({ assignmentKind: 'reader', targetPoints: 100, ...extra });
+  const explicit = reader({ inputMode: 'electronic' });
+  const absent = reader();                        // no inputMode at all
+  const valid = reader({ inputMode: 'handwritten' });
+
+  // ---- 11: the three valid combinations still pass --------------------------
+  for (const [label, a] of [
+    ['handwritten + reader', makeAssignment({ inputMode: 'handwritten', assignmentKind: 'reader', targetPoints: 100 })],
+    ['handwritten + conventional', makeAssignment({ inputMode: 'handwritten', assignmentKind: 'conventional', targetPoints: 100 })],
+    ['electronic + conventional', makeAssignment({ inputMode: 'electronic', assignmentKind: 'conventional', targetPoints: 100 })],
+  ]) {
+    check(`kind/mode: ${label} is allowed`, () =>
+      assertEqual(assignmentKindProblem(a), null, `${label} was refused`));
+  }
+
+  check('kind/mode: an assignment with no inputMode and no reader kind is allowed', () => {
+    const plain = makeAssignment();
+    delete plain.inputMode;
+    assertEqual(assignmentKindProblem(plain), null,
+      'a conventional assignment with no inputMode was refused');
+  });
+
+  // ---- 9: refused at every entry point --------------------------------------
+  // The validator itself, which every entry point calls.
+  for (const [label, a] of [['inputMode electronic', explicit], ['inputMode ABSENT', absent]]) {
+    check(`kind/mode: the validator refuses an electronic reader (${label})`, () => {
+      const problem = assignmentKindProblem(a);
+      assert(problem !== null, 'an electronic reader assignment was allowed');
+      assert(/handwritten/i.test(problem), `the message does not name the fix: ${problem}`);
+      assert(/reader/i.test(problem), `the message does not name the kind: ${problem}`);
+    });
+  }
+
+  check('kind/mode: isElectronicReader treats an absent inputMode as electronic', () => {
+    assert(isElectronicReader(undefined, 'reader') === true,
+      'a reader assignment with no inputMode was not recognised as electronic');
+    assert(isElectronicReader('electronic', 'reader') === true, 'explicit electronic reader missed');
+    assert(isElectronicReader('handwritten', 'reader') === false, 'a handwritten reader was refused');
+    assert(isElectronicReader(undefined, 'conventional') === false, 'a conventional assignment was refused');
+  });
+
+  // The export backstop, on a real buildAssignmentSpec call.
+  for (const [label, a] of [['inputMode electronic', explicit], ['inputMode ABSENT', absent]]) {
+    check(`kind/mode: the export refuses an electronic reader (${label})`, async () => {
+      let threw = null;
+      try { await buildAssignmentSpec(a); } catch (err) { threw = err; }
+      assert(threw !== null, 'the export built a spec for an electronic reader assignment');
+      assert(/Export stopped/.test(threw.message), `unexpected message: ${threw.message}`);
+      assert(/handwritten/i.test(threw.message), `the message does not name the fix: ${threw.message}`);
+    });
+  }
+
+  // The .md route: the file the importer would be handed.
+  {
+    const readerMd = assignmentToMd(valid).replace(/^\*\*Input:\*\* handwritten\n\n/m, '');
+    check('kind/mode: an .md declaring reader with no **Input:** line is refused on import', () => {
+      const parsed = parseMdToAssignment(readerMd);
+      assertEqual(parsed.assignmentKind, 'reader', 'the probe .md did not carry the reader kind');
+      assert(parsed.inputMode !== 'handwritten', 'the probe .md still declared handwritten');
+      assert(assignmentKindProblem(parsed) !== null,
+        'an electronic reader .md passed the check the import route calls');
+    });
+  }
+
+  // convert.py, the format's second implementation, refuses the same file and
+  // writes nothing. This is the row of the table that is a separate program.
+  {
+    const python = ['python', 'python3', 'py'].find(exe =>
+      spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
+    const name = 'kind/mode: convert.py refuses an electronic reader and writes nothing';
+    if (!python) results.push(`  SKIP  ${name} (no Python interpreter on PATH)`);
+    else check(name, () => {
+      const work = mkdtempSync(join(tmpdir(), 'gb-kindmode-'));
+      // No **Input:** line at all: the trap case.
+      const md = assignmentToMd(valid).replace(/^\*\*Input:\*\* handwritten\n\n/m, '');
+      const mdPath = join(work, 'ElectronicReader.md');
+      writeFileSync(mdPath, md, 'utf8');
+      const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), mdPath], { encoding: 'utf8' });
+      assert(run.status !== 0, `convert.py accepted an electronic reader assignment:\n${run.stdout}`);
+      assert(/handwritten/i.test(run.stdout), `convert.py did not say why: ${run.stdout}`);
+      assert(!existsSync(join(work, 'ElectronicReader_spec.json')),
+        'convert.py refused but still wrote a spec file');
+
+      // And the valid pairing is still converted, so the refusal is not a blanket no.
+      const okPath = join(work, 'HandwrittenReader.md');
+      writeFileSync(okPath, assignmentToMd(valid), 'utf8');
+      const okRun = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), okPath], { encoding: 'utf8' });
+      assert(okRun.status === 0, `convert.py refused a valid handwritten reader: ${okRun.stdout}`);
+      const spec = JSON.parse(readFileSync(join(work, 'HandwrittenReader_spec.json'), 'utf8'));
+      assertEqual(spec.assignmentKind, 'reader', 'convert.py lost the kind on the valid file');
+      rmSync(work, { recursive: true, force: true });
+    });
+  }
+
+  // ---- 10: the check is live ------------------------------------------------
+  // A mutation test written as a mutation test: re-implement the check the wrong
+  // way, `!== 'electronic'` instead of `=== 'handwritten'`, and confirm the
+  // absent-inputMode case is the one that slips through. This is the whole
+  // reason the rule is spelled out at the definition, so it is asserted rather
+  // than trusted to a comment.
+  check('kind/mode: MUTATION — `!== electronic` would pass the absent-inputMode case', () => {
+    const wrong = (a) => a.assignmentKind === 'reader' && a.inputMode === 'electronic';
+
+    // Both implementations agree wherever inputMode is stated...
+    assertEqual(wrong(explicit), isElectronicReader(explicit.inputMode, explicit.assignmentKind),
+      'the mutant and the real check disagree on an explicit electronic reader');
+    assertEqual(wrong(valid), isElectronicReader(valid.inputMode, valid.assignmentKind),
+      'the mutant and the real check disagree on a handwritten reader');
+
+    // ...and differ on exactly the case the rule exists for.
+    assert(wrong(absent) === false, 'the mutant no longer reproduces the defect being guarded against');
+    assert(isElectronicReader(absent.inputMode, absent.assignmentKind) === true,
+      'THE LIVE CHECK HAS BEEN WEAKENED: a reader assignment with no inputMode is no longer refused');
   });
 }
 

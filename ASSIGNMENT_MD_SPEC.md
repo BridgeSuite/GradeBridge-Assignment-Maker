@@ -34,7 +34,7 @@ Sketch the transverse E-field and justify the maximum.
 |---|---|---|
 | `# {COURSE}: {TITLE}` | **yes** | Course code and assignment title. Exactly one, first. Format: `# EEC130A: Homework 3`. |
 | `**Input:** handwritten` | no | Marks the whole assignment as handwritten. Any other value, or the line being absent, means **electronic**. Emitted by Export only for handwritten assignments, so older electronic files have no such line. |
-| `**Kind:** reader` | no | Which of the two kinds of assignment this is. `reader` or `conventional`; **absent means `conventional`**, which is what every file written before 2026-09-21 is. Emitted by Export only for reader assignments, so older files stay byte-identical. Whole-assignment: there is no per-problem kind. **Never travels to the student** — see §13. |
+| `**Kind:** reader` | no | Which of the two kinds of assignment this is. `reader` or `conventional`; **absent means `conventional`**, which is what every file written before 2026-09-21 is. Emitted by Export only for reader assignments, so older files stay byte-identical. Whole-assignment: there is no per-problem kind. **`reader` REQUIRES `**Input:** handwritten`** — see below. **Never travels to the student** — see §13. |
 | `**Template ID:** {ID}` | no | Handwritten only. Goes in the printed QR as the layout key (`[A-Z0-9]{1,12}`, unique across the course). Emitted only when the author pinned one; absent means it is derived from the course code and title. |
 | `**AI Feedback:** on` | no | Whether students may request AI feedback on any problem in this assignment. `on` or `off`; absent means **off**. Emitted by Export only when on, so older files stay byte-identical. |
 | `**Submit at:** {address}` | no | Where students hand the work in. Printed on page 1 of the handwritten sheet, under **When you have finished writing** (§10). Single line; whitespace is collapsed. **Absent means that whole section is not printed** — not a placeholder and not a gapped sentence. Emitted by Export only when set, so older files stay byte-identical. |
@@ -99,6 +99,29 @@ through `Export .md` → `Import Markdown`. This is the same documented-default 
 
 **A value that is neither is conventional, not a third kind.** `**Kind:** sideways` imports as
 conventional. The field has two legal values and the parser does not invent a third.
+
+**A reader assignment MUST be handwritten.** The reader's first stage transcribes photographed
+handwriting; an electronic submission has nothing to transcribe, and no electronic reader path
+exists anywhere in the pipeline. Three combinations are valid and one is refused:
+
+| `**Input:**` | `**Kind:**` | |
+|---|---|---|
+| `handwritten` | `conventional` | valid |
+| `handwritten` | `reader` | valid |
+| absent or anything else (= electronic) | `conventional` | valid |
+| absent or anything else (= electronic) | `reader` | **refused** |
+
+**Watch the default.** `**Input:**` is optional and **absent means electronic**, so a file that
+declares `**Kind:** reader` and no input mode is an *electronic reader* assignment and is refused.
+The test is `inputMode === 'handwritten'`, never `inputMode !== 'electronic'` — written the second
+way it passes exactly the case it exists to catch.
+
+The rule is one function, `assignmentKindProblem` in `services/inputModeService.ts`, called from the
+editor's save, both imports, `buildAssignmentSpec` and — as the format's second implementation —
+`assignment_kind_problem` in `converter/convert.py`. The converter refuses before writing, so a
+rejected file leaves no `_spec.json` behind. In the editor the Reader option is unavailable while
+the assignment is electronic, and switching a reader assignment to electronic is refused rather
+than silently downgraded to conventional.
 
 **The routes that carry it, and the one that must not.** The `.md` carries it, the authoring
 backup carries it, `converter/convert.py` reads and writes it in lockstep with the app, and the

@@ -4,6 +4,7 @@ import { decryptJson, encryptJson } from './cryptoService';
 import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
 import { stemForGrader } from './figureText';
 import { generateTemplate } from './templateGenerator';
+import { assignmentKindProblem } from './inputModeService';
 import { partIdentifiers } from './templateLayout';
 import { buildAuthoringBackup } from './authoringBackup';
 import { apportionPoints } from './pointsService';
@@ -1153,6 +1154,15 @@ export const buildAssignmentSpec = async (
   assignment: Assignment,
   layout?: EmbeddedLayout,
 ): Promise<Assignment> => {
+  // THE BACKSTOP. A reader assignment must be handwritten
+  // (`WORKORDER_..._SUPPLEMENT_1`). The editor and both imports refuse this
+  // pairing before it can be stored, so reaching here means one of them was
+  // bypassed — a hand-edited localStorage entry, or a route added later that
+  // forgot to ask. This is the last place anything looks at the assignment
+  // before it becomes files, so it is the last place the rule can hold.
+  const kindProblem = assignmentKindProblem(assignment);
+  if (kindProblem) throw new Error(`Export stopped: ${kindProblem}`);
+
   const source = { ...(assignment as unknown as Record<string, unknown>) };
 
   // Both fields or neither, refused here rather than downstream: a spec naming a

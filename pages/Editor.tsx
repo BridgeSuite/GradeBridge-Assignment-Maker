@@ -7,6 +7,7 @@ import { storageService } from '../services/storageService';
 import { exportService, isRescaleDeclined } from '../services/exportService';
 import {
   MODE_LABEL,
+  assignmentKindProblem,
   convertSubsectionToMode,
   defaultTypeForMode,
   isAiHandwritten,
@@ -241,6 +242,15 @@ const Editor: React.FC = () => {
       return;
     }
 
+    // The pairing rule, on the same function every other entry point calls.
+    // Reachable in the editor only by a route that set one of the two without
+    // going through its control; the controls themselves make it unpickable.
+    const kindConflict = assignmentKindProblem(assignment);
+    if (kindConflict) {
+      alert(`This assignment was not saved.\n\n${kindConflict}`);
+      return;
+    }
+
     const toSave = assignment;
 
     setAssignment(toSave);
@@ -267,6 +277,19 @@ const Editor: React.FC = () => {
 
   const changeInputMode = (mode: InputMode) => {
     if (inputMode === mode) return;
+
+    // A reader assignment must be handwritten, so switching one to electronic is
+    // REFUSED rather than resolved. The tempting alternative — quietly flipping
+    // the kind to conventional so the pair becomes legal — is exactly the silent
+    // default this codebase keeps getting caught by: the author chose reader on
+    // purpose, and they would find out it had been undone when the assignment
+    // came back ungraded. Refusing costs them one extra click and tells them
+    // which two settings are in conflict.
+    const conflict = assignmentKindProblem({ inputMode: mode, assignmentKind });
+    if (conflict) {
+      alert(`This assignment cannot be switched to ${MODE_LABEL[mode]}.\n\n${conflict}`);
+      return;
+    }
 
     const stranded = strandedSubsectionLabels(assignment.problems, mode);
 
@@ -370,6 +393,13 @@ const Editor: React.FC = () => {
             }))
           }))
         };
+
+        const importedConflict = assignmentKindProblem(newAssignment);
+        if (importedConflict) {
+          alert(`This file was not loaded.\n\n${importedConflict}`);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          return;
+        }
 
         setAssignment(newAssignment);
         setAiFeedbackAnswered(true); // the file carries a value; show it as a plain toggle
@@ -639,22 +669,39 @@ const Editor: React.FC = () => {
                   {([
                     { label: 'Conventional', value: 'conventional' as AssignmentKind },
                     { label: 'Reader',       value: 'reader'       as AssignmentKind },
-                  ]).map(({ label, value }) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => chooseKind(value)}
-                      className={`text-xs px-4 py-1.5 rounded-full border font-medium transition-colors ${
-                        kindAnswered && assignmentKind === value
-                          ? 'bg-academic-700 text-white border-academic-700'
-                          : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                  ]).map(({ label, value }) => {
+                    // Unavailable rather than absent: an option that vanishes
+                    // teaches nothing, and the instructor who wants it needs to
+                    // know it exists and what makes it reachable.
+                    const blocked = !!assignmentKindProblem({ inputMode, assignmentKind: value });
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        disabled={blocked}
+                        title={blocked ? 'Only a handwritten assignment can be a reader assignment.' : undefined}
+                        onClick={() => chooseKind(value)}
+                        className={`text-xs px-4 py-1.5 rounded-full border font-medium transition-colors ${
+                          blocked
+                            ? 'bg-academic-100 text-academic-400 border-academic-200 cursor-not-allowed'
+                            : kindAnswered && assignmentKind === value
+                              ? 'bg-academic-700 text-white border-academic-700'
+                              : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
+              {inputMode !== 'handwritten' && (
+                <p className="text-xs text-academic-600 mt-2 leading-relaxed">
+                  <strong>Reader is unavailable on an electronic assignment.</strong> The reader works by
+                  reading photographed pages, so there is nothing for it to read unless students write on
+                  paper. Set <em>How students answer</em> to Handwritten to make it available.
+                </p>
+              )}
               <p className="text-xs text-academic-500 mt-2 leading-relaxed">
                 Whole-assignment, not per problem: there is one kind and every question in this
                 assignment has it. You can change it while authoring. It travels with the assignment

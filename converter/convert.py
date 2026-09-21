@@ -744,6 +744,34 @@ def print_summary(assignment):
         print()
 
 
+def assignment_kind_problem(assignment):
+    """
+    Why this assignment's kind and input mode cannot go together, or None.
+
+    Mirrors assignmentKindProblem() in services/inputModeService.ts. This file is
+    the format's second implementation and must refuse what the app refuses;
+    keep the two in lockstep.
+
+    A reader assignment must be handwritten. The reader's first stage
+    transcribes photographed handwriting, and an electronic submission has
+    nothing to transcribe.
+
+    THE TEST IS == 'handwritten', NEVER != 'electronic'. inputMode is optional
+    and ABSENT MEANS ELECTRONIC: a file with no **Input:** line, or one carrying
+    any value other than handwritten, is electronic. So a reader assignment with
+    no **Input:** line at all is an electronic reader assignment and is refused.
+    Written the other way round, the check passes exactly the case it exists to
+    catch.
+    """
+    if (assignment.get('assignmentKind') == 'reader'
+            and assignment.get('inputMode') != 'handwritten'):
+        return ('A reader assignment must be handwritten. The reader works by reading '
+                'photographed pages, and an electronic assignment has nothing to '
+                'photograph. Either set the input mode to Handwritten, or make this a '
+                'conventional assignment.')
+    return None
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python convert.py <assignment.md>")
@@ -757,6 +785,16 @@ def main():
     print(f"\nParsing: {md_path.name}")
 
     assignment = parse_md(md_path)
+
+    # Refused before anything is written, so a rejected file leaves no
+    # half-valid _spec.json behind for someone to pick up later.
+    kind_problem = assignment_kind_problem(assignment)
+    if kind_problem:
+        print(f"\nError: {kind_problem}")
+        print("  In the file: '**Kind:** reader' needs '**Input:** handwritten' above it.")
+        print("  An assignment with no **Input:** line is electronic.")
+        print("\nNothing was written.")
+        sys.exit(1)
 
     # Strip internal note before writing JSON
     norm_note = assignment.pop('_normalization_note', None)
