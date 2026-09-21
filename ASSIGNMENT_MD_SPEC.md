@@ -91,6 +91,16 @@ One line, two values, and exactly one kind per assignment. There is no per-probl
 per-sub-part kind, no assignment that is partly one and partly the other, and no runtime
 condition that changes it.
 
+**What the two kinds are** (the definitions of record, and the same words the editor shows):
+
+- **Conventional:** a graded assignment. A teaching assistant grades every submission.
+- **Reader:** a practice assignment. Students submit handwritten work and get an AI reading of it
+  back, which tells them how their writing was read. It is not graded and never enters the course
+  record.
+
+The second is why a reader assignment must be handwritten: there is no reading to give back unless
+there is handwriting to read.
+
 **Absent means `conventional`.** Every assignment authored before 2026-09-21 predates the field
 and all of them are conventional, so a file with no `**Kind:**` line is read as conventional and
 a conventional assignment writes no line — which is what keeps older files byte-identical

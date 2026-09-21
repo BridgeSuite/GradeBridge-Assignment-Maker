@@ -645,12 +645,13 @@ const Editor: React.FC = () => {
                 always valid, but a pre-selected radio reads as already
                 answered, and the save refuses until it really is.
 
-                NOTE FOR REVIEW: the sentence under the pills says what the
-                field DOES, not what the two kinds mean, because the work order
-                that introduced them does not define them and inventing a
-                definition here would put words in the pipeline's mouth on a
-                screen instructors read. Replace it with the real distinction
-                when there is one to state. */}
+                The two descriptions beneath the pills are Andre's words,
+                supplied 2026-09-21, and they are the definitions of record. They
+                had been left out deliberately until then: the work order that
+                introduced the field did not define the two kinds, and inventing
+                a distinction on a screen instructors read would have put words
+                in the pipeline's mouth. Do not paraphrase them here without
+                changing the pipeline they describe. */}
             <div className={`md:col-span-2 rounded-lg border p-4 ${
               !kindAnswered ? 'border-amber-300 bg-amber-50' : 'border-academic-200 bg-academic-50'
             }`}>
@@ -695,6 +696,25 @@ const Editor: React.FC = () => {
                   })}
                 </div>
               </div>
+              <dl className="mt-3 space-y-1.5 text-xs leading-relaxed">
+                <div>
+                  <dt className="sr-only">Conventional</dt>
+                  <dd className="text-academic-600">
+                    <strong className="text-academic-800">Conventional:</strong> a graded assignment.
+                    A teaching assistant grades every submission.
+                  </dd>
+                </div>
+                <div>
+                  <dt className="sr-only">Reader</dt>
+                  <dd className="text-academic-600">
+                    <strong className="text-academic-800">Reader:</strong> a practice assignment.
+                    Students submit handwritten work and get an AI reading of it back, which tells
+                    them how their writing was read. It is not graded and never enters the course
+                    record.
+                  </dd>
+                </div>
+              </dl>
+
               {inputMode !== 'handwritten' && (
                 <p className="text-xs text-academic-600 mt-2 leading-relaxed">
                   <strong>Reader is unavailable on an electronic assignment.</strong> The reader works by
