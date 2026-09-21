@@ -499,6 +499,92 @@ check('referencedFigureIds finds every id an assignment refers to', () => {
   });
 }
 
+// ---------------------------------------------------------------------------
+// The rubric tells the grading side what kind of assignment this is (Item 6)
+// ---------------------------------------------------------------------------
+// `{stem}_grading_rubric.json` is instructor-side: it is uploaded with the
+// Gradescope autograder setup and never reaches a student. Nothing in the
+// student's package carries the assignment kind — deliberately, because
+// anything in that file is a claim rather than a fact — so the rubric is the
+// only honest place the grading side can learn it.
+{
+  const rubricFor = (extra) => exportSvc.generateGradingRubric(makeAssignment(extra));
+
+  check('the rubric declares the assignment kind and the input mode', () => {
+    const reader = rubricFor({ assignmentKind: 'reader', inputMode: 'handwritten' });
+    assertEqual(reader.assignment_kind, 'reader', 'the rubric did not carry the reader kind');
+    assertEqual(reader.input_mode, 'handwritten', 'the rubric did not carry the input mode');
+
+    const conventional = rubricFor({ assignmentKind: 'conventional', inputMode: 'electronic' });
+    assertEqual(conventional.assignment_kind, 'conventional', 'the rubric lost the kind');
+    assertEqual(conventional.input_mode, 'electronic', 'the rubric lost the input mode');
+  });
+
+  check('an absent inputMode is stated as electronic, not omitted', () => {
+    // Absent means electronic everywhere else in the pipeline, and the rubric
+    // states the resolved fact rather than passing the absence along. A
+    // consumer should never have to know this app's defaults to read its files.
+    const a = makeAssignment();
+    delete a.inputMode;
+    const rubric = exportSvc.generateGradingRubric(a);
+    assertEqual(rubric.input_mode, 'electronic', 'an absent inputMode was not resolved');
+  });
+
+  check('both fields are ALWAYS emitted, never conditional', () => {
+    for (const extra of [
+      { assignmentKind: 'conventional', inputMode: 'electronic' },
+      { assignmentKind: 'reader', inputMode: 'handwritten' },
+    ]) {
+      const rubric = rubricFor(extra);
+      assert('assignment_kind' in rubric,
+        'assignment_kind is conditional; a consumer would have to guess whether an absent '
+        + 'field means conventional or means the app did not say');
+      assert('input_mode' in rubric, 'input_mode is conditional');
+    }
+  });
+
+  check('the two new fields sit beside assignment_id, not inside rubrics', () => {
+    const rubric = rubricFor({ assignmentKind: 'reader', inputMode: 'handwritten' });
+    assertEqual(Object.keys(rubric).filter(k => !k.startsWith('_')),
+      ['assignment_id', 'course_code', 'assignment_title', 'assignment_kind', 'input_mode', 'rubrics'],
+      'the rubric top level is not the shape the spec documents');
+  });
+
+  check('the student spec still carries neither the kind nor a rubric', async () => {
+    const spec = await exportSvc.buildAssignmentSpec(
+      makeAssignment({ assignmentKind: 'reader', inputMode: 'handwritten' }));
+    assert(!('assignmentKind' in spec), 'the kind reached the student spec');
+    assert(!('assignment_kind' in spec), 'the kind reached the student spec under its rubric name');
+    assert(!('rubrics' in spec), 'a rubric reached the student spec');
+    assert(!exportSvc.STUDENT_SPEC_FIELDS.assignment.includes('assignmentKind'),
+      'assignmentKind is on the student whitelist');
+  });
+
+  // convert.py writes NO rubric — it emits `{stem}_spec.json`, the assignment
+  // object, and nothing else. The supplement asks for the two fields "where it
+  // writes the rubric", and there is no such place. What can be held is that
+  // the two implementations agree on the VALUES, which the spec output carries.
+  {
+    const python = ['python', 'python3', 'py'].find(exe =>
+      spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
+    const name = 'convert.py agrees on the kind and mode, in the file it does write';
+    if (!python) results.push(`  SKIP  ${name} (no Python interpreter on PATH)`);
+    else check(name, () => {
+      const work = mkdtempSync(join(tmpdir(), 'gb-rubric-'));
+      const a = makeAssignment({ assignmentKind: 'reader', inputMode: 'handwritten', targetPoints: 100 });
+      a.problems[0].subsections[0].submissionType = 'Handwritten';
+      const mdPath = join(work, 'KindRubric.md');
+      writeFileSync(mdPath, exportSvc.assignmentToMd(a), 'utf8');
+      const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), mdPath], { encoding: 'utf8' });
+      assert(run.status === 0, `convert.py failed: ${run.stderr || run.stdout}`);
+      const spec = JSON.parse(readFileSync(join(work, 'KindRubric_spec.json'), 'utf8'));
+      assertEqual(spec.assignmentKind, 'reader', 'convert.py lost the kind');
+      assertEqual(spec.inputMode, 'handwritten', 'convert.py lost the input mode');
+      rmSync(work, { recursive: true, force: true });
+    });
+  }
+}
+
 // ---------- report ----------
 await Promise.all(pending);
 console.log(results.join('\n'));

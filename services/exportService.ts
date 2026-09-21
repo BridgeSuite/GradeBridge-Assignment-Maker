@@ -820,6 +820,23 @@ export const generateGradingRubric = (assignment: Assignment): object => {
     assignment_id: assignmentId,
     course_code: assignment.courseCode,
     assignment_title: assignment.title,
+    // WHAT KIND OF ASSIGNMENT THIS IS, AND HOW IT WAS ANSWERED.
+    //
+    // The grading side needs both, and this is the file it should learn them
+    // from: the rubric is instructor-side, uploaded with the Gradescope
+    // autograder setup, and never reaches a student. Nothing in the student's
+    // package carries the kind at all — deliberately, since anything in that
+    // file is a claim rather than a fact — so this is the only honest source.
+    //
+    // ALWAYS EMITTED, never conditional. A consumer that has to distinguish
+    // "conventional" from "the field was absent so I assumed conventional" is a
+    // consumer that will one day assume wrong, and the assignment kind decides
+    // whether a submission is graded or read back as practice.
+    assignment_kind: assignment.assignmentKind,
+    // Absent `inputMode` is electronic, the same rule the rest of the pipeline
+    // uses (types.ts, ASSIGNMENT_MD_SPEC.md §2). Resolved here rather than
+    // passed through, so the rubric states a fact and not a default.
+    input_mode: assignment.inputMode === 'handwritten' ? 'handwritten' : 'electronic',
     // No model, temperature or token budget travels with the rubric. The
     // Assignment Maker describes the work; the grading system decides how to
     // grade it and allocates its own resources — see ASSIGNMENT_MD_SPEC.md §12.

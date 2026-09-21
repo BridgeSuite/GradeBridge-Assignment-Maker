@@ -842,6 +842,17 @@ The same lift protects the parser's own line filters, which throw away blank lin
 | `assignment.pdf` | The browser draws the block — prose, KaTeX and the drawing together — and the raster is placed as an image. Where there is no rasteriser it degrades to the **short placeholder line**, `[figure: ...]`, never to raw SVG source |
 | `assignment.tex` | The placeholder in an `\fbox` — pdflatex cannot typeset an inline SVG without an external file |
 | Handwritten QR template | Drawn into its own reserved block of about 51 mm, **separately from the stem's prose**, rather than being counted as thousands of characters of prose. The two are never rasterised together: a figure may be scaled to fit its block, question text may not, so a drawing that runs over cannot shrink the words beside it |
+**The rubric's top level** is `assignment_id`, `course_code`, `assignment_title`, **`assignment_kind`**
+(`conventional` or `reader`), **`input_mode`** (`handwritten` or `electronic`), then `rubrics`.
+
+The last two are **always emitted, never absent**. This file is instructor-side — it is uploaded
+with the Gradescope autograder setup and never reaches a student — and nothing in the student's
+package carries the assignment kind at all, deliberately, so this is the only honest source for it.
+An assignment with no `**Input:**` line states `electronic` here rather than omitting the field: a
+consumer should not have to know this app's defaults to read its files, and a consumer that cannot
+distinguish "conventional" from "the field was absent" is one that will eventually assume wrong
+about whether work is graded or read back as practice.
+
 | `{stem}_grading_rubric.json` | Every rubric entry carries `problem_statement`: the problem stem with the prose verbatim and **each figure reduced to its own words** — `[Figure — {title}: {desc}]` from the SVG's `<title>` and `<desc>`, falling back to `[Figure: {title}]` and then `[figure]`; a Markdown image uses its alt text. **No `<svg>` or `<path>` reaches the grader.** Written only when the problem has a stem |
 
 **The grader gets the figure's words, not the drawing.** `problem_statement` names each figure by its `<title>`/`<desc>`; the SVG source does not go into the grading rubric. It went in verbatim at first, and ENG17 measured what that cost: ~143k tokens of `<path d="…">` per student per full grading pass, about a million across a class of 30, carried so a grader **forbidden by policy to reason from the drawing** could decline to use it. A `<desc>` written under the "describe only what a sighted student can see" rule is a few hundred bytes, more useful to a model than coordinates, and leaks strictly less than the geometry.
@@ -899,7 +910,7 @@ the artifacts never said who reads them. So, per artifact:
 | `{stem}_OPEN_IN_APP.json` (the student spec) | the Student Submission app | what the student is asked, how they are allowed to answer it, and — handwritten only — **the layout map, embedded verbatim** (§13) | **grading prompts, grader notes, answer keys, reference solutions, grading-resource settings** — anything a student must not see |
 | `instructor/{stem}_authoring_backup.json` | this app, on Import JSON | **restoring an assignment completely** — it is the only artifact that does | *(no restriction: it is the whole assignment, and it is why the ZIP must never be given to students)* |
 | `layout_{TemplateID}.csv` | the page consumer that crops (§10) — reached through `{stem}_OPEN_IN_APP.json`, or as the instructor's own copy under `instructor/` | **where** each region is on the page — nothing else | anything a grader needs in order to grade |
-| `{stem}_grading_rubric.json` | the grading system | what each item asks, what it is worth, what a grader is told, and the answer's **modality** | **model names, temperature, token budgets, or any other grading-system resource decision** |
+| `{stem}_grading_rubric.json` | the grading system | what each item asks, what it is worth, what a grader is told, the answer's **modality**, and — at the top level beside `assignment_id` — `assignment_kind` and `input_mode` | **model names, temperature, token budgets, or any other grading-system resource decision** |
 | `{stem}_grader_document.html` | a human TA, on screen or on paper | the answer key and the rubric in readable form | anything machine-parsed — nothing may depend on its markup |
 | `{stem}.pdf` | the student, on paper | the whole assignment | identity fields — no name, ID or date blank (§10) |
 | `instructor/{stem}.md` | this app, on Import Markdown; and a human editing it | the authored source — the format an author actually writes | *(it carries the grading prompts, so it is instructor-only)* |
