@@ -5,6 +5,7 @@ import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, to
 import { stemForGrader } from './figureText';
 import { generateTemplate } from './templateGenerator';
 import { assignmentKindProblem } from './inputModeService';
+import { resolveAssignmentFigures } from './figureRefs';
 import { partIdentifiers } from './templateLayout';
 import { buildAuthoringBackup } from './authoringBackup';
 import { apportionPoints } from './pointsService';
@@ -503,6 +504,15 @@ const generatePDFContent = async (doc: jsPDF, assignment: Assignment, isTemplate
 };
 
 export const createPDF = async (assignment: Assignment, type: 'student' | 'template'): Promise<Blob> => {
+  // FIGURE BLOCKS ARE RESOLVED ONCE, HERE, AT THE ENTRY POINT.
+  //
+  // Everything below this line works on inline figures only, exactly as it did
+  // before figure blocks existed. Resolving at each entry rather than deep in
+  // the renderers is deliberate: there is one place per surface to get right,
+  // and a surface that forgot would show a raw block rather than silently
+  // dropping a drawing.
+  assignment = resolveAssignmentFigures(assignment);
+
   const doc = new jsPDF();
   await generatePDFContent(doc, assignment, type === 'template');
   return doc.output('blob');
@@ -512,6 +522,15 @@ export const createPDF = async (assignment: Assignment, type: 'student' | 'templ
 // makes — so the file shows the same thing the instructor saw. KaTeX's
 // stylesheet and glyph fonts are embedded: the file needs no network at all.
 export const generateHTML = async (assignment: Assignment): Promise<string> => {
+  // FIGURE BLOCKS ARE RESOLVED ONCE, HERE, AT THE ENTRY POINT.
+  //
+  // Everything below this line works on inline figures only, exactly as it did
+  // before figure blocks existed. Resolving at each entry rather than deep in
+  // the renderers is deliberate: there is one place per surface to get right,
+  // and a surface that forgot would show a raw block rather than silently
+  // dropping a drawing.
+  assignment = resolveAssignmentFigures(assignment);
+
   const katexCss = await katexStylesheet();
   return `<!DOCTYPE html>
 <html>
@@ -567,6 +586,15 @@ h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
 // underscore escape and leaked into every export.
 
 export const generateLaTeX = (assignment: Assignment): string => {
+  // FIGURE BLOCKS ARE RESOLVED ONCE, HERE, AT THE ENTRY POINT.
+  //
+  // Everything below this line works on inline figures only, exactly as it did
+  // before figure blocks existed. Resolving at each entry rather than deep in
+  // the renderers is deliberate: there is one place per surface to get right,
+  // and a surface that forgot would show a raw block rather than silently
+  // dropping a drawing.
+  assignment = resolveAssignmentFigures(assignment);
+
   // Calculate total points
   const totalPoints = assignment.problems.reduce((sum, prob) =>
     sum + prob.subsections.reduce((s, sub) => s + sub.points, 0), 0
@@ -949,6 +977,15 @@ export const assignmentToMd = (assignment: Assignment): string => {
 // =====================================================
 
 export const generateGraderHTML = async (assignment: Assignment): Promise<string> => {
+  // FIGURE BLOCKS ARE RESOLVED ONCE, HERE, AT THE ENTRY POINT.
+  //
+  // Everything below this line works on inline figures only, exactly as it did
+  // before figure blocks existed. Resolving at each entry rather than deep in
+  // the renderers is deliberate: there is one place per surface to get right,
+  // and a surface that forgot would show a raw block rather than silently
+  // dropping a drawing.
+  assignment = resolveAssignmentFigures(assignment);
+
   const katexCss = await katexStylesheet();
   const totalPoints = assignment.problems.reduce((sum, prob) =>
     sum + prob.subsections.reduce((s, sub) => s + sub.points, 0), 0
@@ -1162,6 +1199,12 @@ export const buildAssignmentSpec = async (
   // before it becomes files, so it is the last place the rule can hold.
   const kindProblem = assignmentKindProblem(assignment);
   if (kindProblem) throw new Error(`Export stopped: ${kindProblem}`);
+
+  // Resolve before anything is selected, so the student file carries drawings
+  // and no references. The map is dropped with the same call: a student's
+  // browser has nothing to resolve against, and a spec that mentioned a figure
+  // id would be describing a file nobody has.
+  assignment = resolveAssignmentFigures(assignment);
 
   const source = { ...(assignment as unknown as Record<string, unknown>) };
 

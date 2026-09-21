@@ -47,6 +47,7 @@ import {
   ProblemBlock,
 } from './templateLayout';
 import { splitFigures, trimAroundFigures } from './figureBlocks';
+import { resolveAssignmentFigures } from './figureRefs';
 import { SelfTestReport, runInkChecks, runSelfTest } from './templateSelfTest';
 
 const PX_PER_MM = 96 / 25.4;
@@ -539,6 +540,12 @@ const drawAnswerBox = (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
  * `error.report`.
  */
 export const generateTemplate = async (assignment: Assignment): Promise<GeneratedTemplate> => {
+  // Figure blocks are resolved before anything measures or draws, so the layout
+  // is computed from the drawing itself and not from a five-line reference that
+  // would reserve the wrong amount of space. This is also what keeps extraction
+  // invisible: an extracted SVG resolves to the bytes it was lifted from, so
+  // every rectangle, page count and layout_id is unmoved.
+  assignment = resolveAssignmentFigures(assignment);
   const assignmentId = await resolvePageFormatId(assignment);
   const layout = buildLayout(assignment);
 

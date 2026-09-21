@@ -6,6 +6,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { courseKeyRemovedNotice } from './importNotices';
+import { figureRefProblems, parseFigureRefs, splitFigureRefs } from './figureRefs';
 import { Assignment, AssignmentKind, InputMode, Problem, Subsection, SubmissionType } from '../types';
 import { LEGACY_SPACE_LINES } from './templateLayout';
 import { FIGURE_FENCE_CLOSE_RE, FIGURE_FENCE_OPEN_RE, splitFigures } from './figureBlocks';
@@ -281,23 +282,33 @@ function buildDescription(
   onHeadingLine?: (line: string) => void
 ): string {
   const parts: string[] = [];
-  for (const seg of splitFigures(body.join('\n'))) {
-    if (seg.kind === 'figure') { parts.push(seg.source); continue; }
-    const keptLines = seg.value.split('\n').filter(keepLine);
-    if (onHeadingLine) {
-      for (const line of keptLines) if (HEADING_LINE_RE.test(line.trim())) onHeadingLine(line.trim());
+  // A ```figure block is lifted out verbatim before anything filters lines,
+  // exactly as a ```svg fence is. `figureBlocks.ts` does not know this fence
+  // — deliberately, it is mirrored into the student app — so without this the
+  // block's `id:` / `title:` / `desc:` lines would be treated as prose and come
+  // back reflowed, which would change the text an id refers to.
+  for (const part of splitFigureRefs(body.join('\n'))) {
+    if (part.kind === 'ref') { parts.push(part.source); continue; }
+    for (const seg of splitFigures(part.value)) {
+      if (seg.kind === 'figure') { parts.push(seg.source); continue; }
+      const keptLines = seg.value.split('\n').filter(keepLine);
+      if (onHeadingLine) {
+        for (const line of keptLines) if (HEADING_LINE_RE.test(line.trim())) onHeadingLine(line.trim());
+      }
+      const kept = keptLines.join('\n').trim();
+      if (kept) parts.push(kept);
     }
-    const kept = keptLines.join('\n').trim();
-    if (kept) parts.push(kept);
   }
   return parts.join('\n\n');
 }
 
 function extractBlockquoteValue(key: string, body: string[]): string {
   // A `>` at the start of a line inside a figure is XML, not a blockquote.
-  const lines = splitFigures(body.join('\n'))
-    .filter(seg => seg.kind === 'text')
-    .flatMap(seg => (seg as { value: string }).value.split('\n'));
+  // `desc:` inside a figure block is the figure's description, not a
+  // blockquote key, and the block is skipped for the same reason a figure is.
+  const lines = splitFigureRefs(body.join('\n'))
+    .flatMap(part => (part.kind === 'text' ? splitFigures(part.value) : []))
+    .flatMap(seg => (seg.kind === 'text' ? seg.value.split('\n') : []));
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const startPattern = new RegExp(`^>\\s+${escapedKey}:\\s*(.*)$`, 'i');
   let collecting = false;

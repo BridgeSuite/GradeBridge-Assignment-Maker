@@ -1,0 +1,335 @@
+// =====================================================
+// Figure blocks — referring to a drawing instead of carrying it
+// =====================================================
+// A ```figure block names a figure by id; the drawing lives in
+// `figures/<id>.svg|.png|.jpg`. Replacing the drawing, format included, means
+// replacing that file and nothing else.
+//
+// The property that makes the whole design safe is **resolution equivalence**:
+// after a block is resolved, the text is exactly what the instructor would have
+// authored inline. That is what lets `figureBlocks.ts` stay byte-for-byte
+// unchanged — it is mirrored into the student app and must never learn this
+// fence — and it is what makes extracting the thirty existing ENG17 inline SVGs
+// provably invisible to students.
+
+import { build } from 'esbuild';
+import { webcrypto } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO = resolve(HERE, '..');
+globalThis.crypto ??= webcrypto;
+
+let passed = 0, failed = 0;
+const results = [];
+const pending = [];
+const check = (name, fn) => {
+  const ok = () => { passed++; results.push(`  PASS  ${name}`); };
+  const bad = (err) => { failed++; results.push(`  FAIL  ${name}\n          ${err.message}`); };
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') pending.push(r.then(ok, bad));
+    else ok();
+  } catch (err) { bad(err); }
+};
+const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+const assertEqual = (a, b, msg) => {
+  const x = JSON.stringify(a), y = JSON.stringify(b);
+  if (x !== y) throw new Error(`${msg}\n          expected: ${y}\n          actual:   ${x}`);
+};
+
+// ---------- load ----------
+const outDir = mkdtempSync(join(tmpdir(), 'gb-figref-'));
+const requireFromRepo = createRequire(join(REPO, 'package.json'));
+const assetImports = {
+  name: 'asset-imports',
+  setup(b) {
+    b.onResolve({ filter: /\?(raw|dataurl)$/ }, args => {
+      const [, q] = args.path.match(/\?(raw|dataurl)$/);
+      return { path: requireFromRepo.resolve(args.path.replace(/\?(raw|dataurl)$/, '')), namespace: q };
+    });
+    b.onLoad({ filter: /.*/, namespace: 'raw' }, a => ({ contents: readFileSync(a.path, 'utf8'), loader: 'text' }));
+    b.onLoad({ filter: /.*/, namespace: 'dataurl' }, a => ({
+      contents: `export default ${JSON.stringify(`data:font/woff2;base64,${readFileSync(a.path).toString('base64')}`)};`,
+      loader: 'js',
+    }));
+  },
+};
+const stubHeavy = {
+  name: 'stub-heavy',
+  setup(b) {
+    b.onResolve({ filter: /^(jspdf|jszip|file-saver)$/ }, args => ({ path: args.path, namespace: 'stub' }));
+    b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
+      contents: 'const s = new Proxy(function(){}, { get: () => s, apply: () => s, construct: () => s }); export default s;',
+      loader: 'js',
+    }));
+  },
+};
+const load = async (entry, name, plugins = [assetImports]) => {
+  const outfile = join(outDir, name);
+  await build({
+    entryPoints: [entry], outfile, format: 'esm', target: 'es2022', bundle: true,
+    absWorkingDir: dirname(entry), logLevel: 'silent', plugins,
+  });
+  return import(pathToFileURL(outfile).href);
+};
+
+const refs = await load(join(REPO, 'services', 'figureRefs.ts'), 'figureRefs.mjs');
+const figText = await load(join(REPO, 'services', 'figureText.ts'), 'figureText.mjs');
+const blocks = await load(join(REPO, 'services', 'figureBlocks.ts'), 'figureBlocks.mjs');
+const mdParser = await load(join(REPO, 'services', 'mdParserService.ts'), 'mdParser.mjs');
+const exportSvc = await load(join(REPO, 'services', 'exportService.ts'), 'exportSvc.mjs',
+  [assetImports, stubHeavy]);
+
+console.log('\nFigure blocks — reference, resolve, and leave the mirror alone\n');
+
+// ---------------------------------------------------------------------------
+// 1. The mirrored file is untouched (criterion 1)
+// ---------------------------------------------------------------------------
+// `figureBlocks.ts` is held byte-identical with the Student Submission app.
+// This work order adds a fence; teaching it to THAT file would ship an
+// authoring concern into the student bundle, where nothing can resolve a
+// reference. The mirror check is the reason `figureRefs.ts` exists at all.
+{
+  const MIRROR = resolve(REPO, '..', 'GradeBridge-Student-Submission', 'services', 'figureBlocks.ts');
+  if (existsSync(MIRROR)) {
+    check('figureBlocks.ts is still byte-identical to the Student Submission copy', () => {
+      assertEqual(
+        readFileSync(join(REPO, 'services', 'figureBlocks.ts'), 'utf8'),
+        readFileSync(MIRROR, 'utf8'),
+        'the mirrored figure file has drifted');
+    });
+  } else {
+    results.push('  SKIP  figureBlocks.ts mirror (Student Submission not checked out alongside)');
+  }
+
+  check('figureBlocks.ts knows nothing about the figure fence', () => {
+    const src = readFileSync(join(REPO, 'services', 'figureBlocks.ts'), 'utf8');
+    assert(!/```[ \t]*figure|figureRef|FIGURE_REF/i.test(src),
+      'the mirrored file has learned the ```figure fence, which puts it in the student bundle');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 2. Parsing
+// ---------------------------------------------------------------------------
+const BLOCK = [
+  '```figure',
+  'id: p1-divider',
+  'title: Voltage divider for Problem 1',
+  'desc: Two resistors R1 and R2 in series across a 12 V source.',
+  '```',
+].join('\n');
+
+check('a block is parsed into id, title and desc', () => {
+  const [seg] = refs.parseFigureRefs(BLOCK);
+  assertEqual(seg.ref, {
+    id: 'p1-divider',
+    title: 'Voltage divider for Problem 1',
+    desc: 'Two resistors R1 and R2 in series across a 12 V source.',
+  }, 'the block was misread');
+  assertEqual(seg.source, BLOCK, 'the source is not the block verbatim');
+});
+
+check('a block is found among prose, and the prose is left alone', () => {
+  const text = `Given the network below.\n\n${BLOCK}\n\nFind Vout.`;
+  const found = refs.parseFigureRefs(text);
+  assertEqual(found.length, 1, 'wrong number of blocks found');
+  assertEqual(found[0].ref.id, 'p1-divider', 'wrong id');
+  const parts = refs.splitFigureRefs(text);
+  assertEqual(parts.map(p => p.kind), ['text', 'ref', 'text'], 'the split is wrong');
+  assertEqual(parts.map(p => (p.kind === 'text' ? p.value : p.source)).join('\n'), text,
+    'the split does not reassemble to the input');
+});
+
+check('an unknown key inside a block is ignored rather than refused', () => {
+  const [seg] = refs.parseFigureRefs(BLOCK.replace('```\n', '') + '\nsource: textbook fig 3.2\n```');
+  assert(seg.ref.id === 'p1-divider', 'a future key broke the parse');
+});
+
+for (const [what, bad, expect] of [
+  ['no id', BLOCK.replace('id: p1-divider\n', ''), /no `id:` line/],
+  ['no title', BLOCK.replace('title: Voltage divider for Problem 1\n', ''), /no `title:` line/],
+  ['no desc', BLOCK.replace(/desc: .*\n/, ''), /no `desc:` line/],
+  ['an unusable id', BLOCK.replace('p1-divider', 'P1 Divider!'), /not usable as a filename/],
+]) {
+  check(`a block with ${what} is reported`, () => {
+    const [seg] = refs.parseFigureRefs(bad);
+    const problems = refs.figureRefProblems(seg.ref).join(' | ');
+    assert(expect.test(problems), `the problem is not named: ${problems}`);
+  });
+}
+
+check('the desc refusal says why a desc matters', () => {
+  const problems = refs.figureRefProblems({ id: 'x', title: 'y' }).join(' ');
+  assert(/only thing the grader sees/.test(problems),
+    `the message does not say what a missing desc costs: ${problems}`);
+});
+
+// ---------------------------------------------------------------------------
+// 3. Resolution equivalence — the property everything else rests on
+// ---------------------------------------------------------------------------
+const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+  + '<title>Voltage divider for Problem 1</title>'
+  + '<desc>Two resistors R1 and R2 in series across a 12 V source.</desc>'
+  + '<path d="M0 0 L10 10" stroke="#000"/></svg>';
+const svgFile = { format: 'svg', base64: Buffer.from(SVG, 'utf8').toString('base64'), filename: 'p1-divider.svg' };
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+const pngFile = { format: 'png', base64: PNG_B64, filename: 'p1-divider.png' };
+
+check('an SVG block resolves to exactly the fence it would have been authored as', () => {
+  const inlineAuthored = '```svg\n' + SVG + '\n```';
+  const resolved = refs.resolveFigureRefsInText(BLOCK, { 'p1-divider': svgFile });
+  assertEqual(resolved, inlineAuthored,
+    'a resolved SVG block is not identical to the same drawing authored inline');
+});
+
+check('resolution is invisible to the mirrored splitter', () => {
+  const inlineAuthored = '```svg\n' + SVG + '\n```';
+  const fromBlock = blocks.splitFigures(refs.resolveFigureRefsInText(BLOCK, { 'p1-divider': svgFile }));
+  const fromInline = blocks.splitFigures(inlineAuthored);
+  assertEqual(fromBlock, fromInline, 'the resolved block and the inline figure split differently');
+});
+
+check('a raster block resolves to an image line with a data: URI and the title as alt', () => {
+  const resolved = refs.resolveFigureRefsInText(BLOCK, { 'p1-divider': pngFile });
+  assertEqual(resolved, `![Voltage divider for Problem 1](data:image/png;base64,${PNG_B64})`,
+    'the raster resolution is wrong');
+  const segs = blocks.splitFigures(resolved);
+  assertEqual(segs.length, 1, 'the resolved image is not a single figure segment');
+  assertEqual(segs[0].figure.form, 'image', 'it did not resolve to an image figure');
+});
+
+check('a block whose file is missing is left exactly as it is', () => {
+  assertEqual(refs.resolveFigureRefsInText(BLOCK, {}), BLOCK,
+    'a missing file changed the text — import refuses that case, render must not mangle it');
+});
+
+check('text with no block is returned byte-for-byte', () => {
+  const plain = 'Given the network.\n\n```svg\n' + SVG + '\n```\n\nFind Vout.';
+  assertEqual(refs.resolveFigureRefsInText(plain, { 'p1-divider': svgFile }), plain,
+    'resolution disturbed text that had no block in it');
+});
+
+check('an SVG with non-ASCII labels survives resolution', () => {
+  const unicode = '<svg xmlns="http://www.w3.org/2000/svg"><title>Ω</title><desc>5 Ω at 25 °C</desc></svg>';
+  const file = { format: 'svg', base64: Buffer.from(unicode, 'utf8').toString('base64'), filename: 'f.svg' };
+  const out = refs.resolveFigureRefsInText(BLOCK, { 'p1-divider': file });
+  assert(out.includes('5 Ω at 25 °C'), `the degree sign or ohm was mangled: ${out}`);
+});
+
+// ---------------------------------------------------------------------------
+// 4. The grader sees the block's own words, whatever the format
+// ---------------------------------------------------------------------------
+// This is why title and desc live in the .md rather than in the image: a PNG
+// has no <title> and no <desc>, so a format swap would otherwise blank the
+// grader's only view of the figure.
+{
+  const stem = `Given the network below.\n\n${BLOCK}\n\nFind Vout.`;
+  const expected = 'Given the network below.\n\n'
+    + '[Figure — Voltage divider for Problem 1: Two resistors R1 and R2 in series across a 12 V source.]'
+    + '\n\nFind Vout.';
+
+  check('the grader text for a block is its title and desc', () => {
+    assertEqual(figText.stemForGrader(stem), expected, 'the grader text is wrong');
+  });
+
+  check('the grader text is the SAME for the inline SVG the block replaced', () => {
+    const inlineStem = `Given the network below.\n\n\`\`\`svg\n${SVG}\n\`\`\`\n\nFind Vout.`;
+    assertEqual(figText.stemForGrader(inlineStem), expected,
+      'an inline SVG and the block that replaces it read differently to the grader');
+  });
+
+  check('no markup reaches the grader from a block', () => {
+    const out = figText.stemForGrader(stem);
+    assert(!/<svg|<path|```|data:image/.test(out), `markup leaked to the grader: ${out}`);
+  });
+
+  check('swapping the SVG for a PNG does not change the grader text', () => {
+    // The rubric is built from the unresolved stem, so the file behind the id
+    // is irrelevant to it. Asserted rather than assumed, because "the grader
+    // never sees the drawing" is the whole reason the words live in the block.
+    assertEqual(figText.stemForGrader(stem), expected, 'the grader text moved with the format');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 5. The student spec carries drawings, never references
+// ---------------------------------------------------------------------------
+const makeAssignment = (extra = {}) => ({
+  id: 'a1', courseCode: 'EEC1', title: 'Lab 1', assignmentKind: 'conventional',
+  preamble: 'Do it.', createdAt: 1, updatedAt: 1,
+  problems: [{
+    id: 'p1', name: 'Divider', description: `Given the network.\n\n${BLOCK}\n\nFind Vout.`,
+    subsections: [{ id: 's1', name: 'a', description: 'Work it out', points: 100, submissionType: 'Text' }],
+  }],
+  ...extra,
+});
+
+check('the spec resolves the block and carries no figure map', async () => {
+  const spec = await exportSvc.buildAssignmentSpec(
+    makeAssignment({ figures: { 'p1-divider': svgFile } }));
+  const stem = spec.problems[0].description;
+  assert(!stem.includes('```figure'), 'a figure block reached the student spec');
+  assert(stem.includes('```svg'), 'the drawing did not reach the student spec');
+  assert(stem.includes('<path d="M0 0 L10 10"'), 'the drawing lost its content');
+  assert(!('figures' in spec), 'the figure map reached the student spec');
+});
+
+check('the spec for a raster block inlines the image', async () => {
+  const spec = await exportSvc.buildAssignmentSpec(
+    makeAssignment({ figures: { 'p1-divider': pngFile } }));
+  const stem = spec.problems[0].description;
+  assert(stem.includes(`data:image/png;base64,${PNG_B64}`), 'the PNG was not inlined');
+  assert(!stem.includes('```figure'), 'a figure block reached the student spec');
+});
+
+check('the figure map is not on the student whitelist', () => {
+  assert(!exportSvc.STUDENT_SPEC_FIELDS.assignment.includes('figures'),
+    'figures is on the student whitelist; the map must never travel');
+});
+
+// ---------------------------------------------------------------------------
+// 6. The .md keeps the block, and the round trip does not reflow it
+// ---------------------------------------------------------------------------
+check('a figure block survives Export .md -> Import Markdown unchanged', () => {
+  const md = exportSvc.assignmentToMd(makeAssignment({ figures: { 'p1-divider': svgFile } }));
+  assert(md.includes('```figure'), 'Export .md resolved the block away — the .md must keep the reference');
+  assert(!md.includes('<path d='), 'Export .md inlined the drawing into the reference');
+
+  const back = mdParser.parseMdToAssignment(md);
+  const [seg] = refs.parseFigureRefs(back.problems[0].description);
+  assert(seg, 'the block did not survive the import');
+  assertEqual(seg.ref, {
+    id: 'p1-divider',
+    title: 'Voltage divider for Problem 1',
+    desc: 'Two resistors R1 and R2 in series across a 12 V source.',
+  }, 'the block was reflowed or mangled on import');
+
+  const again = exportSvc.assignmentToMd(back);
+  assertEqual(again, md, 'the second export differs from the first');
+});
+
+check('a desc: line inside a block is not mistaken for a blockquote key', () => {
+  const md = exportSvc.assignmentToMd(makeAssignment({ figures: { 'p1-divider': svgFile } }));
+  const back = mdParser.parseMdToAssignment(md);
+  const sub = back.problems[0].subsections[0];
+  assert(!/Two resistors/.test(sub.graderNote || ''), 'the figure desc leaked into the grader note');
+  assert(!/Two resistors/.test(sub.aiGradingPrompt || ''), 'the figure desc leaked into the grading prompt');
+});
+
+check('referencedFigureIds finds every id an assignment refers to', () => {
+  const a = makeAssignment();
+  assertEqual(refs.referencedFigureIds(a), ['p1-divider'], 'the referenced ids are wrong');
+});
+
+// ---------- report ----------
+await Promise.all(pending);
+console.log(results.join('\n'));
+console.log(`\n${passed} passed, ${failed} failed\n`);
+try { rmSync(outDir, { recursive: true, force: true }); } catch { /* windows handles */ }
+process.exit(failed > 0 ? 1 : 0);

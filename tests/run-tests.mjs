@@ -1536,6 +1536,9 @@ ${r.problem_statement}`);
     title: 'HW 1',
     inputMode: 'handwritten',
     assignmentKind: 'reader',
+    // A figure file, so the completeness round trip covers the map as well as
+    // the blocks that refer to it.
+    figures: { 'p1-fig1': { format: 'svg', base64: 'PHN2Zy8+', filename: 'p1-fig1.svg' } },
     pageFormatId: 'ENG17HW1',
     aiFeedback: true,
     preamble: 'Show all working on paper.',

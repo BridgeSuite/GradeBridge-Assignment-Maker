@@ -124,7 +124,35 @@ const GAPS: Gap[] = [
     present: a => !!(a.submissionAddress || '').trim() },
   { label: 'the assignment kind (conventional or reader) — without it the assignment opens as conventional',
     present: a => a.assignmentKind === 'conventional' || a.assignmentKind === 'reader' },
+  // Only an assignment that refers to figures can lose them. Reported as
+  // present when there is nothing to carry, so an assignment whose figures are
+  // all inline is not warned about files it never had.
+  { label: 'the figure files — without them every ```figure block refers to a drawing nobody has',
+    present: a => figureIdsIn(a).length === 0
+      || figureIdsIn(a).every(id => !!(a.figures || {})[id]) },
 ];
+
+/**
+ * The figure ids an assignment refers to. Local rather than imported from
+ * `figureRefs.ts` for the same reason `subs` is local: this file must be able to
+ * describe a plain parsed object, including one from a file written by an older
+ * version, without depending on the shape being a valid `Assignment` yet.
+ */
+const figureIdsIn = (a: any): string[] => {
+  const ids: string[] = [];
+  for (const p of (Array.isArray(a?.problems) ? a.problems : [])) {
+    const text: string = typeof p?.description === 'string' ? p.description : '';
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (!/^[ \t]*```[ \t]*figure[ \t]*$/i.test(lines[i])) continue;
+      for (let j = i + 1; j < lines.length && !/^[ \t]*```[ \t]*$/.test(lines[j]); j++) {
+        const m = lines[j].match(/^[ \t]*id[ \t]*:[ \t]*(.*)$/i);
+        if (m && m[1].trim() && !ids.includes(m[1].trim())) ids.push(m[1].trim());
+      }
+    }
+  }
+  return ids;
+};
 
 const subs = (a: any): any[] =>
   Array.isArray(a?.problems) ? a.problems.flatMap((p: any) => p?.subsections || []) : [];

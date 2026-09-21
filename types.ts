@@ -49,6 +49,25 @@ export interface Problem {
 export type InputMode = 'electronic' | 'handwritten';
 
 /**
+ * One figure file, as the app stores it.
+ *
+ * Bytes are held base64-encoded because that is the one form that survives
+ * every route this app has: JSON storage, the authoring backup, and a `data:`
+ * URI in a rendered page. `filename` is kept only so the instructor can be told
+ * what they uploaded; nothing reads it to decide anything.
+ */
+export interface FigureFile {
+  format: 'svg' | 'png' | 'jpg';
+  /** The file's bytes, base64. For SVG this decodes to the document text. */
+  base64: string;
+  /** What the file was called when it arrived. Display only. */
+  filename: string;
+}
+
+/** Figure id to file. Ids are `[a-z0-9-]{1,40}` and name the file on disk. */
+export type FigureMap = Record<string, FigureFile>;
+
+/**
  * The two kinds of assignment. Two values, no third, and no blank once set.
  */
 export type AssignmentKind = 'conventional' | 'reader';
@@ -85,6 +104,22 @@ export interface Assignment {
    * downstream to validate.
    */
   assignmentKind: AssignmentKind;
+  /**
+   * The figure files this assignment's ```figure blocks refer to, by id.
+   *
+   * **Per assignment and copied, never shared.** A course-wide figure library
+   * was considered and rejected: a change made for one assignment would
+   * silently change another assignment's printed sheet, and no assignment would
+   * be self-contained.
+   *
+   * Absent on an assignment with no figure blocks, which is every assignment
+   * authored before 2026-09-21 and every one whose figures stay inline.
+   *
+   * **Never reaches a student.** `buildAssignmentSpec` resolves the blocks into
+   * inline figures and drops this map, so the student spec carries drawings and
+   * no references — exactly as it did before figure blocks existed.
+   */
+  figures?: FigureMap;
   pageFormatId?: string; // QR field 2, [A-Z0-9]{1,12}. Unset = derived from courseCode + title.
   /**
    * Whether students may request the gradeless, pointer-only AI feedback on any

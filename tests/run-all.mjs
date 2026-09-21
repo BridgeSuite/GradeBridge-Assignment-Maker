@@ -31,6 +31,7 @@ const SUITES = [
   'no-personal-names.mjs',
   'no-process-records.mjs',
   'deploy-gate-tests.mjs',
+  'figure-ref-tests.mjs',
 ];
 
 const results = [];

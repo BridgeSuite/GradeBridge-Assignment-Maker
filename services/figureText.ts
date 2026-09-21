@@ -25,6 +25,7 @@
  */
 
 import { Figure, figureLabel, splitFigures } from './figureBlocks';
+import { resolveFigureRefsForGrader } from './figureRefs';
 
 /**
  * The document's `<desc>`, flattened to one line.
@@ -66,6 +67,12 @@ export const figureToDescText = (figure: Figure): string => {
  * do not move.
  */
 export const stemForGrader = (stem: string): string =>
-  splitFigures(stem)
+  // Figure blocks first, and NOT by resolving them to drawings. A block already
+  // carries the words this function exists to produce, so it goes straight to
+  // its `[Figure — title: desc]` line. That is what makes a format swap
+  // invisible to the grader: an SVG's own <title>/<desc> and a block's
+  // title:/desc: produce the identical text, so replacing a drawing with a PNG
+  // — which has neither — changes nothing in the rubric.
+  splitFigures(resolveFigureRefsForGrader(stem))
     .map(seg => (seg.kind === 'text' ? seg.value : figureToDescText(seg.figure)))
     .join('');
