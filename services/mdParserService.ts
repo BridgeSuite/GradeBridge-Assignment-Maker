@@ -7,7 +7,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { courseKeyRemovedNotice } from './importNotices';
 import { figureRefProblems, parseFigureRefs, splitFigureRefs } from './figureRefs';
-import { Assignment, AssignmentKind, InputMode, Problem, Subsection, SubmissionType } from '../types';
+import { Assignment, AssignmentKind, FinalizeStamp, InputMode, Problem, Subsection, SubmissionType } from '../types';
 import { LEGACY_SPACE_LINES } from './templateLayout';
 import { FIGURE_FENCE_CLOSE_RE, FIGURE_FENCE_OPEN_RE, splitFigures } from './figureBlocks';
 import { RETIRED_TYPE_TAGS, keepPromptAsGraderNote, retiredTypeWarning } from './retiredTypes';
@@ -134,14 +134,16 @@ function hasCourseKeyBlock(lines: string[]): boolean {
 }
 
 function parseMetadata(lines: string[], warnings?: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode' | 'assignmentKind'>
-    & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string } {
+    & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string;
+        finalized?: FinalizeStamp; finalizeHistory?: FinalizeStamp[] } {
   // Every optional line here defaults to the value a file written before it
   // existed would have had, so older .md files round-trip byte-for-byte:
   // **Input:** absent → electronic, **Template ID:** absent → derived,
   // **AI Feedback:** absent → off, **Submit at:** absent → no submission section,
   // **Kind:** absent → conventional.
   const meta: Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode' | 'assignmentKind'>
-      & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string } =
+      & { pageFormatId?: string; aiFeedback: boolean; submissionAddress?: string;
+          finalized?: FinalizeStamp; finalizeHistory?: FinalizeStamp[] } =
     { courseCode: '', title: '', preamble: '', inputMode: 'electronic' as InputMode,
       aiFeedback: false, assignmentKind: 'conventional' as AssignmentKind };
   if (hasCourseKeyBlock(lines)) warnings?.push(courseKeyRemovedNotice());
@@ -156,6 +158,18 @@ function parseMetadata(lines: string[], warnings?: string[]): Pick<Assignment, '
     if (m) { meta.inputMode = m[1].trim().toLowerCase() === 'handwritten' ? 'handwritten' : 'electronic'; continue; }
     // Two values and no third: anything that is not `reader` is conventional,
     // which is also what an absent line means.
+    // `**Finalized:** 2026-09-21 layout 95438EDF content A1B2C3D4E5F60718`
+    m = l.match(/^\*\*(Finalized|Finalized-was):\*\*\s+(\S+)\s+layout\s+(\S+)\s+content\s+(\S+)\s*$/i);
+    if (m) {
+      const stamp = {
+        date: m[2],
+        layoutId: m[3] === '-' ? '' : m[3],
+        fingerprint: m[4],
+      };
+      if (m[1].toLowerCase() === 'finalized') meta.finalized = stamp;
+      else meta.finalizeHistory = [...(meta.finalizeHistory || []), stamp];
+      continue;
+    }
     m = l.match(/^\*\*Kind:\*\*\s+(.+)$/i);
     if (m) { meta.assignmentKind = m[1].trim().toLowerCase() === 'reader' ? 'reader' : 'conventional'; continue; }
     m = l.match(/^\*\*Template ID:\*\*\s+(.+)$/i);
@@ -546,6 +560,10 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
     title: meta.title,
     inputMode: meta.inputMode,
     assignmentKind: meta.assignmentKind,
+    // Only when the file carried one; an assignment that was never finalized
+    // must not come back looking as though it was.
+    ...(meta.finalized ? { finalized: meta.finalized } : {}),
+    ...(meta.finalizeHistory?.length ? { finalizeHistory: meta.finalizeHistory } : {}),
     // Zero is not a target. An .md with no points anywhere keeps the default.
     ...(authoredTotal > 0 ? { targetPoints: authoredTotal } : {}),
     ...(meta.pageFormatId ? { pageFormatId: meta.pageFormatId } : {}),

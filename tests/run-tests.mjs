@@ -1539,6 +1539,10 @@ ${r.problem_statement}`);
     // A figure file, so the completeness round trip covers the map as well as
     // the blocks that refer to it.
     figures: { 'p1-fig1': { format: 'svg', base64: 'PHN2Zy8+', filename: 'p1-fig1.svg' } },
+    // The lock: an assignment that has been issued once and reopened, so both
+    // the current stamp and a history entry are exercised.
+    finalized: { date: '2026-09-21', layoutId: '95438EDF', fingerprint: 'A1B2C3D4E5F60718' },
+    finalizeHistory: [{ date: '2026-09-20', layoutId: '17E25A03', fingerprint: '0011223344556677' }],
     pageFormatId: 'ENG17HW1',
     aiFeedback: true,
     preamble: 'Show all working on paper.',
@@ -1632,7 +1636,12 @@ ${r.problem_statement}`);
   // student spec, so the message is checked against what the whitelist actually
   // drops rather than against a guess about it.
   check('authoring backup: a student spec import names what it is about to lose', async () => {
-    const spec = await buildAssignmentSpec(everything);
+    // Built from an UNFINALIZED copy. `everything` carries a made-up stamp so
+    // the completeness round trip covers the lock, and that stamp does not
+    // match its own content — which the export correctly refuses. This check is
+    // about what an import route loses, not about the lock.
+    const { finalized: _stamp, ...unlocked } = everything;
+    const spec = await buildAssignmentSpec(unlocked);
     const joined = describeImportGaps(spec).join(' | ');
     assert(joined.length > 0, 'importing a student spec reported no loss at all');
     for (const expected of ['grading prompts', 'grader notes', 'answer-space', 'point target']) {

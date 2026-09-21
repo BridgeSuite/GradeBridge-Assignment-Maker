@@ -33,6 +33,7 @@ const SUITES = [
   'deploy-gate-tests.mjs',
   'figure-ref-tests.mjs',
   'figure-guard-tests.mjs',
+  'finalize-tests.mjs',
 ];
 
 const results = [];

@@ -68,6 +68,23 @@ export interface FigureFile {
 export type FigureMap = Record<string, FigureFile>;
 
 /**
+ * What finalizing records: the layout the printed sheet carries, a fingerprint
+ * of what students see, and the date.
+ *
+ * `layoutId` is empty for an electronic assignment, which has no printed
+ * layout. Such an assignment is still fingerprinted, so the lock works for it
+ * on content alone.
+ */
+export interface FinalizeStamp {
+  /** `YYYY-MM-DD`. */
+  date: string;
+  /** The `layout_id` computed fresh at the moment of finalizing. */
+  layoutId: string;
+  /** 16 hex characters over the student-facing content. See `services/finalize.ts`. */
+  fingerprint: string;
+}
+
+/**
  * The two kinds of assignment. Two values, no third, and no blank once set.
  */
 export type AssignmentKind = 'conventional' | 'reader';
@@ -120,6 +137,24 @@ export interface Assignment {
    * no references — exactly as it did before figure blocks existed.
    */
   figures?: FigureMap;
+  /**
+   * Present once the instructor has issued this assignment. An export that
+   * would change the student-facing content or the printed layout is then
+   * refused until the assignment is explicitly reopened.
+   *
+   * **Never reaches a student.** It is not in `STUDENT_SPEC_FIELDS` and a test
+   * asserts it stays out: it is a fact about the instructor's workflow, and the
+   * student's copy has no use for it.
+   */
+  finalized?: FinalizeStamp;
+  /**
+   * Every stamp this assignment has had, appended to on each reopen and never
+   * overwritten.
+   *
+   * The lock does not prevent an assignment being changed after issue — it
+   * makes the change visible. This is where it stays visible.
+   */
+  finalizeHistory?: FinalizeStamp[];
   pageFormatId?: string; // QR field 2, [A-Z0-9]{1,12}. Unset = derived from courseCode + title.
   /**
    * Whether students may request the gradeless, pointer-only AI feedback on any

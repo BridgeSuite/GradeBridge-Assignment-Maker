@@ -6,6 +6,7 @@ import { stemForGrader } from './figureText';
 import { generateTemplate } from './templateGenerator';
 import { assignmentKindProblem } from './inputModeService';
 import { resolveAssignmentFigures } from './figureRefs';
+import { finalizeLockProblem } from './finalize';
 import { partIdentifiers } from './templateLayout';
 import { buildAuthoringBackup } from './authoringBackup';
 import { apportionPoints } from './pointsService';
@@ -883,6 +884,25 @@ export const assignmentToMd = (assignment: Assignment): string => {
     lines.push(`**AI Feedback:** on`);
     lines.push('');
   }
+  // THE FINALIZE STAMP, and its history.
+  //
+  // Carried because the .md is a documented restore route: a stamp that
+  // vanished on `Export .md` -> `Import Markdown` would let an instructor turn
+  // the lock off by accident, on the route they were told to use for backups,
+  // which would make the lock worth nothing.
+  //
+  // Removing the line by hand turns the lock off ON PURPOSE, and that is
+  // allowed — this is a guard against accident, not a security control
+  // (ASSIGNMENT_MD_SPEC.md, finalized assignments).
+  if (normalized.finalized) {
+    const f = normalized.finalized;
+    lines.push(`**Finalized:** ${f.date} layout ${f.layoutId || '-'} content ${f.fingerprint}`);
+    lines.push('');
+  }
+  for (const past of normalized.finalizeHistory || []) {
+    lines.push(`**Finalized-was:** ${past.date} layout ${past.layoutId || '-'} content ${past.fingerprint}`);
+    lines.push('');
+  }
   // Where students hand the work in, printed on page 1 of the handwritten sheet.
   // Emitted only when set, so a file written before it existed round-trips
   // byte-for-byte — and carried at all because `Export .md` → `Import Markdown`
@@ -1199,6 +1219,18 @@ export const buildAssignmentSpec = async (
   // before it becomes files, so it is the last place the rule can hold.
   const kindProblem = assignmentKindProblem(assignment);
   if (kindProblem) throw new Error(`Export stopped: ${kindProblem}`);
+
+  // THE FINALIZE LOCK, enforced here and nowhere else.
+  //
+  // A student can only receive changed content through an export, and every
+  // spec-producing route converges on this function, so this one check point is
+  // the whole enforcement. The Editor shows a banner as well, but that is so an
+  // instructor learns the rule before spending an hour on an edit — not
+  // because the banner enforces anything.
+  const lockProblem = await finalizeLockProblem(assignment);
+  if (lockProblem) {
+    throw new Error(`Export stopped: this assignment is finalized.\n\n${lockProblem}`);
+  }
 
   // Resolve before anything is selected, so the student file carries drawings
   // and no references. The map is dropped with the same call: a student's

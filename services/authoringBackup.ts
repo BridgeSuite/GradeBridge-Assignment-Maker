@@ -127,6 +127,11 @@ const GAPS: Gap[] = [
   // Only an assignment that refers to figures can lose them. Reported as
   // present when there is nothing to carry, so an assignment whose figures are
   // all inline is not warned about files it never had.
+  // Only an assignment that has been finalized can lose the lock. An
+  // assignment that was never issued is reported present: it has nothing to
+  // lose, and warning about it would train instructors to ignore the warning.
+  { label: 'the finalize lock — without it an issued assignment opens unlocked and can be changed after students have printed it',
+    present: a => !a.finalized || (!!a.finalized.fingerprint && !!a.finalized.date) },
   { label: 'the figure files — without them every ```figure block refers to a drawing nobody has',
     present: a => figureIdsIn(a).length === 0
       || figureIdsIn(a).every(id => !!(a.figures || {})[id]) },
