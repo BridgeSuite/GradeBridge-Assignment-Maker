@@ -32,6 +32,7 @@ const SUITES = [
   'no-process-records.mjs',
   'deploy-gate-tests.mjs',
   'figure-ref-tests.mjs',
+  'figure-guard-tests.mjs',
 ];
 
 const results = [];
