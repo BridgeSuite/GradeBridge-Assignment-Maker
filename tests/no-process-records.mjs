@@ -76,6 +76,31 @@ const PROCESS_RECORD = [
   /_Test_Battery_.*\.md$/i,
 ];
 
+/**
+ * Process records identified by WHERE they are rather than what they are
+ * called, as regexes over the repo-relative POSIX path.
+ *
+ * `PROCESS_RECORD` above matches basenames, which is right for a naming
+ * convention and wrong for this: a session artifact that is not a `.md` has no
+ * agreed prefix to match on. On 2026-09-21 a `.patch` holding a discarded
+ * feature was written to `docs/session/` and committed, because every pattern
+ * above ends in `\.md$` and a `.patch` is not one. It was caught by review, not
+ * by this file, and the fix is not another prefix — the next one would be a
+ * `.txt`, a `.diff` or a `.json`.
+ *
+ * **`docs/session/` is for working notes and is not tracked**, per
+ * `docs/session/README.md` and the `.gitignore` block. The exception is that
+ * folder's own `README.md`, which explains the rule and is developer
+ * documentation rather than a record of a session.
+ */
+const PROCESS_RECORD_PATHS = [
+  /^docs\/session\/(?!README\.md$).+$/i,
+];
+
+const isProcessRecord = (path) =>
+  PROCESS_RECORD.some((re) => re.test(basename(path)))
+  || PROCESS_RECORD_PATHS.some((re) => re.test(path.replace(/\\/g, '/')));
+
 // `git ls-files`, not the working directory. An untracked note beside the code
 // is a working file and must not trip this; a committed one must always trip
 // it, whether it is ignored or not — `git add -f` beats `.gitignore` and this
@@ -83,8 +108,7 @@ const PROCESS_RECORD = [
 const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: REPO, maxBuffer: 64 << 20 })
   .toString('utf8').split('\0').filter(Boolean);
 
-const offenders = tracked.filter(
-  (path) => PROCESS_RECORD.some((re) => re.test(basename(path))));
+const offenders = tracked.filter(isProcessRecord);
 
 let failed = 0;
 const fail = (msg) => { console.error(`  FAIL  ${msg}`); failed++; };
@@ -112,7 +136,12 @@ if (PROCESS_RECORD.length === 0) {
   fail('the pattern list is empty — every filename would be compared against ' +
     'nothing and reported clean');
 }
+if (PROCESS_RECORD_PATHS.length === 0) {
+  fail('the path pattern list is empty — a session artifact with no process ' +
+    'prefix would be reported clean');
+}
 console.log(`  ${plural(PROCESS_RECORD.length, 'filename pattern', 'filename patterns')} ` +
+  `and ${plural(PROCESS_RECORD_PATHS.length, 'path pattern', 'path patterns')} ` +
   `over ${plural(tracked.length, 'tracked file', 'tracked files')}`);
 
 // ---- the patterns are exercised, on names built here and tracked nowhere ----
@@ -188,12 +217,52 @@ console.log(`  ${plural(PROCESS_RECORD.length, 'filename pattern', 'filename pat
     'PULL_REQUEST_TEMPLATE.md', 'LICENSE',
   ];
 
+  /**
+   * Paths that are process records because of where they sit, whatever they are
+   * called. The first is the real file this rule was added for.
+   */
+  const DIRTY_PATHS = [
+    'docs/session/SUPERSEDED_no_key_dialog_2026-09-06.patch',
+    'docs/session/COMPLETION_AM_PIPELINE_RECALIBRATION_2026-09-21.md',
+    'docs/session/scratch.txt',
+    'docs/session/reviewer-notes.diff',
+    'docs/session/nested/anything.json',
+  ];
+
+  /**
+   * Paths that must stay clean. `docs/session/README.md` is the exception the
+   * rule is written around — it explains the convention and is documentation.
+   * The rest guard against a path pattern anchored loosely enough to escape the
+   * folder: a `.patch` anywhere else in the tree is a legitimate file.
+   */
+  const CLEAN_PATHS = [
+    'docs/session/README.md',
+    'docs/architecture.md',
+    'patches/vendor-fix.patch',
+    'tests/fixtures/sample.patch',
+    'converter/convert.py',
+    'README.md',
+  ];
+
   let ran = 0;
   for (const name of DIRTY) {
     ran++;
     if (!matches(name)) {
       fail(`the pattern list no longer matches ${name}, which is a process ` +
         `record and must never be tracked`);
+    }
+  }
+  for (const path of DIRTY_PATHS) {
+    ran++;
+    if (!isProcessRecord(path)) {
+      fail(`${path} is no longer recognised as a process record — anything ` +
+        `under docs/session/ except its README must never be tracked`);
+    }
+  }
+  for (const path of CLEAN_PATHS) {
+    ran++;
+    if (isProcessRecord(path)) {
+      fail(`${path} is treated as a process record and must not be`);
     }
   }
   for (const name of CLEAN) {
@@ -212,10 +281,18 @@ console.log(`  ${plural(PROCESS_RECORD.length, 'filename pattern', 'filename pat
         `leaving the pattern unproven`);
     }
   }
+  for (const re of PROCESS_RECORD_PATHS) {
+    if (!DIRTY_PATHS.some((path) => re.test(path))) {
+      fail(`no fixture exercises ${re} — add a path to DIRTY_PATHS rather than ` +
+        `leaving the pattern unproven`);
+    }
+  }
 
   if (ran === 0) fail('the self-check exercised no filenames at all');
-  console.log(`  self-check — ${ran} filenames, ${DIRTY.length} that must match ` +
-    `and ${CLEAN.length} that must not; every pattern covered`);
+  console.log(`  self-check — ${ran} cases: ` +
+    `${DIRTY.length} names and ${DIRTY_PATHS.length} paths that must match, ` +
+    `${CLEAN.length} names and ${CLEAN_PATHS.length} paths that must not; ` +
+    `every pattern covered`);
 }
 
 if (offenders.length > 0) {
