@@ -717,6 +717,57 @@ check('every problem starts a new page; no page mixes two problems', () => {
       'the standing instructions leaked into an electronic assignment');
   });
 
+  // ---------- nothing fixed on page 1 names a place (restored 2026-09-22) ----------
+  // `5afa0a7` deleted this with the submission address it was written around.
+  // Most of that test was about the address — but four of its checks were
+  // about every OTHER fixed sentence on the page, and those sentences are still
+  // printed on every sheet. Deleting a guard along with the feature that
+  // prompted it is how a rule quietly stops being enforced.
+  //
+  // THE RULE: the tool is meant for use beyond the campus that commissioned it,
+  // so the standing text has to be true wherever it prints. A URL, a domain, a
+  // deployment name or an institution in a fixed sentence is a sentence that
+  // stops being true the moment the suite is renamed, rehosted or adopted
+  // elsewhere — and this suite has already been renamed and rehosted once, in
+  // August 2026.
+  //
+  // It now covers MORE than the deleted version did: every fixed string the
+  // page draws, not just the ones the submission section happened to sit beside.
+  check('page 1: no fixed sentence carries a URL, a domain, a deployment or an institution', () => {
+    const fixed = [
+      ...lay.STANDING_INSTRUCTIONS.flatMap(s => [s.heading, ...s.items]),
+      lay.STANDING_CLOSING,
+      lay.PREAMBLE_HEADING,
+    ];
+    // A guard that scans an empty list passes vacuously, which is the failure
+    // this repository has been caught by three times in one week.
+    assert(fixed.length >= 10, `only ${fixed.length} fixed strings were collected`);
+    for (const sentence of fixed) {
+      assert(typeof sentence === 'string' && sentence.length > 0,
+        `a fixed string is empty: ${JSON.stringify(sentence)}`);
+      assert(!/https?:\/\//i.test(sentence), `standing text carries a URL: "${sentence}"`);
+      assert(!/\.(com|edu|org|net|io|gov)\b/i.test(sentence),
+        `standing text carries a domain: "${sentence}"`);
+      assert(!/gradebridge\.|bridgesuite|github\.io/i.test(sentence),
+        `standing text names a deployment: "${sentence}"`);
+      assert(!/universit|college|campus|\bdavis\b|\buc\b/i.test(sentence),
+        `standing text names an institution: "${sentence}"`);
+    }
+  });
+
+  check('page 1: the strings the generator actually draws are the ones checked', async () => {
+    // The list above is read from the module. This asserts the module's list is
+    // what reaches the page, so the guard cannot be satisfied by a constant
+    // nobody prints.
+    const g = await gen.generateTemplate(instr({}));
+    const drawn = JSON.stringify(g.layout.instructionsPage);
+    for (const s of lay.STANDING_INSTRUCTIONS) {
+      assert(drawn.includes(s.heading), `a standing heading is not on the page: "${s.heading}"`);
+    }
+    assert(drawn.includes(lay.STANDING_CLOSING), 'the standing closing is not on the page');
+    assert(drawn.includes(lay.PREAMBLE_HEADING), 'the preamble heading is not on the page');
+  });
+
   // ---------- the submission section is GONE (2026-09-22) ----------
   // What stood here asserted that page 1 printed a "When you have finished
   // writing" section whenever the author set a submission address, and that it
