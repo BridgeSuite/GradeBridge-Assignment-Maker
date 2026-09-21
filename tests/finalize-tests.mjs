@@ -291,6 +291,109 @@ await check('deleting the Finalized line turns the lock off, deliberately', () =
     + 'the line by hand is meant to work');
 });
 
+// ---------------------------------------------------------------------------
+// THE PRINTED SHEET IS ALSO A STUDENT ARTEFACT (found 2026-09-22, end-to-end run)
+// ---------------------------------------------------------------------------
+// The lock was written with a one-line justification: every spec-producing
+// route converges on `buildAssignmentSpec`, so one check point is the whole
+// enforcement. True, and not enough -- a student receives TWO things, and only
+// one of them is a spec. `generateTemplate` makes the other, the paper, and it
+// never comes through the spec builder.
+//
+// Measured on the live site before the fix: finalize (layout 95438EDF), edit
+// one sub-part description, press QR Template. A sheet came out, with
+// `layout_id` 18FE7635 in the QR on every page, no refusal, and the banner
+// still saying exports were locked. That is a reprint nobody was told about,
+// against a package students already hold.
+//
+// These checks are written over the BUTTON, not over the helper, because the
+// defect was that the button did not reach the helper.
+{
+  const tpl = await load(join(REPO, 'services', 'templateGenerator.ts'), 'tpl.mjs',
+    [assetImports, stubHeavy]);
+
+  const finalizedThenEdited = async () => {
+    const a = await fin.finalizeAssignment(base());
+    a.problems[0].subsections[0].description = 'Do something else entirely.';
+    return a;
+  };
+
+  await check('the QR Template button refuses a finalized assignment that changed', async () => {
+    let msg = null;
+    try { await exportSvc.exportService.downloadQrTemplate(await finalizedThenEdited()); }
+    catch (err) { msg = err.message; }
+    assert(msg, 'QR Template produced a sheet for a finalized assignment that had been edited');
+    assert(/finalized/i.test(msg), `refused, but not by the lock: ${msg}`);
+    assert(/What students see has changed/.test(msg),
+      `the refusal does not say what changed: ${msg}`);
+  });
+
+  await check('generateTemplate itself refuses, so a new caller cannot miss it', async () => {
+    let msg = null;
+    try { await tpl.generateTemplate(await finalizedThenEdited()); }
+    catch (err) { msg = err.message; }
+    assert(msg && /finalized/i.test(msg),
+      `the producer does not hold the lock, only the button would: ${msg}`);
+  });
+
+  await check('the refusal names the moved layout, which is the reprint', async () => {
+    const a = await fin.finalizeAssignment(base());
+    // A second sub-part is a second answer region, so the layout must move --
+    // the half that costs students a reprint. (More writing lines on the ONLY
+    // part does not: the last region on a page already grows to the bottom
+    // margin, so its rectangle is unchanged. That is correct behaviour and it
+    // is why this mutation adds a region instead.)
+    a.problems[0].subsections[0].points = 50;
+    a.problems[0].subsections.push({
+      id: 's2', name: 'Solve', description: 'Do it.', points: 50,
+      submissionType: 'Handwritten', handwrittenGradingMode: 'ai', answerLines: 6,
+    });
+    let msg = null;
+    try { await tpl.generateTemplate(a); } catch (err) { msg = err.message; }
+    assert(msg && /printed layout has changed/.test(msg),
+      `a moved layout was not named in the refusal: ${msg}`);
+  });
+
+  await check('an UNCHANGED finalized assignment is not refused by the lock', async () => {
+    // jspdf is stubbed in this suite, so the template cannot actually be drawn.
+    // What is asserted is that whatever stops it, it is not the lock.
+    let msg = '';
+    try { await tpl.generateTemplate(await fin.finalizeAssignment(base())); }
+    catch (err) { msg = err.message; }
+    assert(!/this assignment is finalized/.test(msg),
+      'the lock refused an assignment that had not changed since it was finalized');
+  });
+
+  await check('an assignment that was never finalized is not refused', async () => {
+    let msg = '';
+    try { await tpl.generateTemplate(base()); } catch (err) { msg = err.message; }
+    assert(!/finalized/i.test(msg), `the lock fired on an unfinalized assignment: ${msg}`);
+  });
+
+  // THE LIST, and why it is a list rather than an argument.
+  //
+  // "Everything converges on X" is a claim about routes nobody is counting,
+  // and it was wrong within a fortnight of being written. What is counted here
+  // is the student-facing ARTEFACTS: the spec a student loads, and the sheet a
+  // student prints. Each producer holds the lock itself. A third artefact --
+  // anything else that reaches a student's hands or browser -- adds a row here
+  // and a call there, and this check is what says so out loud.
+  await check('every producer of a student-facing artefact holds the lock', () => {
+    const PRODUCERS = [
+      ['services/exportService.ts', 'buildAssignmentSpec', 'the file a student loads'],
+      ['services/templateGenerator.ts', 'generateTemplate', 'the sheet a student prints'],
+    ];
+    for (const [file, fn, what] of PRODUCERS) {
+      const src = readFileSync(join(REPO, file), 'utf8');
+      const start = src.indexOf(`export const ${fn} = async`);
+      assert(start > 0, `${fn} is not where ${file} says it is`);
+      const body = src.slice(start, start + 4000);
+      assert(/await finalizeLockProblem\(/.test(body),
+        `${fn} produces ${what} and does not check the finalize lock`);
+    }
+  });
+}
+
 // ---------- report ----------
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);

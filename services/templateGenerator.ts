@@ -49,6 +49,7 @@ import {
 import { splitFigures, trimAroundFigures } from './figureBlocks';
 import { resolveAssignmentFigures } from './figureRefs';
 import { SelfTestReport, runInkChecks, runSelfTest } from './templateSelfTest';
+import { finalizeLockProblem } from './finalize';
 
 const PX_PER_MM = 96 / 25.4;
 const RASTER_SCALE = 3;
@@ -540,6 +541,34 @@ const drawAnswerBox = (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
  * `error.report`.
  */
 export const generateTemplate = async (assignment: Assignment): Promise<GeneratedTemplate> => {
+  // THE FINALIZE LOCK, second of the two places that hold it.
+  //
+  // `buildAssignmentSpec` used to say it was "enforced here and nowhere else",
+  // reasoning that every student-facing route converges on the spec. It does
+  // not. **The printed sheet is the other student-facing artefact**, and this
+  // function is what produces it -- so the QR Template button walked straight
+  // past the lock. Found on 2026-09-22 by running the workflow Anthony is
+  // about to run: finalize, edit one question, press QR Template, and the app
+  // cheerfully emitted a sheet whose layout_id had moved from 95438EDF to
+  // 18FE7635, while the banner overhead said exports were locked.
+  //
+  // That is the worst shape a guard can fail in. It did not refuse an action
+  // the instructor wanted; it let them print paper that silently disagrees
+  // with the package their students already hold, and the Submission app
+  // refuses to crop a sheet whose code does not match the map.
+  //
+  // The check is here rather than in `downloadQrTemplate` because the sheet is
+  // produced by this function wherever it is asked for, and a guard on one
+  // button is a guard the next button forgets. On the export-ZIP path this now
+  // refuses one step earlier than before -- same verdict, same message, minus
+  // the work of building a template nothing may use.
+  const lockProblem = await finalizeLockProblem(assignment);
+  if (lockProblem) {
+    throw new Error(`Export stopped: this assignment is finalized.
+
+${lockProblem}`);
+  }
+
   // Figure blocks are resolved before anything measures or draws, so the layout
   // is computed from the drawing itself and not from a five-line reference that
   // would reserve the wrong amount of space. This is also what keeps extraction

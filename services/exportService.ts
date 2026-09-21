@@ -1235,13 +1235,26 @@ export const buildAssignmentSpec = async (
   const kindProblem = assignmentKindProblem(assignment);
   if (kindProblem) throw new Error(`Export stopped: ${kindProblem}`);
 
-  // THE FINALIZE LOCK, enforced here and nowhere else.
+  // THE FINALIZE LOCK, one of the TWO places that hold it.
   //
-  // A student can only receive changed content through an export, and every
-  // spec-producing route converges on this function, so this one check point is
-  // the whole enforcement. The Editor shows a banner as well, but that is so an
-  // instructor learns the rule before spending an hour on an edit — not
-  // because the banner enforces anything.
+  // This comment used to read "enforced here and nowhere else", on the
+  // reasoning that every spec-producing route converges on this function. The
+  // reasoning was sound and the conclusion was wrong, because **a student
+  // receives two artefacts and only one of them is a spec**: the other is the
+  // printed sheet, which `services/templateGenerator.ts` produces without ever
+  // coming through here. The QR Template button therefore bypassed the lock
+  // entirely until 2026-09-22, when running the workflow end to end caught it.
+  //
+  // The lesson is not "add a second check". It is that an invariant of the
+  // form *everything converges on X* is a claim about routes nobody is
+  // counting, and it decays the moment a route is added. What counts now is
+  // the STUDENT-FACING ARTEFACT, of which there are exactly two, and each
+  // producer holds the lock itself. `tests/finalize-tests.mjs` enumerates them
+  // and fails if a third appears unguarded.
+  //
+  // The Editor shows a banner as well, but that is so an instructor learns the
+  // rule before spending an hour on an edit — not because the banner enforces
+  // anything.
   const lockProblem = await finalizeLockProblem(assignment);
   if (lockProblem) {
     throw new Error(`Export stopped: this assignment is finalized.\n\n${lockProblem}`);
