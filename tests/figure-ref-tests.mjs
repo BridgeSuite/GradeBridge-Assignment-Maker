@@ -70,13 +70,26 @@ const stubHeavy = {
     }));
   },
 };
-const load = async (entry, name, plugins = [assetImports]) => {
+/**
+ * `source` builds a MUTANT: the altered file is written beside the original so
+ * its relative imports still resolve, and removed in the `finally`.
+ */
+const load = async (entry, name, plugins = [assetImports], source) => {
   const outfile = join(outDir, name);
-  await build({
-    entryPoints: [entry], outfile, format: 'esm', target: 'es2022', bundle: true,
-    absWorkingDir: dirname(entry), logLevel: 'silent', plugins,
-  });
-  return import(pathToFileURL(outfile).href);
+  let entryPoint = entry;
+  if (source !== undefined) {
+    entryPoint = join(dirname(entry), `__mutant-${name.replace(/[^a-z0-9]+/gi, '-')}.ts`);
+    writeFileSync(entryPoint, source, 'utf8');
+  }
+  try {
+    await build({
+      entryPoints: [entryPoint], outfile, format: 'esm', target: 'es2022', bundle: true,
+      absWorkingDir: dirname(entry), logLevel: 'silent', plugins,
+    });
+    return await import(pathToFileURL(outfile).href + `?v=${name}`);
+  } finally {
+    if (source !== undefined) { try { rmSync(entryPoint, { force: true }); } catch { /* ignore */ } }
+  }
 };
 
 const refs = await load(join(REPO, 'services', 'figureRefs.ts'), 'figureRefs.mjs');
@@ -87,6 +100,7 @@ const exportSvc = await load(join(REPO, 'services', 'exportService.ts'), 'export
   [assetImports, stubHeavy]);
 const backupSvc = await load(join(REPO, 'services', 'authoringBackup.ts'), 'backup.mjs');
 const figImport = await load(join(REPO, 'services', 'figureImport.ts'), 'figImport.mjs');
+const noticesSvc = await load(join(REPO, 'services', 'importNotices.ts'), 'notices.mjs');
 
 console.log('\nFigure blocks — reference, resolve, and leave the mirror alone\n');
 
@@ -583,6 +597,122 @@ check('referencedFigureIds finds every id an assignment refers to', () => {
       rmSync(work, { recursive: true, force: true });
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// A PERSON DECIDES EVERY GRADE (Supplement 1, Item 5)
+// ---------------------------------------------------------------------------
+// An image part used to offer "AI Inspection", which set
+// `imageGradingMode: 'auto'` and exported as
+// `grading_type: "ai_image_completion"` — documented as "auto-award if
+// images_submitted > 0". Full marks for any upload at all, with nobody looking.
+//
+// Removed 2026-09-22. **No grading type may award marks on its own.**
+{
+  const withImage = (mode) => {
+    const a = makeAssignment();
+    a.problems[0].subsections[0] = {
+      id: 's1', name: 'Bench photograph', description: 'Photograph your circuit.',
+      points: 100, submissionType: 'Image', maxImages: 2,
+      ...(mode ? { imageGradingMode: mode } : {}),
+    };
+    return a;
+  };
+
+  const gradingTypes = (a) =>
+    Object.values(exportSvc.generateGradingRubric(a).rubrics).map(r => r.grading_type);
+
+  check('ITEM 5: an image part exports as human_image, whatever it was set to', () => {
+    assertEqual(gradingTypes(withImage('auto')), ['human_image'],
+      'an image part set to mark itself still exports as an automatic grade');
+    assertEqual(gradingTypes(withImage('human')), ['human_image'], 'a reviewed image part changed');
+    assertEqual(gradingTypes(withImage(null)), ['human_image'], 'an image part with no mode changed');
+  });
+
+  check('ITEM 5: no exported rubric can carry ai_image_completion at all', () => {
+    for (const mode of ['auto', 'human', null]) {
+      const text = JSON.stringify(exportSvc.generateGradingRubric(withImage(mode)));
+      assert(!/ai_image_completion/.test(text),
+        `the rubric still emits ai_image_completion for mode ${JSON.stringify(mode)}`);
+    }
+  });
+
+  /**
+   * Comments stripped before scanning, deliberately.
+   *
+   * These two checks are about whether a CODE PATH exists, and a raw substring
+   * scan answers a different question: it also matches the comment that records
+   * why the path was removed. This repository has been caught by that before —
+   * the export-contract guard scans JSON keys rather than the words
+   * "temperature" and "model", because engineering prose is full of both and a
+   * guard that fires on prose gets deleted the first time someone sets a
+   * heat-transfer problem.
+   *
+   * So the reasoning stays in the comments, where it belongs, and the checks
+   * read the code.
+   */
+  const codeOnly = (file) => readFileSync(join(REPO, file), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+
+  check('ITEM 5: the source no longer contains the branch that emitted it', () => {
+    assert(!/ai_image_completion/.test(codeOnly('services/exportService.ts')),
+      'exportService still has a code path that emits ai_image_completion');
+  });
+
+  check('ITEM 5: a file carrying auto is downgraded AND reported', () => {
+    const imported = withImage('auto');
+    const notices = noticesSvc.downgradeAutoImageGrading(imported);
+    assertEqual(imported.problems[0].subsections[0].imageGradingMode, 'human',
+      'the part was not downgraded to human review');
+    assertEqual(notices.length, 1, 'the downgrade was silent, or reported more than once');
+    assert(/without anyone looking/.test(notices[0]),
+      `the notice does not say what it used to do: ${notices[0]}`);
+    assert(/reviewed by a person/.test(notices[0]),
+      `the notice does not say what happens now: ${notices[0]}`);
+  });
+
+  check('ITEM 5: many auto parts produce ONE sentence, not one each', () => {
+    // An instructor with eleven image questions needs one sentence.
+    const a = makeAssignment();
+    a.problems[0].subsections = [1, 2, 3].map(n => ({
+      id: `s${n}`, name: `Photo ${n}`, description: 'x', points: 33,
+      submissionType: 'Image', imageGradingMode: 'auto',
+    }));
+    const notices = noticesSvc.downgradeAutoImageGrading(a);
+    assertEqual(notices.length, 1, 'one notice per part rather than one per import');
+    assert(/3 image questions were/.test(notices[0]), `the count is wrong: ${notices[0]}`);
+  });
+
+  check('ITEM 5: a file with no auto part is not reported about', () => {
+    assertEqual(noticesSvc.downgradeAutoImageGrading(withImage('human')), [],
+      'a reviewed image part was reported as if it had been downgraded');
+    assertEqual(noticesSvc.downgradeAutoImageGrading(makeAssignment()), [],
+      'an assignment with no image part was reported about');
+  });
+
+  check('ITEM 5: the Editor offers no way to choose automatic marking', () => {
+    const src = codeOnly('pages/Editor.tsx');
+    assert(!/AI Inspection/.test(src), 'the AI Inspection control is still in the Editor');
+    assert(!/imageGradingMode: 'auto'/.test(src),
+      'the Editor can still set an image part to mark itself');
+  });
+
+  // MUTATION: put the branch back and confirm the first test fails.
+  check('ITEM 5 MUTATION: restoring the auto branch brings ai_image_completion back', async () => {
+    const src = readFileSync(join(REPO, 'services', 'exportService.ts'), 'utf8');
+    const from = "          : isImage ? 'human_image'";
+    assert(src.includes(from), 'the mutation anchor is gone from exportService.ts');
+    const to = "          : isImage ? ((sub as { imageGradingMode?: string }).imageGradingMode === 'auto' "
+      + "? 'ai_image_completion' : 'human_image')";
+    const broken = await load(join(REPO, 'services', 'exportService.ts'), 'mutant-autoimage.mjs',
+      [assetImports, stubHeavy], src.replace(from, to));
+    assertEqual(
+      Object.values(broken.generateGradingRubric(withImage('auto')).rubrics).map(r => r.grading_type),
+      ['ai_image_completion'],
+      'the mutant did not reproduce the defect, so this suite does not exercise the removal');
+  });
 }
 
 // ---------- report ----------

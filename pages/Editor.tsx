@@ -17,7 +17,7 @@ import {
 import { DEFAULT_ANSWER_LINES, answerLinesFor } from '../services/templateLayout';
 import { derivePageFormatId } from '../services/qrPayload';
 import { describeImportGaps, isAuthoringBackup, readAuthoringBackup } from '../services/authoringBackup';
-import { assignmentKindDefaultedNotice } from '../services/importNotices';
+import { assignmentKindDefaultedNotice, downgradeAutoImageGrading } from '../services/importNotices';
 import { describeExtraction, extractFigures } from '../services/figureExtract';
 import { parseFigureRefs, referencedFigureIds } from '../services/figureRefs';
 import { figureFileProblems } from '../services/figureGuards';
@@ -196,8 +196,14 @@ const Editor: React.FC = () => {
             }))
           }))
         };
+        // A stored project may still have an image part set to mark itself.
+        // Downgraded and reported, never switched in silence: somebody now has
+        // to look at those uploads who previously did not.
+        const autoNotices = downgradeAutoImageGrading(sanitized as unknown as Record<string, unknown>);
+
         setAssignment(sanitized);
         if (kindWasAbsent) alert(assignmentKindDefaultedNotice());
+        for (const n of autoNotices) alert(n);
       } else {
         navigate('/');
       }
@@ -543,6 +549,7 @@ const Editor: React.FC = () => {
         }
 
         setAssignment(newAssignment);
+        for (const n of downgradeAutoImageGrading(newAssignment as unknown as Record<string, unknown>)) alert(n);
         setAiFeedbackAnswered(true); // the file carries a value; show it as a plain toggle
         setKindAnswered(true);
 
@@ -1104,7 +1111,7 @@ const Editor: React.FC = () => {
                          onClick={() => updateSubsection(pIndex, sIndex,
                            type === SubmissionType.HANDWRITTEN
                              ? { submissionType: SubmissionType.HANDWRITTEN, handwrittenGradingMode: sub.handwrittenGradingMode ?? 'ai' }
-                             : { submissionType: type, imageGradingMode: 'human' }
+                             : { submissionType: type, imageGradingMode: 'human' as const }
                          )}
                          className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
                            // Text is the fallback pill: active only when no other medium claims the type
@@ -1189,23 +1196,14 @@ const Editor: React.FC = () => {
                              title="Number of image pages allowed"
                            />
                          </div>
-                         {([
-                           { label: 'Human Inspection', mode: 'human' as const },
-                           { label: 'AI Inspection',    mode: 'auto'  as const },
-                         ]).map(({ label, mode }) => (
-                           <button
-                             key={mode}
-                             type="button"
-                             onClick={() => updateSubsection(pIndex, sIndex, { imageGradingMode: mode })}
-                             className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                               (sub.imageGradingMode ?? 'human') === mode
-                                 ? 'bg-academic-700 text-white border-academic-700'
-                                 : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
-                             }`}
-                           >
-                             {label}
-                           </button>
-                         ))}
+                        {/* No mode choice for an image part any more.
+                            "AI Inspection" set imageGradingMode: 'auto', which
+                            awarded full marks for any upload with nobody
+                            looking. A person reviews every image, so there is
+                            one behaviour and nothing to pick. */}
+                        <span className="text-xs text-academic-500">
+                          Reviewed by a person
+                        </span>
                        </>
                      ) : sub.submissionType === SubmissionType.TEXT_AND_IMAGE ? (
                        /* Text + Image branch — human grading only */

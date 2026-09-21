@@ -54,6 +54,25 @@ export const submissionAddressRemovedNotice = (): string =>
   + 'they open the assignment in the Submission app. Nothing is required of you.';
 
 /**
+ * Shown when an imported file has an image part set to automatic marking.
+ *
+ * Removed 2026-09-22. `imageGradingMode: 'auto'` exported as
+ * `grading_type: "ai_image_completion"` — full marks for any upload at all,
+ * with nobody looking at it. **A person decides every grade**, and no grading
+ * type may award marks on its own.
+ *
+ * Reported rather than silently switched, because the instructor who chose it
+ * chose something specific, and the part now behaves differently: somebody has
+ * to look at those uploads who previously did not.
+ */
+export const autoImageGradingRemovedNotice = (count: number): string =>
+  `${count} image question${count === 1 ? ' was' : 's were'} set to be marked `
+  + 'automatically, which gave full marks for any upload without anyone looking. '
+  + `That option has been removed, so ${count === 1 ? 'it is' : 'they are'} now `
+  + 'reviewed by a person like every other image question. Nothing else about '
+  + 'the assignment has changed.';
+
+/**
  * Shown when a loaded assignment predates `assignmentKind` and is taken to be
  * conventional.
  *
@@ -143,5 +162,26 @@ export const stripRetiredFields = (imported: Record<string, unknown>): string[] 
       notices.push(notice());
     }
   }
+  notices.push(...downgradeAutoImageGrading(imported));
   return notices;
+};
+
+/**
+ * Turn every image part set to automatic marking into a reviewed one.
+ *
+ * A sub-part field rather than an assignment one, so it is walked here instead
+ * of sitting in `RETIRED_ASSIGNMENT_FIELDS`. Counted and reported once rather
+ * than once per part: an instructor with eleven image questions needs one
+ * sentence, not eleven.
+ */
+export const downgradeAutoImageGrading = (imported: Record<string, unknown>): string[] => {
+  const problems = Array.isArray(imported.problems) ? imported.problems : [];
+  let count = 0;
+  for (const p of problems as Array<Record<string, unknown>>) {
+    const subs = Array.isArray(p?.subsections) ? p.subsections : [];
+    for (const s of subs as Array<Record<string, unknown>>) {
+      if (s?.imageGradingMode === 'auto') { s.imageGradingMode = 'human'; count += 1; }
+    }
+  }
+  return count ? [autoImageGradingRemovedNotice(count)] : [];
 };

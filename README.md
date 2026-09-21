@@ -80,12 +80,11 @@ between modes converts its parts.
 
 ### Image questions *(electronic)*
 
-`Type: [Text] [Image] [Text + Image]  pages: __  |  Grading: [Human Inspection] [AI Inspection]`
+`Type: [Text] [Image] [Text + Image]  pages: __`
 
 | Grading selection | What it means | Autograded? |
 |---|---|---|
-| **Human Inspection** *(default)* | TA reviews the uploaded image | No |
-| **AI Inspection** | Autograder checks `images_submitted > 0`; awards full marks automatically | Yes |
+| **Image** | A person reviews the uploaded image. There is no automatic option. | No |
 
 Set the number of image pages allowed with the **pages** field (e.g. 6 for a quiz transcript).
 
@@ -214,7 +213,7 @@ The parser auto-promotes a flat problem into a single `(a)` subsection on import
 | Tag | Creates | Notes |
 |---|---|---|
 | `[text]` | Text answer box | Human-graded by default |
-| `[image]` | Single image upload | Human Inspection by default |
+| `[image]` | Single image upload | Reviewed by a person |
 | `[image:N]` | Image upload, N pages | e.g. `[image:6]` for a quiz transcript |
 | `[text+image]` | Text answer + single image upload | Human-graded; TA reviews both |
 | `[text+image:N]` | Text answer + N image pages | e.g. `[text+image:2]` |
@@ -390,14 +389,21 @@ test fails if any exported artifact grows one. See `ASSIGNMENT_MD_SPEC.md` §12.
 
 `grading_type` values:
 
-| Value | Meaning |
-|---|---|
-| `"ai"` | AI-graded text response (scored) |
-| `"human"` | TA reviews text response (also used for Text + Image) |
-| `"human_image"` | TA reviews uploaded image |
-| `"ai_image_completion"` | Auto-award if `images_submitted > 0` |
-| `"ai_handwritten"` | Handwritten part, OCR then AI-graded from the page crop |
-| `"human_handwritten"` | Handwritten part, TA grades from the page crop |
+**A person decides every grade.** Each value below says what the grading side
+*produces*; none of them awards a mark on its own.
+
+| Value | What the grading side produces | Who decides the grade |
+|---|---|---|
+| `"ai"` | A suggested score and feedback for a written answer | A person |
+| `"human"` | Nothing automatic; the answer is passed through (also used for Text + Image) | A person |
+| `"human_image"` | Nothing automatic; the upload is passed through | A person |
+| `"ai_handwritten"` | A transcript of the page crop, and a suggested score | A person |
+| `"human_handwritten"` | A transcript of the page crop | A person |
+
+`"ai_image_completion"` was removed on 2026-09-22. It awarded full marks for any
+upload with nobody looking at it, which is the one thing no grading type may do.
+An older file that sets an image part to it is reported on import and the part is
+reviewed by a person instead.
 
 `answer_modality` is **optional**: `"text"` (a written answer), `"figure"` (a drawing — a `handwritten`
 part authored `> template: sketch`), or **absent** where the app does not know — an `[image]` or

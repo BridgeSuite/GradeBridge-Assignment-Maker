@@ -31,7 +31,22 @@ export interface Subsection {
   answerLines?: AnswerLines; // Handwritten only: writing lines reserved on the template. Unset = DEFAULT_ANSWER_LINES.
   isDrawing?: boolean;       // Handwritten only: sketch part. Sets is_drawing in the layout map.
   maxImages?: number; // Specific for Image submission types
-  imageGradingMode?: 'human' | 'auto'; // Image only: 'human' = TA reviews; 'auto' = autograder checks images_submitted > 0
+  /**
+   * Image parts only. **The only value is `'human'`: a person reviews the
+   * upload.**
+   *
+   * `'auto'` was removed on 2026-09-22. It exported as
+   * `grading_type: "ai_image_completion"`, documented as "auto-award if
+   * `images_submitted > 0`" — full marks for any upload at all, with nobody
+   * looking at it. **A person decides every grade** (Andre, 2026-09-22), and no
+   * grading type may award marks on its own.
+   *
+   * The field is kept rather than deleted because it still carries a real
+   * choice for the day a second review mode exists, and because removing it
+   * outright would make an older file's value vanish with nothing said. A file
+   * carrying `'auto'` is reported on import and treated as human review.
+   */
+  imageGradingMode?: 'human';
   handwrittenGradingMode?: 'ai' | 'human'; // Handwritten only: 'ai' = OCR+grade; 'human' = TA grades from crops
   config?: string; // For extra data like prompts or IDs
   aiGradingPrompt?: string;

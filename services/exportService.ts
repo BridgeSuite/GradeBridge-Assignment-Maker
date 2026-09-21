@@ -804,7 +804,13 @@ export const generateGradingRubric = (assignment: Assignment): object => {
         grading_type: isHandwritten
             ? (sub.handwrittenGradingMode === 'human' ? 'human_handwritten' : 'ai_handwritten')
           : isAi ? 'ai'
-          : isImage ? (sub.imageGradingMode === 'auto' ? 'ai_image_completion' : 'human_image')
+          // ONE VALUE FOR AN IMAGE PART, AND A PERSON IS IN IT.
+          //
+          // This read `sub.imageGradingMode === 'auto' ? 'ai_image_completion'
+          // : 'human_image'`, and `ai_image_completion` meant the grading side
+          // awarded full marks for any upload without a person looking. Removed
+          // 2026-09-22: no grading type may award marks on its own.
+          : isImage ? 'human_image'
           : 'human',
         grading_prompt: (isAi || isAiHandwritten) ? (sub.aiGradingPrompt || '') : '',
         ...(isAi && minWords !== undefined && { min_words: minWords }),
