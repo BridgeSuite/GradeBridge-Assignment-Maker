@@ -10,9 +10,28 @@ Assignments come in two **input modes**. In **electronic** mode the student type
 
 ---
 
+## If you are an instructor, the guide is in the app
+
+Press **Help** in the app's header. The whole instructor guide is in there — how
+to start, the two things to choose first, who decides the grades, figures,
+Finalize, what each export is for, and how to write mathematics — and it works
+with the network off. Small **?** links beside the figure card, the assignment
+kind and Finalize open it at the right section.
+
+Its source is [`docs/INSTRUCTOR_GUIDE.md`](docs/INSTRUCTOR_GUIDE.md), and that
+file is the only copy: the app bundles it at build time, and **this README does
+not repeat it**. One guide cannot drift out of step with itself; two can, and
+the one on GitHub is the one nobody updates. *An instructor should never need
+GitHub to learn how to use the tool* (Andre, 2026-09-22).
+
+**Everything below is the developer file**: the export contract, the `.md`
+format, the grading rubric JSON, privacy, and local development.
+
+---
+
 ## The Apps
 
-GradeBridge apps share an encryption contract and a Gradescope-Docker autograder pattern. This app handles lab reports, mini-projects and homework — typed, image-based and AI-graded responses in electronic mode, and printed-and-photographed work in handwritten mode.
+GradeBridge apps share an encryption contract and a Gradescope-Docker autograder pattern. This app handles lab reports, mini-projects and homework — typed and image-based responses in electronic mode, and printed-and-photographed work in handwritten mode.
 
 | App | Who uses it | What it does |
 |---|---|---|
@@ -21,18 +40,18 @@ GradeBridge apps share an encryption contract and a Gradescope-Docker autograder
 
 ### What the export ZIP contains
 
-**The ZIP is for you. It MUST NOT be given to students** — four files in
-`instructor/` contain the answer key. **Attach `{stem}_FOR_STUDENTS.zip` to your
-Canvas assignment, and nothing else.** That one file is everything a student
-needs. The archive is laid out so that is easy to do correctly, and it carries a
-generated notice at the root naming every file.
+The export contract, for anyone writing a consumer of it. **Four files in
+`instructor/` contain the answer key, and `{stem}_FOR_STUDENTS.zip` is the only
+entry that may reach a student.** The archive is laid out so that is easy to get
+right, and it carries a generated notice at the root naming every file. What an
+instructor does with it is in the guide.
 
 `{stem}` below is `{CourseCode}_{Title}`, with spaces replaced by underscores.
 
 | Entry | Mode | What it is |
 |---|---|---|
 | `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` | both | Generated at export time from the actual entry list; names every file and who it is for |
-| `{stem}_FOR_STUDENTS.zip` | both | **ATTACH THIS, and nothing else.** The student package, ready to post as it comes. Holds exactly the two files below and nothing else. Stored uncompressed, since it is already an archive |
+| `{stem}_FOR_STUDENTS.zip` | both | **The only entry a student may receive.** The student package, ready to post as it comes. Holds exactly the two files below and nothing else. Stored uncompressed, since it is already an archive |
 | ↳ `{stem}.pdf` | both | Electronic: the handout. **Handwritten: the sheet itself** — the QR-registered pages the student prints and writes on |
 | ↳ `{stem}_OPEN_IN_APP.json` | both | The one file they load into the Submission app. **Encoded** (`gb1:` envelope) and built from a whitelist, so it carries no grading prompt, grader note or answer key — and on a handwritten assignment it carries the layout map inside it, so there is no second file to load and nothing to open |
 | `instructor/layout_{TemplateID}.csv` | **handwritten only** | **Your copy** of the map the Submission app crops answers by, for setting up the Gradescope outline. The student's copy is inside `{stem}_OPEN_IN_APP.json`, byte for byte. **Do not post this**: students no longer need it, and it is the map their answers are cut from |
@@ -53,125 +72,73 @@ CSV — and a student opening it faced a confusing choice. The map now travels
 inside the spec, so that reason has gone, and the loose arrangement had a worse
 problem: an instructor building a Canvas assignment attaches **one** file, and two
 loose files means selecting and attaching both. The package is back, holding
-exactly two files, and it is what you attach.
+exactly two files, and it is the single entry an instructor posts.
 
 ---
 
-## Submission Types and Grading Modes
+## Question types
 
-Each subsection has a **Type** selector and a **Grading** selector. The two branch based on medium.
+The type-to-export mapping, for a developer or for whoever writes a consumer of
+the rubric. Which type to choose, and what each asks of a student, is in the
+guide.
 
-**Which types are available depends on the assignment's input mode.** An electronic
-assignment uses Text, Image and Text + Image; a handwritten one uses Handwritten
-for every part. The editor enforces this, and switching an existing assignment
-between modes converts its parts.
+**Which types are available depends on the assignment's input mode.** An
+electronic assignment uses Text, Image and Text + Image; a handwritten one uses
+Handwritten for every part. The editor enforces this, and switching an existing
+assignment between modes converts its parts.
 
-### Text questions *(electronic)*
+**A person decides every grade.** The last column says what the grading side
+*produces* for each type. Nothing here awards a mark on its own, and a suggested
+score reaches the teaching assistant only if they choose to see it.
 
-`Type: [Text] [Image] [Text + Image]  |  Grading: [Human] | AI: [Binary] [Short] [Medium] [Long]`
+| Editor selection | `.md` tag | `SubmissionType` | `grading_type` | What the grading side produces |
+|---|---|---|---|---|
+| Text · Human | `[text]` | `Text` | `human` | Nothing automatic; the answer is passed through |
+| Text · AI: Binary | `[ai-graded:binary]` | `AI Graded: Binary` | `ai` | A suggested score and feedback — 2 bands, 20 word guide |
+| Text · AI: Short | `[ai-graded:short]` | `AI Graded: Short` | `ai` | A suggested score and feedback — 3 bands, 50 word guide |
+| Text · AI: Medium | `[ai-graded:medium]` | `AI Graded: Medium` | `ai` | A suggested score and feedback — 4 bands, 100 word guide |
+| Text · AI: Long | `[ai-graded:long]` | `AI Graded: Long` | `ai` | A suggested score and feedback — 5 bands, 150 word guide |
+| Image | `[image]`, `[image:N]` | `Image` | `human_image` | Nothing automatic; the upload is passed through. There is no other option for an image |
+| Text + Image | `[text+image]`, `[text+image:N]` | `Text and Image` | `human` | Nothing automatic; the text and the images are passed through together |
+| Handwritten · AI | `[handwritten]` | `Handwritten` | `ai_handwritten` | A transcript of the page crop, and a suggested score |
+| Handwritten · Human | `[handwritten:human]` | `Handwritten` | `human_handwritten` | A transcript of the page crop |
 
-| Grading selection | What it means | Autograded? |
-|---|---|---|
-| **Human** | TA reviews the student's written answer | No |
-| **AI: Binary** | Student states yes/no and briefly justifies; AI grades | Yes — 2 bands, 20 word min |
-| **AI: Short** | Student answers a focused concept question; AI grades | Yes — 3 bands, 50 word min |
-| **AI: Medium** | Student explains a mechanism or relationship; AI grades | Yes — 4 bands, 100 word min |
-| **AI: Long** | Student analyses trade-offs or synthesises across concepts; AI grades | Yes — 5 bands, 150 word min |
+The word figures are guidance shown to the student, not gates — neither app
+blocks a submission on word count. `pages` / `image pages` sets `maxImages` on an
+electronic image part; a handwritten part takes no page count, because pages are
+an assignment-level pool.
 
-### Image questions *(electronic)*
+### The handwritten sheet
 
-`Type: [Text] [Image] [Text + Image]  pages: __`
+The app generates a QR-registered sheet: the student prints it at 100%, writes in
+the bordered answer box under each part, photographs the pages, and the
+Submission app uses the QR codes and corner marks to find each box and crop it.
 
-| Grading selection | What it means | Autograded? |
-|---|---|---|
-| **Image** | A person reviews the uploaded image. There is no automatic option. | No |
-
-Set the number of image pages allowed with the **pages** field (e.g. 6 for a quiz transcript).
-
-### Text + Image questions *(electronic)*
-
-`Type: [Text] [Image] [Text + Image]  image pages: __  |  Grading: [Human]`
-
-Student submits both a written answer and one or more supporting images in a single subsection slot. Always human-graded — the TA reviews both the text response and the uploaded image(s) in the PDF. Set the maximum number of image pages with the **image pages** field.
-
-### Handwritten questions
-
-`Type: [Handwritten]  |  Grading: [AI] [Human]`
-
-The whole assignment is printed and answered on paper. The app generates a
-QR-registered sheet; the student prints it at 100%, writes in the bordered answer
-box under each part, photographs the pages, and the Submission app uses the QR
-codes and corner marks to find each box and crop it.
-
-| Grading selection | What it means | Autograded? |
-|---|---|---|
-| **AI** | The crop is transcribed (OCR) and then AI-graded against the part's `grading_prompt` | Yes |
-| **Human** | The TA grades from the crop; no OCR | No |
-
-Two things are set per part rather than per assignment:
+Two things are set per part rather than per assignment, both on a `> template:`
+line — see [the `.md` format](#the--template-line-handwritten-only) below:
 
 - **How much room the student gets.** Each part reserves a number of writing
   lines. A part that asks for more room than a page can give moves to a page that
   can hold it — page count flexes, and question text is never shrunk to fit.
 - **Whether the answer is a drawing.** A sketch part reserves the same space with
   no ruled lines, and declares itself as a figure rather than as writing so the
-  grading system does not send a circuit diagram to a text transcriber.
-
-Both are written in the `.md` with a `> template:` line — see
-[Submission Type Tags](#submission-type-tags) below.
+  grading side does not send a circuit diagram to a text transcriber.
 
 **Page 1 is always an instructions page**, carrying the standing instructions and
-your preamble and no questions; problems begin on page 2. It is not cropped and
-is not graded. The full page format is in `ASSIGNMENT_MD_SPEC.md` §10.
+the author's preamble and no questions; problems begin on page 2. It is not
+cropped and is not graded. The full page format is in `ASSIGNMENT_MD_SPEC.md` §10.
 
 **There is no name, student ID or date field on the sheet**, deliberately — see
 [Data & Privacy](#student-privacy).
 
----
+### Point totals
 
-## Point Scaling
-
-The editor header shows a running total of all subsection points. You can set any point total you like — 100 is the default, but 50, 150, or any other value works equally well.
-
-**To change the total:**
-1. Enter the desired total in the **Target** field in the editor header.
-2. If the current total does not match the target, a **Rescale** button appears.
-3. Click **Rescale** — all subsection values scale proportionally, with any rounding remainder absorbed by the highest-value subsection.
-
-The target is saved with the assignment and applied automatically at ZIP export (including the grading rubric and assignment spec).
-
----
-
-## Quick Start
-
-### Option A — Start from scratch
-1. Open the [Live App](https://bridgesuite.github.io/GradeBridge-Assignment-Maker/)
-2. Click **New Assignment**
-3. Fill in course code, title, and preamble
-4. Add problems and subsections; use the **Type** and **Grading** selectors
-5. For AI-graded questions, write the grading rubric in the rubric field
-6. Click **Export** to download the ZIP
-
-### Option B — Import a Markdown file (recommended for bulk authoring)
-1. Author an assignment in `.md` format (see [Markdown Format](#markdown-assignment-format) below)
-2. Click **Import Markdown** on the dashboard
-3. The app parses the file instantly and opens it in the editor
-4. Review, fine-tune, and export
-
-### Option C — Generate and iterate with Claude Code
-The `.md` format is plain text, so an assistant can write one from your lab
-manual and read back whatever you changed afterwards. Point it at
-[Markdown Assignment Format](#markdown-assignment-format) below and at
-`ASSIGNMENT_MD_SPEC.md`, which is the authoritative format contract and is
-written to be handed to a tool.
-
-The loop, which means you never have to explain your edits in prose:
-
-1. The assistant generates `DEMO101_Lab1_Prelab.md` from your lab manual
-2. Click **Import Markdown** → assignment opens in the editor
-3. Make changes in the UI (adjust points, tweak descriptions, edit rubrics)
-4. Click **Export .md** (top-right of editor) → downloads the updated `.md` with all changes
-5. Next session: *"read DEMO101_Lab1_Prelab.md"* — it sees exactly the current state, no explanation needed
+Subsection points are scaled to `targetPoints` — the editor's **Target** field,
+100 on a new assignment. **An imported file's own total becomes the target**, so
+a round trip through Import and Export rescales nothing. When the authored total
+and the target disagree, every download stops and asks first; the question is
+raised inside `services/exportService.ts` rather than at the four call sites, so
+a fifth download cannot forget it.
 
 ---
 
@@ -212,21 +179,25 @@ The parser auto-promotes a flat problem into a single `(a)` subsection on import
 
 | Tag | Creates | Notes |
 |---|---|---|
-| `[text]` | Text answer box | Human-graded by default |
+| `[text]` | Text answer box | Reviewed by a person |
 | `[image]` | Single image upload | Reviewed by a person |
 | `[image:N]` | Image upload, N pages | e.g. `[image:6]` for a quiz transcript |
-| `[text+image]` | Text answer + single image upload | Human-graded; TA reviews both |
+| `[text+image]` | Text answer + single image upload | Reviewed by a person, text and images together |
 | `[text+image:N]` | Text answer + N image pages | e.g. `[text+image:2]` |
-| `[ai-graded:binary]` | Yes/no free-text, AI graded | 20 word min; 2 grading bands |
-| `[ai-graded:short]` | Short free-text, AI graded | 50 word min; 3 grading bands |
-| `[ai-graded:medium]` | Medium free-text, AI graded | 100 word min; 4 grading bands |
-| `[ai-graded:long]` | Long free-text, AI graded | 150 word min; 5 grading bands |
-| `[handwritten]` | Handwritten answer, OCR then AI graded | Handwritten assignments only |
-| `[handwritten:human]` | Handwritten answer, TA grades from the crop | Handwritten assignments only |
+| `[ai-graded:binary]` | Yes/no free-text; `grading_type: "ai"` | 20 word guide; 2 grading bands |
+| `[ai-graded:short]` | Short free-text; `grading_type: "ai"` | 50 word guide; 3 grading bands |
+| `[ai-graded:medium]` | Medium free-text; `grading_type: "ai"` | 100 word guide; 4 grading bands |
+| `[ai-graded:long]` | Long free-text; `grading_type: "ai"` | 150 word guide; 5 grading bands |
+| `[handwritten]` | Handwritten answer; transcribed, with a suggested score | Handwritten assignments only |
+| `[handwritten:human]` | Handwritten answer; transcribed, and the TA grades from the crop | Handwritten assignments only |
 
 The first seven are for **electronic** assignments; the two `handwritten` tags
 are for **handwritten** ones. A handwritten assignment declares itself with a
-`**Input:** handwritten` line under the title — absent means electronic.
+`**Input:** handwritten` line under the title — absent means electronic. A
+practice assignment declares `**Kind:** reader` the same way — absent means
+`conventional`, and `reader` requires `**Input:** handwritten`, so a file that
+declares one without the other is refused on import. Both travel to the grading
+rubric and neither travels to the student.
 
 **Handwritten parts take no image count.** Pages are an assignment-level pool,
 not a per-part count, so `[handwritten:3]` is not a thing.
@@ -259,9 +230,8 @@ Both are optional and order-free — `> template: sketch` alone is valid, and so
 its own problem stem is moved to a page that can give them rather than being
 silently shortened.
 
-Which grading block a handwritten part takes follows its tag: `[handwritten]` is
-AI-graded and takes `> grading_prompt:`; `[handwritten:human]` takes
-`> grader_note:`.
+Which grading block a handwritten part takes follows its tag: `[handwritten]`
+takes `> grading_prompt:`, and `[handwritten:human]` takes `> grader_note:`.
 
 ### Math notation (LaTeX)
 
@@ -284,7 +254,7 @@ what the student sees.
 
 ### Grading Prompt Format
 
-Every `[ai-graded:*]` subsection must have a `> grading_prompt:` block. The rubric must be fully self-contained — the autograder sees only the rubric and the student's response, nothing else.
+Every `[ai-graded:*]` subsection must have a `> grading_prompt:` block. The rubric must be fully self-contained — the grading side sees only the rubric and the student's response, nothing else.
 
 Every rubric (except binary) must begin with a `Required elements:` list. Bands are defined by how many elements are present.
 
@@ -364,6 +334,8 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
   "assignment_id": "DEMO101_Lab1_Prelab",
   "course_code": "DEMO101",
   "assignment_title": "Lab 1 Prelab",
+  "assignment_kind": "conventional",
+  "input_mode": "electronic",
   "rubrics": {
     "p1s0": {
       "subsection_id": "p1s0",
@@ -382,6 +354,24 @@ The exported `{Course}_{Title}_grading_rubric.json` is the file your Gradescope 
   }
 }
 ```
+
+**Top-level fields**, all five always present:
+
+| Field | Values | What it is |
+|---|---|---|
+| `assignment_id` | `{CourseCode}_{Title}` | The id the submission is matched against |
+| `course_code` | free text | As authored |
+| `assignment_title` | free text | As authored |
+| `assignment_kind` | `"conventional"` \| `"reader"` | **Whether this is graded at all.** `conventional` is a graded assignment; `reader` is practice — handwritten work is read back to the student and nothing enters the course record |
+| `input_mode` | `"handwritten"` \| `"electronic"` | How the work was produced |
+
+**`assignment_kind` and `input_mode` are always emitted, never conditional.** A
+consumer that has to tell `conventional` apart from *the field was absent so I
+assumed conventional* is a consumer that will one day assume wrong, and this is
+the field that decides whether a submission is graded or read back as practice.
+`input_mode` is resolved at export rather than passed through, so an assignment
+with no mode set says `"electronic"` rather than saying nothing. Neither field
+reaches the student: the rubric is the instructor's file.
 
 **The rubric never carries a model name, a temperature or a token budget.** The Assignment Maker
 describes the work; the grading system decides how to grade it and allocates its own resources. A

@@ -397,6 +397,22 @@ export const renderIt = () => renderToStaticMarkup(
       'the header still offers only LaTeX help, which is the smallest question an instructor has');
   });
 
+  await check('ITEM 2: no instructor text says the AI grades, scores or awards marks', () => {
+    // The campus rule: a person decides every grade. This runs over BOTH the
+    // guide and the README, because the README is what a developer hands to an
+    // instructor when the app is not in front of them.
+    for (const file of ['docs/INSTRUCTOR_GUIDE.md', 'README.md']) {
+      const text = readFileSync(join(REPO, file), 'utf8');
+      for (const banned of [/awards full marks/i, /auto-award/i, /awards? marks automatically/i]) {
+        assert(!banned.test(text), `${file} says the system awards marks: ${banned}`);
+      }
+      // "AI-graded" used as a grade. The .md TYPE TAGS `[ai-graded:short]` are
+      // format names and are allowed; the prose claim is not.
+      const prose = text.replace(/`[^`]*`/g, '').replace(/\[ai-graded:[^\]]*\]/g, '');
+      assert(!/AI-graded/i.test(prose), `${file} describes something as AI-graded in prose`);
+    }
+  });
+
   await check('ITEM 1: the guide carries no pipeline jargon', () => {
     const text = readFileSync(GUIDE, 'utf8');
     for (const jargon of [/marking stage/i, /\bwhitelist\b/i, /layout_id/i, /\bgb1\b|\bgb2\b/i,
