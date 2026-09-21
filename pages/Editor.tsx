@@ -2,14 +2,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { Assignment, InputMode, Problem, Subsection, SubmissionType } from '../types';
+import { Assignment, AssignmentKind, InputMode, Problem, Subsection, SubmissionType } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService, isRescaleDeclined } from '../services/exportService';
-import {
-  validateCoursePublicKey,
-  normalizeCoursePublicKey,
-  CoursePublicKeyValidation
-} from '../services/cryptoService';
 import {
   MODE_LABEL,
   convertSubsectionToMode,
@@ -21,9 +16,10 @@ import {
 import { DEFAULT_ANSWER_LINES, answerLinesFor } from '../services/templateLayout';
 import { derivePageFormatId } from '../services/qrPayload';
 import { describeImportGaps, isAuthoringBackup, readAuthoringBackup } from '../services/authoringBackup';
+import { assignmentKindDefaultedNotice } from '../services/importNotices';
 import { apportionPoints } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
-import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, PenLine, Keyboard, QrCode } from 'lucide-react';
+import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, PenLine, Keyboard, QrCode } from 'lucide-react';
 
 const AI_GRADED_TYPES = new Set([
   SubmissionType.AI_GRADED_BINARY,
@@ -95,6 +91,10 @@ const Editor: React.FC = () => {
     courseCode: '',
     title: '',
     inputMode: 'electronic',
+    // Pre-filled so the object is always a valid `Assignment`, but NOT treated
+    // as answered: `kindAnswered` below is what gates the save, and neither pill
+    // shows as chosen until the author picks one.
+    assignmentKind: 'conventional',
     aiFeedback: false,
     preamble: '',
     problems: [emptyProblem()],
@@ -114,6 +114,28 @@ const Editor: React.FC = () => {
   const [aiFeedbackAnswered, setAiFeedbackAnswered] = useState(isEdit);
   const aiFeedbackUnanswered = !aiFeedbackAnswered;
 
+  /**
+   * The assignment kind is a choice at creation, and a new assignment cannot be
+   * saved without one.
+   *
+   * The state is pre-filled with `'conventional'` so the object is always a
+   * valid `Assignment`, but that value is NOT shown as chosen and does not count
+   * as an answer. A pre-selected radio that must be clicked anyway reads as
+   * already answered, which is how a default becomes a decision nobody made —
+   * and the whole reason this field is required is that there are now two kinds
+   * of assignment and the pipeline has to be told which one this is.
+   *
+   * Anything loaded or imported has been answered, either by the file or by the
+   * migration default, which announces itself.
+   */
+  const [kindAnswered, setKindAnswered] = useState(isEdit);
+  const assignmentKind: AssignmentKind = assignment.assignmentKind ?? 'conventional';
+
+  const chooseKind = (kind: AssignmentKind) => {
+    setKindAnswered(true);
+    setAssignment(prev => ({ ...prev, assignmentKind: kind }));
+  };
+
   // What the QR would carry if the author leaves the Template ID blank.
   const [qrIdPreview, setQrIdPreview] = useState('');
   useEffect(() => {
@@ -128,11 +150,6 @@ const Editor: React.FC = () => {
     return () => { live = false; };
   }, [inputMode, assignment.courseCode, assignment.title]);
 
-  // Course public key is edited as raw text and only committed to the assignment once it validates.
-  const [keyInput, setKeyInput] = useState('');
-  const [keyStatus, setKeyStatus] = useState<CoursePublicKeyValidation | null>(null);
-  const keyCheckSeq = useRef(0);
-
   useEffect(() => {
     if (id) {
       const loaded = storageService.get(id);
@@ -145,9 +162,17 @@ const Editor: React.FC = () => {
         // them; drop them silently — it is not the author's mistake and there is
         // nothing for them to do about it.
         const { dueDate: _d, dueTime: _t, aiGradingConfig: _ai, ...loadedWithoutDate } = loaded as any;
+        // An assignment saved before 2026-09-21 has no kind. It becomes
+        // conventional — every assignment authored before the field existed is
+        // — and unlike the drops above this one is ANNOUNCED, because it is a
+        // value being chosen on the author's behalf rather than a dead field
+        // being discarded. See `services/importNotices.ts`.
+        const kindWasAbsent = loaded.assignmentKind !== 'conventional'
+          && loaded.assignmentKind !== 'reader';
         const sanitized = {
           ...loadedWithoutDate,
           inputMode: loaded.inputMode || 'electronic',
+          assignmentKind: (kindWasAbsent ? 'conventional' : loaded.assignmentKind) as AssignmentKind,
           aiFeedback: !!loaded.aiFeedback,
           problems: loaded.problems.map(p => ({
             ...p,
@@ -163,43 +188,12 @@ const Editor: React.FC = () => {
           }))
         };
         setAssignment(sanitized);
-        setKeyInput(loaded.coursePublicKey || '');
-        if (loaded.coursePublicKey) checkCourseKey(loaded.coursePublicKey);
+        if (kindWasAbsent) alert(assignmentKindDefaultedNotice());
       } else {
         navigate('/');
       }
     }
   }, [id, navigate]);
-
-  // Write the key onto the assignment, or drop the field entirely when there is no key.
-  const setCourseKeyOnAssignment = (pem: string | null) => {
-    setAssignment(prev => {
-      if (pem === null) {
-        if (prev.coursePublicKey === undefined) return prev;
-        const { coursePublicKey: _dropped, ...rest } = prev;
-        return rest as Assignment;
-      }
-      return { ...prev, coursePublicKey: pem };
-    });
-  };
-
-  // Validate the pasted key and keep the assignment in sync. Only a valid key is ever stored.
-  const checkCourseKey = async (value: string) => {
-    const seq = ++keyCheckSeq.current;
-    const pem = normalizeCoursePublicKey(value);
-
-    if (!pem) {
-      setKeyStatus(null);
-      setCourseKeyOnAssignment(null);
-      return;
-    }
-
-    const result = await validateCoursePublicKey(pem);
-    if (seq !== keyCheckSeq.current) return; // a newer paste superseded this check
-
-    setKeyStatus(result);
-    setCourseKeyOnAssignment(result.ok ? pem : null);
-  };
 
   /**
    * Emit the printable page-format template and its sidecar map. The generator
@@ -235,24 +229,19 @@ const Editor: React.FC = () => {
       return;
     }
 
-    // Re-validate on save so an unblurred paste can never slip through.
-    const pem = normalizeCoursePublicKey(keyInput);
-    let toSave = assignment;
-
-    if (pem) {
-      const result = await validateCoursePublicKey(pem);
-      keyCheckSeq.current++;
-      setKeyStatus(result);
-      if (!result.ok) {
-        setCourseKeyOnAssignment(null);
-        alert(`The course public key is not valid, so the assignment was not saved.\n\n${result.error}\n\nClear the field to keep the standard (gb1) encoding.`);
-        return;
-      }
-      toSave = { ...assignment, coursePublicKey: pem };
-    } else {
-      const { coursePublicKey: _dropped, ...rest } = assignment;
-      toSave = rest as Assignment;
+    // An assignment has exactly one kind and it is not guessable from anything
+    // else in the file, so the question is asked once and answered before
+    // anything is stored. Refusing here costs a click; a wrong kind stored
+    // silently is discovered downstream, by someone who cannot tell it was
+    // never chosen.
+    if (!kindAnswered) {
+      alert('Choose whether this is a conventional or a reader assignment before saving.\n\n'
+        + 'Every assignment is one or the other, and it cannot be worked out from anything else '
+        + 'in the file, so there is no sensible default to fall back on.');
+      return;
     }
+
+    const toSave = assignment;
 
     setAssignment(toSave);
     storageService.save(toSave);
@@ -384,11 +373,10 @@ const Editor: React.FC = () => {
 
         setAssignment(newAssignment);
         setAiFeedbackAnswered(true); // the file carries a value; show it as a plain toggle
-        setKeyInput(newAssignment.coursePublicKey || '');
-        checkCourseKey(newAssignment.coursePublicKey || '');
+        setKindAnswered(true);
 
         if (restoring) {
-          alert("Restored from authoring backup. Everything came back \u2014 grading prompts, grader notes, answer-space settings, the point target and the course key.");
+          alert("Restored from authoring backup. Everything came back \u2014 grading prompts, grader notes, answer-space settings and the point target.");
         } else {
           // Name what is missing, at the one moment the instructor can act on
           // it. Silent loss of an instructor's rubrics is the same failure shape
@@ -615,6 +603,66 @@ const Editor: React.FC = () => {
               </div>
             </div>
 
+            {/* THE ASSIGNMENT KIND. Two values, no third, and no blank once set.
+
+                Placed here, immediately under how students answer and above
+                everything else, because it is a property of the whole
+                assignment rather than of any question in it — and because §4.5
+                of the work order asks for it to be visible without hunting.
+
+                Neither pill is filled until the author picks one: the state
+                underneath is pre-filled with 'conventional' so the object is
+                always valid, but a pre-selected radio reads as already
+                answered, and the save refuses until it really is.
+
+                NOTE FOR REVIEW: the sentence under the pills says what the
+                field DOES, not what the two kinds mean, because the work order
+                that introduced them does not define them and inventing a
+                definition here would put words in the pipeline's mouth on a
+                screen instructors read. Replace it with the real distinction
+                when there is one to state. */}
+            <div className={`md:col-span-2 rounded-lg border p-4 ${
+              !kindAnswered ? 'border-amber-300 bg-amber-50' : 'border-academic-200 bg-academic-50'
+            }`}>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <p className="text-sm font-medium text-academic-800">
+                    What kind of assignment is this?
+                  </p>
+                  {!kindAnswered && (
+                    <p className="text-xs text-amber-700 mt-0.5 font-medium">
+                      Choose one — it cannot be saved until you do.
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  {([
+                    { label: 'Conventional', value: 'conventional' as AssignmentKind },
+                    { label: 'Reader',       value: 'reader'       as AssignmentKind },
+                  ]).map(({ label, value }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => chooseKind(value)}
+                      className={`text-xs px-4 py-1.5 rounded-full border font-medium transition-colors ${
+                        kindAnswered && assignmentKind === value
+                          ? 'bg-academic-700 text-white border-academic-700'
+                          : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-academic-500 mt-2 leading-relaxed">
+                Whole-assignment, not per problem: there is one kind and every question in this
+                assignment has it. You can change it while authoring. It travels with the assignment
+                and is named in the export's <code className="font-mono">00_INSTRUCTOR_ONLY</code> notice,
+                and it is deliberately not part of the file students load.
+              </p>
+            </div>
+
             {/* The one per-assignment AI-feedback flag. Asked as a question so a
                 new assignment gets a conscious answer rather than a silent
                 default, and left visible so an imported value can be seen and
@@ -681,56 +729,6 @@ const Editor: React.FC = () => {
               />
             </div>
 
-            {/* Course public key — optional; enables gb2 hardened submissions */}
-            <div className="md:col-span-2">
-              <div className="rounded border border-academic-200 bg-academic-50/60 p-4 space-y-2">
-                <div className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-academic-600 shrink-0" />
-                  <span className="text-sm font-medium text-academic-800">
-                    Course public key (enables hardened gb2 submissions)
-                  </span>
-                  <span className="text-xs text-academic-500">· optional</span>
-                </div>
-                <p className="text-xs text-academic-500 leading-relaxed">
-                  Paste the <strong>public</strong> key issued for this course — SPKI PEM, starting with
-                  {' '}<code className="font-mono">-----BEGIN PUBLIC KEY-----</code>. It ships inside the assignment and is
-                  safe to distribute: with it, students' submissions can only be opened by the autograder's private key.
-                  Leave this empty to keep the current encoding. Your institution generates and holds the keypair —
-                  <strong> never paste a private key</strong>.
-                </p>
-                <textarea
-                  rows={5}
-                  spellCheck={false}
-                  value={keyInput}
-                  onChange={e => setKeyInput(e.target.value)}
-                  onBlur={e => checkCourseKey(e.target.value)}
-                  placeholder={'-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkq...\n-----END PUBLIC KEY-----'}
-                  className="w-full font-mono text-xs bg-white text-academic-900 rounded-md border border-academic-300 shadow-sm py-2 px-3 resize-y focus:outline-none focus:border-academic-500 focus:ring-1 focus:ring-academic-500"
-                />
-                {!keyInput.trim() ? (
-                  <div className="flex items-start gap-1.5 text-xs text-academic-500">
-                    <span>No key set — submissions use the standard (gb1) encoding.</span>
-                  </div>
-                ) : keyStatus?.ok && keyStatus.warning ? (
-                  <div className="flex items-start gap-1.5 text-xs text-amber-700">
-                    <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
-                    <span>Valid RSA public key ({keyStatus.bits}-bit). {keyStatus.warning}</span>
-                  </div>
-                ) : keyStatus?.ok ? (
-                  <div className="flex items-start gap-1.5 text-xs text-green-700">
-                    <CheckCircle2 className="w-3.5 h-3.5 mt-px shrink-0" />
-                    <span>Valid RSA public key ({keyStatus.bits}-bit) — exported specs will carry it.</span>
-                  </div>
-                ) : keyStatus ? (
-                  <div className="flex items-start gap-1.5 text-xs text-red-600">
-                    <XCircle className="w-3.5 h-3.5 mt-px shrink-0" />
-                    <span>{keyStatus.error}</span>
-                  </div>
-                ) : (
-                  <div className="text-xs text-academic-500">Click outside the box to check the key.</div>
-                )}
-              </div>
-            </div>
           </div>
         </Card>
 

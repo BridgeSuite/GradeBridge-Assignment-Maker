@@ -7,24 +7,19 @@
 //
 //   npm test
 //
-// Covers validateCoursePublicKey() and buildAssignmentSpec(), plus a
-// cross-app check that a key exported here actually drives the Student
-// Submission app's gb2 encoder, plus the handwritten input-mode / medium
-// round trip through .md export, .md import and grading_rubric.json.
+// Covers buildAssignmentSpec() and what may reach a student, the handwritten
+// input-mode / medium round trip through .md export, .md import and
+// grading_rubric.json, and the notices an import owes an instructor.
 //
-// The fixture (test keypair + a known-good SPKI PEM) is NOT committed — it
-// contains a private key. Default location:
-//
-//   ../Encryption/gb2_test_fixture.json      (relative to the repo root)
-//
-// Override with:  GB2_FIXTURE=/path/to/gb2_test_fixture.json npm test
-//
-// Without it the suite still runs every fixture-independent check using
-// ephemeral keypairs and reports the rest as SKIPPED.
+// NO FIXTURE IS NEEDED and none is looked for. Until 2026-09-21 this suite
+// wanted an uncommitted RSA keypair at ../Encryption/gb2_test_fixture.json,
+// without which a block of checks reported SKIPPED. Submission encryption was
+// removed from the pipeline that day, so there is no keypair to hold and every
+// check here runs on every machine.
 // =====================================================
 
 import { build } from 'esbuild';
-import { webcrypto, createPrivateKey, privateDecrypt, constants as cryptoConstants } from 'node:crypto';
+import { webcrypto } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -152,6 +147,7 @@ const figures = await loadModule(join(REPO, 'services', 'figureBlocks.ts'), 'fig
 const layoutSvc = await loadModule(join(REPO, 'services', 'templateLayout.ts'), 'templateLayout.mjs');
 const retiredSvc = await loadModule(join(REPO, 'services', 'retiredTypes.ts'), 'retiredTypes.mjs');
 const backupSvc = await loadModule(join(REPO, 'services', 'authoringBackup.ts'), 'authoringBackup.mjs');
+const noticesSvc = await loadModule(join(REPO, 'services', 'importNotices.ts'), 'importNotices.mjs');
 
 // Same module, but with a real jsPDF so the PDF can actually be inspected.
 const exportPdfSvc = await loadModule(join(REPO, 'services', 'exportService.ts'), 'exportServicePdf.mjs', {
@@ -167,7 +163,7 @@ const genForHash = await loadModule(join(REPO, 'services', 'templateGenerator.ts
 });
 const qrpForHash = await loadModule(join(REPO, 'services', 'qrPayload.ts'), 'qrPayloadHash.mjs');
 
-const { validateCoursePublicKey, normalizeCoursePublicKey, looksLikeCoursePublicKey, encryptJson, decryptJson } = crypto_;
+const { encryptJson, decryptJson } = crypto_;
 const { buildAssignmentSpec, assignmentToMd, generateGradingRubric, convertSubmissionType,
         generateHTML, generateLaTeX, generateGraderHTML, STUDENT_SPEC_FIELDS } = exportSvc;
 const { parseMdToAssignment } = mdParser;
@@ -179,23 +175,14 @@ const { splitFigures, figureSegsToSource, hasFigure, trimAroundFigures, figureLa
 const { estimateDescLines } = layoutSvc;
 const { degradeRetiredTypes } = retiredSvc;
 const { buildAuthoringBackup, isAuthoringBackup, readAuthoringBackup, describeImportGaps } = backupSvc;
+const { stripRetiredFields, RETIRED_ASSIGNMENT_FIELD_NAMES, adoptAssignmentKind } = noticesSvc;
 
 // ---------- helpers ----------
-const spkiPem = (der) =>
-  `-----BEGIN PUBLIC KEY-----\n${Buffer.from(der).toString('base64').replace(/(.{64})/g, '$1\n').trimEnd()}\n-----END PUBLIC KEY-----\n`;
-
-const genKey = async (bits) => {
-  const pair = await webcrypto.subtle.generateKey(
-    { name: 'RSA-OAEP', modulusLength: bits, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
-    true, ['encrypt', 'decrypt']
-  );
-  return { pem: spkiPem(await webcrypto.subtle.exportKey('spki', pair.publicKey)), pair };
-};
-
 const makeAssignment = (extra = {}) => ({
   id: 'a1',
   courseCode: 'EEC1',
   title: 'Lab 1 In-Lab',
+  assignmentKind: 'conventional',
   preamble: 'Complete all parts.',
   problems: [{
     id: 'p1', name: 'Problem 1', description: '',
@@ -206,251 +193,47 @@ const makeAssignment = (extra = {}) => ({
   ...extra,
 });
 
-// ---------- fixture ----------
-const fixturePath = process.env.GB2_FIXTURE
-  ? resolve(process.env.GB2_FIXTURE)
-  : resolve(REPO, '..', 'Encryption', 'gb2_test_fixture.json');
-const fixture = existsSync(fixturePath) ? JSON.parse(readFileSync(fixturePath, 'utf8')) : null;
-
-console.log('\nAssignment Maker test suite — coursePublicKey (gb2) + handwritten round trip');
-console.log(`fixture: ${fixture ? fixturePath : `NOT FOUND at ${fixturePath}`}\n`);
+console.log('\nAssignment Maker test suite — export contract + handwritten round trip\n');
 
 // =====================================================
-// 1. validateCoursePublicKey — the fixture key
+// 1. buildAssignmentSpec — what lands in assignment_spec.json
 // =====================================================
-if (fixture) {
-  // THE CONTRACT, NOT A CONSTANT (fixed 2026-09-05).
-  //
-  // This used to assert `bits === 2048`. It passed for as long as every key the
-  // suite had ever seen was 2048-bit, and it failed the moment a real one
-  // arrived: the live ENG17 Fall course key is RSA-4096. **An assertion that
-  // rejects the configuration production actually uses is worse than no
-  // assertion** — and it was worse still here, because `npm test` chained the
-  // suites with `&&`, so this one red line hid four entirely green suites
-  // behind it.
-  //
-  // `cryptoService.validateCoursePublicKey` already states the contract: 2048
-  // and 4096 are in-contract and carry no warning, anything else imports but
-  // warns. So the test now checks that contract rather than restating one of
-  // its two legal values. The Student Submission app fixed the identical defect
-  // the same way, at its own `run-tests.mjs:159`.
-  const IN_CONTRACT_BITS = [2048, 4096];
-  const r = await validateCoursePublicKey(fixture.public_key_spki_pem);
-  check('fixture key is an in-contract RSA PUBLIC key (2048 or 4096, never private)', () => {
-    // It must be the PUBLIC half. The private counterpart is rejected by the
-    // check below; this asserts the fixture we are validating is not one.
-    assert(/-----BEGIN PUBLIC KEY-----/.test(fixture.public_key_spki_pem),
-      'the fixture public key is not in SPKI public form');
-    assert(!/PRIVATE KEY/i.test(fixture.public_key_spki_pem),
-      'the fixture public key contains a private key');
-    assert(r.ok === true, `ok is ${r.ok}: ${r.error}`);
-    assert(IN_CONTRACT_BITS.includes(r.bits),
-      `bits is ${r.bits}; the course key contract is ${IN_CONTRACT_BITS.join(' or ')}`);
-    // In-contract sizes carry no warning — that is what "in contract" means, and
-    // it is what keeps this from silently accepting an off-contract key.
-    assert(!r.warning, `an in-contract ${r.bits}-bit key produced a warning: ${r.warning}`);
-  });
-
-  const priv = await validateCoursePublicKey(fixture.private_key_pkcs8_pem);
-  check('fixture PRIVATE key is rejected with the private-key message', () => {
-    assert(priv.ok === false, 'a private key was accepted');
-    assert(/private key/i.test(priv.error), `error was: "${priv.error}"`);
-    assert(/public key only/i.test(priv.error), `error does not say what to paste instead: "${priv.error}"`);
-  });
-
-  const truncatedResult = await validateCoursePublicKey(fixture.public_key_spki_pem.slice(0, 120));
-  check('a truncated paste is rejected', () => {
-    assert(truncatedResult.ok === false, 'a truncated key was accepted');
-    assert(typeof truncatedResult.error === 'string' && truncatedResult.error.length > 0, 'no error message');
-  });
-
-  const crlf = `  ${fixture.public_key_spki_pem.trim().replace(/\n/g, '\r\n')}  `;
-  const crlfResult = await validateCoursePublicKey(crlf);
-  check('a CRLF / untrimmed paste of the same key still validates', () => {
-    // The property under test is NORMALISATION, not size: the same key pasted
-    // with Windows line endings and stray whitespace must validate to the same
-    // result. Comparing against `r` rather than a literal says exactly that, and
-    // cannot go stale when the fixture key is reissued at a different size.
-    assert(crlfResult.ok === true, `ok is ${crlfResult.ok}: ${crlfResult.error}`);
-    assertEqual(crlfResult.bits, r.bits,
-      'a CRLF paste of the same key validated to a different modulus size');
-    assertEqual(crlfResult.warning, r.warning,
-      'a CRLF paste of the same key produced a different warning');
-  });
-} else {
-  for (const n of [
-    'fixture key is an in-contract RSA PUBLIC key (2048 or 4096, never private)',
-    'fixture PRIVATE key is rejected with the private-key message',
-    'a truncated paste is rejected',
-    'a CRLF / untrimmed paste of the same key still validates',
-  ]) skip(n, 'fixture not found');
-}
-
-// =====================================================
-// 2. validateCoursePublicKey — fixture-independent cases
-// =====================================================
-{
-  const k2048 = await genKey(2048);
-  const r2048 = await validateCoursePublicKey(k2048.pem);
-  check('an ephemeral 2048-bit key validates with no warning', () => {
-    assert(r2048.ok === true, `ok is ${r2048.ok}: ${r2048.error}`);
-    assert(r2048.bits === 2048 && !r2048.warning, `bits ${r2048.bits}, warning ${r2048.warning}`);
-  });
-
-  const k4096 = await genKey(4096);
-  const r4096 = await validateCoursePublicKey(k4096.pem);
-  check('a 4096-bit key validates with no warning (contract size)', () => {
-    assert(r4096.ok === true, `ok is ${r4096.ok}: ${r4096.error}`);
-    assert(r4096.bits === 4096 && !r4096.warning, `bits ${r4096.bits}, warning ${r4096.warning}`);
-  });
-
-  const k3072 = await genKey(3072);
-  const r3072 = await validateCoursePublicKey(k3072.pem);
-  check('an off-contract 3072-bit key warns but is NOT hard-blocked', () => {
-    assert(r3072.ok === true, 'a usable off-size key was hard-blocked');
-    assert(r3072.bits === 3072, `bits is ${r3072.bits}`);
-    assert(typeof r3072.warning === 'string' && /2048|4096/.test(r3072.warning),
-      `warning does not name the expected sizes: "${r3072.warning}"`);
-  });
-
-  const cases = [
-    ['empty string', '', /empty|no key/i],
-    ['whitespace only', '   \n  ', /empty|no key/i],
-    ['plain garbage', 'not a key at all', /SPKI|BEGIN PUBLIC KEY/i],
-    ['PKCS#1 header', '-----BEGIN RSA PUBLIC KEY-----\nMIIBCgKCAQEA\n-----END RSA PUBLIC KEY-----', /PKCS#1|SPKI/i],
-    ['a PKCS#8 private key header', '-----BEGIN PRIVATE KEY-----\nMIIEvg==\n-----END PRIVATE KEY-----', /private key/i],
-    ['an OpenSSH private key', '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----', /private key/i],
-    ['BEGIN with no END', '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkq', /BEGIN|END/i],
-    ['empty PEM body', '-----BEGIN PUBLIC KEY-----\n\n-----END PUBLIC KEY-----', /empty/i],
-    ['non-key base64 body', '-----BEGIN PUBLIC KEY-----\nbm90YWtleQ==\n-----END PUBLIC KEY-----', /import|RSA|usable/i],
-  ];
-  for (const [label, input, pattern] of cases) {
-    const r = await validateCoursePublicKey(input);
-    check(`rejects ${label} with a specific message`, () => {
-      assert(r.ok === false, `accepted "${label}"`);
-      assert(typeof r.error === 'string' && r.error.length > 0, 'no error message');
-      assert(pattern.test(r.error), `message does not explain the problem: "${r.error}"`);
-    });
-  }
-
-  check('normalizeCoursePublicKey trims and converts CRLF to LF', () => {
-    assertEqual(normalizeCoursePublicKey('  a\r\nb  \n'), 'a\nb', 'normalisation wrong');
-    assertEqual(normalizeCoursePublicKey(''), '', 'empty input should stay empty');
-  });
-  check('looksLikeCoursePublicKey screens PEMs without importing', () => {
-    assert(looksLikeCoursePublicKey(k2048.pem) === true, 'rejected a valid SPKI PEM');
-    assert(looksLikeCoursePublicKey('-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----') === false,
-      'accepted a private key');
-    assert(looksLikeCoursePublicKey(undefined) === false, 'accepted a non-string');
-    assert(looksLikeCoursePublicKey('') === false, 'accepted an empty string');
-  });
-}
-
-// =====================================================
-// 3. buildAssignmentSpec — what lands in assignment_spec.json
-// =====================================================
+// Sections 1, 2 and 4 used to live here: RSA course-key validation, and a
+// cross-app check that a key exported here opened a submission sealed by the
+// Student app. Submission encryption was removed from the pipeline on
+// 2026-09-21 and there is no course key left to validate or to seal with, so
+// the checks went with the feature rather than being left passing vacuously.
+//
+// gb1 is untouched and is still exercised below. It is a different encoding
+// with a different job — tamper resistance on the assignment file, not
+// confidentiality of a submission — and removing the other one is not a
+// reason to stop testing it.
 {
   const bare = makeAssignment();
   const bareSpec = await buildAssignmentSpec(bare);
-  check('no key: coursePublicKey is absent from the spec entirely', () =>
-    assert(!('coursePublicKey' in bareSpec), 'the field was added to a keyless assignment'));
-  check('no key: spec is byte-for-byte identical to the assignment (gb1 unaffected)', () =>
-    assert(JSON.stringify(bareSpec) === JSON.stringify(bare),
-      'the serialized spec changed for an assignment with no key'));
+  // Not an identity any more, and deliberately so: `assignmentKind` is a field
+  // of every assignment that the student's copy must never carry. What is
+  // asserted is that the difference is EXACTLY that and nothing else, so a
+  // second field going missing from the student file still fails here.
+  check('the spec is the assignment minus only what the whitelist withholds', () => {
+    const { assignmentKind, ...expected } = bare;
+    assertEqual(bareSpec, expected, 'the spec dropped or added something other than the kind');
+    assert(!('assignmentKind' in bareSpec), 'the student spec carries the assignment kind');
+  });
 
-  for (const [label, value] of [['empty string', ''], ['whitespace only', '  \n '], ['undefined', undefined]]) {
-    const a = makeAssignment({ coursePublicKey: value });
-    const spec = await buildAssignmentSpec(a);
-    check(`key set to ${label}: field omitted from the spec`, () =>
-      assert(!('coursePublicKey' in spec), `field present with value ${JSON.stringify(spec.coursePublicKey)}`));
-  }
+  check('the spec still survives the gb1 encode/decode round trip', async () => {
+    const decoded = await decryptJson(await encryptJson(bareSpec));
+    assertEqual(decoded, bareSpec, 'the spec changed passing through the gb1 envelope');
+  });
 
-  if (fixture) {
-    const pem = fixture.public_key_spki_pem;
-    const spec = await buildAssignmentSpec(makeAssignment({ coursePublicKey: pem }));
-    check('key set: spec carries the exact PEM', () =>
-      assert(spec.coursePublicKey === normalizeCoursePublicKey(pem),
-        'the exported PEM does not match what was set'));
-    check('key set: everything else in the spec is unchanged', () => {
-      const { coursePublicKey, ...rest } = spec;
-      assertEqual(rest, makeAssignment(), 'other spec fields were altered');
-    });
-
-    // export -> encode -> decode -> reimport
-    const decoded = await decryptJson(await encryptJson(spec));
-    check('the key survives the gb1 spec encode/decode round trip', () =>
-      assert(decoded.coursePublicKey === normalizeCoursePublicKey(pem),
-        'the key changed passing through the spec envelope'));
-
-    let threw = null;
-    try {
-      await buildAssignmentSpec(makeAssignment({ coursePublicKey: '-----BEGIN PUBLIC KEY-----\nbm90YWtleQ==\n-----END PUBLIC KEY-----' }));
-    } catch (err) { threw = err; }
-    check('an invalid key stops the export instead of shipping a broken spec', () => {
-      assert(threw !== null, 'export proceeded with an unusable key');
-      assert(/Export stopped/.test(threw.message), `unexpected message: "${threw.message}"`);
-    });
-
-    let threwPriv = null;
-    try {
-      await buildAssignmentSpec(makeAssignment({ coursePublicKey: fixture.private_key_pkcs8_pem }));
-    } catch (err) { threwPriv = err; }
-    check('a private key can never reach the exported spec', () => {
-      assert(threwPriv !== null, 'a private key was exported');
-      assert(/private key/i.test(threwPriv.message), `unexpected message: "${threwPriv.message}"`);
-    });
-  } else {
-    for (const n of [
-      'key set: spec carries the exact PEM',
-      'the key survives the gb1 spec encode/decode round trip',
-      'an invalid key stops the export instead of shipping a broken spec',
-      'a private key can never reach the exported spec',
-    ]) skip(n, 'fixture not found');
-  }
-}
-
-// =====================================================
-// 4. Cross-app — the exported key drives the Student app's gb2 encoder
-// =====================================================
-{
-  const studentCrypto = resolve(REPO, '..', 'GradeBridge-Student-Submission', 'cryptoService.ts');
-  if (fixture && existsSync(studentCrypto)) {
-    const student = await loadModule(studentCrypto, 'studentCryptoService.mjs');
-
-    // Exactly what the Maker would ship.
-    const spec = await buildAssignmentSpec(makeAssignment({ coursePublicKey: fixture.public_key_spki_pem }));
-
-    // Exactly what the Student app would do with it.
-    const payload = student.deidentifyForGb2({
-      student_name: 'Jane Smith',
-      course_code: spec.courseCode,
-      assignment_id: `${spec.courseCode}_${spec.title.replace(/\s+/g, '_')}`,
-      submission_data: { p0s0: { answer: 'ok', images_submitted: 0 } },
-    });
-    const gb2 = await student.encryptJsonGb2(payload, spec.coursePublicKey);
-
-    // Exactly what the autograder would do with that.
-    const raw = Buffer.from(gb2.slice(4), 'base64');
-    const wrappedKeyLen = raw.readUInt16BE(0);
-    const contentKey = privateDecrypt(
-      { key: createPrivateKey(fixture.private_key_pkcs8_pem), padding: cryptoConstants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
-      raw.subarray(2, 2 + wrappedKeyLen)
-    );
-    const aesKey = await webcrypto.subtle.importKey('raw', contentKey, { name: 'AES-GCM' }, false, ['decrypt']);
-    const opened = JSON.parse(Buffer.from(await webcrypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: raw.subarray(2 + wrappedKeyLen, 2 + wrappedKeyLen + 12) },
-      aesKey,
-      raw.subarray(2 + wrappedKeyLen + 12)
-    )).toString('utf8'));
-
-    check('cross-app: a spec exported here produces a gb2 submission the course key opens', () =>
-      assertEqual(opened, payload, 'the round trip through both apps lost or changed the payload'));
-    check('cross-app: that submission carries no student identity', () =>
-      assert(!('student_name' in opened), 'student_name reached the autograder payload'));
-  } else {
-    const why = !fixture ? 'fixture not found' : 'Student Submission repo not alongside this one';
-    skip('cross-app: a spec exported here produces a gb2 submission the course key opens', why);
-  }
+  // A stored project written before 2026-09-21 still has the field on it. The
+  // whitelist is what stops it reaching a student, so this is checked against a
+  // legacy-shaped object rather than against a type that no longer declares it.
+  const legacy = makeAssignment({ coursePublicKey: '-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----\n' });
+  const legacySpec = await buildAssignmentSpec(legacy);
+  check('a legacy course key never reaches the student spec', () =>
+    assert(!('coursePublicKey' in legacySpec),
+      'the retired course key was copied into the file that goes to every student'));
 }
 
 // =====================================================
@@ -1600,12 +1383,25 @@ ${r.problem_statement}`);
         const body = src.match(new RegExp(`export interface ${iface} \\{([\\s\\S]*?)\\n\\}`))[1];
         return [...body.matchAll(/^\s*(\w+)\??:/gm)].map(m => m[1]);
       };
-      // Every field the student app declares must be one we are allowed to send.
-      // There is no exemption list any more: `dueDate` / `dueTime` were the only
-      // entries and were deleted from both repos on 2026-08-31, being required
-      // fields that were never present. If this needs an exemption again, the
-      // question to ask first is whether the field should exist at all.
-      const missing = fieldsOf('Assignment').filter(f => !STUDENT_SPEC_FIELDS.assignment.includes(f));
+      // Every field the student app declares must be one we are allowed to send,
+      // with one narrow exemption: a field THIS repo has retired.
+      //
+      // The exemption is read from `importNotices.ts` rather than written here,
+      // so it cannot outlive the removal that justifies it. It exists because
+      // the two repos cannot be changed in one commit: on 2026-09-21 submission
+      // encryption was removed from this app, and the Student Submission app
+      // still declares `coursePublicKey` on its own `Assignment`.
+      //
+      // That app degrades correctly in the meantime — `encodeSubmissionJson`
+      // takes the gb1 branch when the key is absent, which is now every export
+      // — so this is dead declaration over there, not a break. **It is still
+      // owed a companion change in that repo**, and the right end state is the
+      // one the previous comment here argued for: not an exemption, but a field
+      // that exists in neither repo.
+      const retired = RETIRED_ASSIGNMENT_FIELD_NAMES;
+      const missing = fieldsOf('Assignment')
+        .filter(f => !STUDENT_SPEC_FIELDS.assignment.includes(f))
+        .filter(f => !retired.includes(f));
       assertEqual(missing, [], 'the student app declares an assignment field the whitelist does not send');
       const subMissing = fieldsOf('Subsection').filter(f => !STUDENT_SPEC_FIELDS.subsection.includes(f));
       assertEqual(subMissing, [], 'the student app declares a sub-part field the whitelist does not send');
@@ -1720,7 +1516,7 @@ ${r.problem_statement}`);
 // until 2026-08-31 nothing in it restored an assignment completely:
 // `assignment_spec.json` correctly drops the grading material and `answerLines`
 // (losing which repaginates the sheet and moves `layout_id`), `Export .md`
-// drops `targetPoints`, `coursePublicKey` and `config`, and the ZIP did not
+// drops `targetPoints` and `config`, and the ZIP did not
 // contain the `.md` at all. Completeness is now one property of one file, and
 // this is its one test.
 {
@@ -1738,13 +1534,11 @@ ${r.problem_statement}`);
     courseCode: 'ENG17',
     title: 'HW 1',
     inputMode: 'handwritten',
+    assignmentKind: 'reader',
     pageFormatId: 'ENG17HW1',
     aiFeedback: true,
     preamble: 'Show all working on paper.',
     targetPoints: 200,
-    // A real key when the fixture is available, so the spec-building checks
-    // below exercise the validating path rather than a placeholder.
-    coursePublicKey: fixture ? fixture.public_key_spki_pem : '-----BEGIN PUBLIC KEY-----\nMIIB\n-----END PUBLIC KEY-----\n',
     submissionAddress: 'submit.example.edu/eng17',
     problems: [{
       id: 'p1', name: 'Divider', description: 'A stem with a $V_s$ in it.',
@@ -1826,7 +1620,6 @@ ${r.problem_statement}`);
   check('authoring backup: targetPoints survives, so the next export does not halve the points', () => {
     const restored = readAuthoringBackup(JSON.parse(buildAuthoringBackup(everything)));
     assertEqual(restored.targetPoints, 200, 'targetPoints was lost — the next export would normalise to 100');
-    assertEqual(restored.coursePublicKey, everything.coursePublicKey, 'the course key was lost — gb2 would revert to gb1');
     const total = restored.problems.flatMap(p => p.subsections).reduce((n, s) => n + s.points, 0);
     assertEqual(total, 200, 'the points did not come back at the target total');
   });
@@ -1834,28 +1627,26 @@ ${r.problem_statement}`);
   // What Import JSON says when it is handed the lossy file. Run against a REAL
   // student spec, so the message is checked against what the whitelist actually
   // drops rather than against a guess about it.
-  const gapCheck = fixture ? check
-    : (name) => skip(name, 'needs the gb2 fixture key to build a spec');
-  gapCheck('authoring backup: a student spec import names what it is about to lose', async () => {
+  check('authoring backup: a student spec import names what it is about to lose', async () => {
     const spec = await buildAssignmentSpec(everything);
     const joined = describeImportGaps(spec).join(' | ');
     assert(joined.length > 0, 'importing a student spec reported no loss at all');
     for (const expected of ['grading prompts', 'grader notes', 'answer-space', 'point target']) {
       assert(joined.includes(expected), `the warning does not mention ${expected}: ${joined}`);
     }
-    // coursePublicKey IS in the student whitelist, so it is NOT lost — and the
-    // message must not claim it is. A warning that overstates gets ignored.
+    // The course key is not mentioned at all: it is not a field any more, and a
+    // warning about a field that cannot exist is noise that gets the real ones
+    // ignored.
     assert(!joined.includes('course public key'),
-      `the warning claims the course key is lost, but the spec carries it: ${joined}`);
+      `the warning names a field that no longer exists: ${joined}`);
   });
 
   check('authoring backup: a complete file is not warned about, and absence is not invented', () => {
     assertEqual(describeImportGaps(everything), [], 'a complete assignment was warned about');
     // An assignment that genuinely never had prompts is not told it lost them...
-    const plain = { ...makeAssignment(), targetPoints: 100, coursePublicKey: 'x' };
+    const plain = { ...makeAssignment(), targetPoints: 100 };
     const gaps = describeImportGaps(plain).join(' | ');
     assert(!gaps.includes('point target'), 'a present targetPoints was reported as missing');
-    assert(!gaps.includes('course public key'), 'a present coursePublicKey was reported as missing');
   });
 }
 
@@ -2087,14 +1878,14 @@ ${r.problem_statement}`);
     assert(/rescale/i.test(asked[0]), `the question does not say what happens: "${asked[0]}"`);
   });
 
-  // `check` is synchronous, so the one await here is done up front.
-  // The key below is not a key: reaching buildAssignmentSpec would throw about
-  // that instead, which is what proves the export stopped before building.
+  // `check` is synchronous, so the one await here is done up front. Nothing is
+  // stubbed for the write: the decline has to happen before anything reaches a
+  // file, so a download that got that far would fail here on its own.
   answering(false);
   const declined = { ...parseMdToAssignment(md), targetPoints: 100 };
   let downloadErr = null;
   try {
-    await exportSvc.exportService.downloadZIP({ ...declined, coursePublicKey: 'not a key' });
+    await exportSvc.exportService.downloadZIP({ ...declined });
   } catch (err) { downloadErr = err; }
 
   check('declining the rescale stops the export and writes nothing', () => {
@@ -3213,167 +3004,221 @@ ${r.problem_statement}`);
 }
 
 // =====================================================
-// THE COURSE PUBLIC KEY IS IN THE .md, AND SURVIVES THE ROUND TRIP
+// A LEFTOVER COURSE KEY IS REPORTED, NOT SWALLOWED
 // =====================================================
-// The .md is meant to be the source: the instructor authors there and the app
-// imports it. Until 2026-09-05 the format could not express `coursePublicKey`
-// — the one field that turns gb2 on — so `Export .md` → `Import Markdown`
-// dropped it, the NEXT export fell back to the unhardened gb1 encoding, and
-// nothing anywhere said a word. `GB2_INSTRUCTOR_KEY_SETUP.md` step 3 told
-// instructors to work around it by never building a distributable spec from a
-// .md, which is exactly the kind of instruction that gets forgotten under time
-// pressure.
+// Submission encryption was removed from the pipeline on 2026-09-21. Every .md
+// exported before then can still carry the key as a fenced ```pem block, and
+// every authoring backup and spec JSON can still carry the field.
 //
-// A 4096-bit SPKI PEM is fourteen lines and every metadata row in
-// ASSIGNMENT_MD_SPEC.md §2 is single-line by construction, so the key travels
-// as a fenced ```pem block. The fence is inert to everything already in the
-// pipeline: `splitFigures` opens only on ```svg, and the metadata region's body
-// is discarded by both parsers, so the PEM never reaches a description, an
-// escaper or the `$...$` splitter.
+// The work order's rule for that file is the whole of this section: REPORT IT,
+// do not refuse the import, and do not drop it silently. Not refuse, because
+// the file imports perfectly well without the key and refusing costs the
+// instructor their work for no safety gain. Not silent, because an instructor
+// who set a key may otherwise go on believing submission encryption is active.
+// It is not.
 //
-// THE KEY IS GENERATED HERE, NOT READ FROM DISK. What is under test is whether
-// a key survives export and re-import, not which key it is, so a throwaway
-// keypair keeps this self-contained and reproducible on any machine. It is
-// 4096 bits because that is the shape of the real ENG17 Fall key, and a
-// hardcoded 2048 assumption is precisely what took two assertions down on
-// 2026-09-05.
+// The negative matters as much as the positive: a file that never had a key
+// must produce no notice at all, or the message becomes background noise on
+// every import and stops being read.
 {
-  const { pem: coursePem } = await genKey(4096);
-  const keyed = makeAssignment({
-    inputMode: 'handwritten',
-    targetPoints: 100,
-    coursePublicKey: coursePem,
-  });
-  const keyless = makeAssignment({ inputMode: 'handwritten', targetPoints: 100 });
+  const KEY_BLOCK = [
+    '```pem',
+    '-----BEGIN PUBLIC KEY-----',
+    'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnotarealkey',
+    '-----END PUBLIC KEY-----',
+    '```',
+    '',
+  ].join('\n');
 
-  /** The .md with its ```pem block removed — the deliberate negative. */
-  const stripKeyBlock = (md) => {
-    const out = [];
-    let inBlock = false;
-    for (const line of md.split('\n')) {
-      if (!inBlock && /^```pem$/.test(line)) { inBlock = true; continue; }
-      if (inBlock) { if (/^```$/.test(line)) inBlock = false; continue; }
-      out.push(line);
-    }
-    return out.join('\n');
+  const withKey = (md) => {
+    const lines = md.split('\n');
+    const at = lines.findIndex(l => /^## Problem /.test(l));
+    const cut = at === -1 ? lines.length : at;
+    return [...lines.slice(0, cut), KEY_BLOCK, ...lines.slice(cut)].join('\n');
   };
 
-  check('course key: the generated key really is 4096 bits, like the real one', async () => {
-    const r = await validateCoursePublicKey(coursePem);
-    assert(r.ok, `the generated key did not validate: ${r.error}`);
-    assertEqual(r.bits, 4096, 'the round-trip key is not the shape of the real course key');
+  const plainMd = assignmentToMd(makeAssignment({ inputMode: 'handwritten', targetPoints: 100 }));
+  const keyedMd = withKey(plainMd);
+
+  check('a .md carrying a course key still imports', () => {
+    const back = parseMdToAssignment(keyedMd);
+    assertEqual(back.courseCode, 'EEC1', 'the import was refused or mangled by the key block');
+    assertEqual(back.problems.length, 1, 'the key block disturbed the problems');
   });
 
-  check('course key: Export .md writes a ```pem block with the armour intact', () => {
-    const md = assignmentToMd(keyed);
-    assert(md.includes('```pem\n-----BEGIN PUBLIC KEY-----\n'),
-      `the .md does not open a pem fence on the armour:\n${md.split('\n').slice(0, 24).join('\n')}`);
-    assert(md.includes('-----END PUBLIC KEY-----\n```\n'), 'the pem fence does not close on the armour');
-    // Verbatim, not reconstructed: the whole armoured key is in the file as the
-    // instructor would paste it anywhere else.
-    assert(md.includes(coursePem), 'the key in the .md is not byte-identical to the key on the assignment');
+  check('the key is discarded rather than carried onto the assignment', () => {
+    const back = parseMdToAssignment(keyedMd);
+    assert(!('coursePublicKey' in back), 'a retired course key was carried onto the assignment');
   });
 
-  check('course key: Import Markdown reads it back byte-identical', () => {
-    const back = parseMdToAssignment(assignmentToMd(keyed));
-    assertEqual(back.coursePublicKey, normalizeCoursePublicKey(coursePem),
-      'the course key did not survive the .md round trip');
-  });
-
-  check('course key: export → fresh import → export agrees on the key', async () => {
-    // THE ACCEPTANCE TEST. Step 3 is the one that used to fail: the reimport
-    // held no key at all, so the second spec silently fell back to gb1.
-    const first = await buildAssignmentSpec(keyed);
-    const reimported = parseMdToAssignment(assignmentToMd(keyed));
-    const second = await buildAssignmentSpec(reimported);
-    assert('coursePublicKey' in second, 'the second export lost the course key — gb2 reverted to gb1');
-    assertEqual(second.coursePublicKey, first.coursePublicKey,
-      'the two assignment_spec.json files disagree about the course key');
-    assertEqual(second.coursePublicKey, normalizeCoursePublicKey(coursePem),
-      'the key in the spec is not the key that was set');
-  });
-
-  check('course key: strip the block and the spec carries no key at all', async () => {
-    // The deliberate negative — proof the check above can fail. A .md with no
-    // ```pem block must produce a spec with no `coursePublicKey` field, which is
-    // what every file written before 2026-09-05 looks like.
-    const stripped = stripKeyBlock(assignmentToMd(keyed));
-    assert(!stripped.includes('BEGIN PUBLIC KEY'), 'the strip helper left the key in the file');
-    const back = parseMdToAssignment(stripped);
-    assert(!('coursePublicKey' in back), 'importing a keyless .md invented a course key');
-    const spec = await buildAssignmentSpec(back);
-    assert(!('coursePublicKey' in spec), 'a keyless import still wrote a course key into the spec');
-  });
-
-  check('course key: a keyless .md stays keyless in both directions', () => {
-    const md = assignmentToMd(keyless);
-    assert(!md.includes('```pem'), 'a .md gained a pem fence it never had');
-    assert(!('coursePublicKey' in parseMdToAssignment(md)), 'importing a keyless .md invented the field');
-  });
-
-  check('course key: a malformed block warns, drops the key, and never refuses the file', () => {
-    // Rejecting the FILE would lock the author out of the one screen where a
-    // bad key can be replaced. So: the assignment lands intact, without a key,
-    // and the instructor is told — a stated downgrade rather than a silent one.
-    const md = assignmentToMd(keyed).replace(coursePem, 'this is not a key');
+  check('the import says so, in words an instructor can act on', () => {
     const warnings = [];
-    const back = parseMdToAssignment(md, warnings);
-    assert(!('coursePublicKey' in back), 'a malformed key was carried onto the assignment');
-    assertEqual(back.problems.length, keyed.problems.length, 'a malformed key cost the file its problems');
-    assertEqual(back.title, keyed.title, 'a malformed key cost the file its title');
-    assert(warnings.some(w => /pem block/.test(w) && /WITHOUT a course key/.test(w)),
-      `nothing warned about the rejected key: ${JSON.stringify(warnings)}`);
+    parseMdToAssignment(keyedMd, warnings);
+    const joined = warnings.join(' | ');
+    assert(joined.length > 0, 'the key was dropped silently — the one outcome the rule forbids');
+    assert(/course public key/i.test(joined), `the notice does not name what was found: ${joined}`);
+    assert(/discard|no longer|removed/i.test(joined),
+      `the notice does not say the key was discarded: ${joined}`);
   });
 
-  check('course key: a private key in the block is rejected, not carried', () => {
-    const md = assignmentToMd(keyed).replace(
-      coursePem,
-      '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B\n-----END PRIVATE KEY-----');
+  check('a .md with no key block is not warned about', () => {
     const warnings = [];
-    assert(!('coursePublicKey' in parseMdToAssignment(md, warnings)),
-      'a private key pasted into the block was accepted as the course key');
-    assert(warnings.length === 1, `expected exactly one warning, got ${JSON.stringify(warnings)}`);
+    parseMdToAssignment(plainMd, warnings);
+    assert(warnings.length === 0,
+      `a keyless file was warned about anyway: ${warnings.join(' | ')}`);
   });
 
-  check('course key: a PEM below the first problem is prose, not the course key', () => {
-    // The key is read from the metadata region only. A question that quotes a
-    // public key — an assignment about RSA is not far-fetched — is text.
-    const md = assignmentToMd(keyless)
-      .replace(/^(## Problem 1:.*)$/m, `$1\n\n\`\`\`pem\n${coursePem}\n\`\`\``);
-    assert(md.includes('BEGIN PUBLIC KEY'), 'the probe did not place a key in the problem');
-    assert(!('coursePublicKey' in parseMdToAssignment(md)),
-      'a PEM inside a problem was read as the course key');
+  check('a ```pem block below the first problem is prose, not a leftover key', () => {
+    const warnings = [];
+    parseMdToAssignment(plainMd + '\n' + KEY_BLOCK, warnings);
+    assert(warnings.length === 0,
+      `a PEM quoted inside a problem was read as a course key: ${warnings.join(' | ')}`);
   });
 
-  // The two parsers are required to move in lockstep. This holds them to it on
-  // the field whose absence silently downgraded students' encryption.
+  check('a spec or backup carrying the field is stripped and reported', () => {
+    const imported = { ...makeAssignment(), coursePublicKey: 'anything at all' };
+    const notices = stripRetiredFields(imported);
+    assert(!('coursePublicKey' in imported), 'the retired field survived the strip');
+    assertEqual(notices.length, 1, 'the strip did not report exactly one notice');
+    assert(/course public key/i.test(notices[0]), `unexpected notice: ${notices[0]}`);
+  });
+
+  check('a file with nothing retired on it produces no notice', () => {
+    const clean = makeAssignment();
+    assertEqual(stripRetiredFields(clean), [], 'a clean file was reported about');
+  });
+}
+
+// =====================================================
+// THE ASSIGNMENT KIND SURVIVES EVERY ROUND TRIP, AND NEVER REACHES A STUDENT
+// =====================================================
+// There are two kinds of assignment, conventional and reader, and exactly one
+// per assignment. It cannot be derived from anything else in the file, so every
+// route that claims to restore an assignment has to carry it — and the route
+// that goes to a student has to not.
+//
+// Why the negative is a test rather than a convention: the whole design is that
+// NOTHING student-facing carries the kind, so there is no claim downstream for
+// anything to validate. One well-meaning addition to the whitelist would undo
+// that quietly, and the export would still look correct.
+{
+  const conventional = makeAssignment({ inputMode: 'handwritten', targetPoints: 100, assignmentKind: 'conventional' });
+  const reader = makeAssignment({ inputMode: 'handwritten', targetPoints: 100, assignmentKind: 'reader' });
+
+  // §4.4 (1) — export .md, import it, export again; identical both times.
+  for (const original of [conventional, reader]) {
+    const kind = original.assignmentKind;
+    check(`kind round trip: a ${kind} assignment survives Export .md → Import Markdown`, () => {
+      const first = assignmentToMd(original);
+      const back = parseMdToAssignment(first);
+      assertEqual(back.assignmentKind, kind, 'the kind changed on import');
+      const second = assignmentToMd(back);
+      assertEqual(parseMdToAssignment(second).assignmentKind, kind,
+        'the kind changed on the second export');
+      assertEqual(second, first, 'the .md was not stable across the round trip');
+    });
+  }
+
+  // §4.4 (2) — the authoring backup, whose entire job is completeness.
+  for (const original of [conventional, reader]) {
+    const kind = original.assignmentKind;
+    check(`kind round trip: a ${kind} assignment survives the authoring backup`, () => {
+      const restored = readAuthoringBackup(JSON.parse(buildAuthoringBackup(original)));
+      assertEqual(restored.assignmentKind, kind, 'the authoring backup lost the kind');
+    });
+  }
+
+  // The .md default, stated rather than assumed: absent means conventional,
+  // exactly as an absent **Input:** means electronic. A conventional assignment
+  // therefore writes no line and an older file round-trips byte-for-byte.
+  check('kind: a conventional assignment writes no **Kind:** line', () => {
+    assert(!/\*\*Kind:\*\*/.test(assignmentToMd(conventional)),
+      'a conventional assignment wrote a Kind line, which breaks byte-identity for older files');
+    assert(/^\*\*Kind:\*\* reader$/m.test(assignmentToMd(reader)),
+      'a reader assignment did not write its Kind line');
+  });
+
+  check('kind: an .md with no **Kind:** line imports as conventional', () => {
+    const md = assignmentToMd(conventional);
+    assertEqual(parseMdToAssignment(md).assignmentKind, 'conventional',
+      'a file with no Kind line did not default to conventional');
+  });
+
+  check('kind: an unrecognised value is conventional, not a third kind', () => {
+    const md = assignmentToMd(conventional).replace('# EEC1:', '**Kind:** sideways\n\n# EEC1:');
+    assertEqual(parseMdToAssignment(md).assignmentKind, 'conventional',
+      'a third value survived into the assignment');
+  });
+
+  // §4.3, last row — the one that must NOT carry it.
+  check('kind: it is not in STUDENT_SPEC_FIELDS', () => {
+    assert(!STUDENT_SPEC_FIELDS.assignment.includes('assignmentKind'),
+      'assignmentKind is on the student whitelist; the student file must not carry the kind');
+  });
+
+  check('kind: a real exported student spec carries no kind', async () => {
+    const spec = await buildAssignmentSpec(reader);
+    assert(!('assignmentKind' in spec),
+      'the exported student spec carries the assignment kind');
+  });
+
+  // §4.2 — the migration default is applied, and announced.
+  check('kind: a file with no kind is adopted as conventional AND says so', () => {
+    const legacy = { ...makeAssignment() };
+    delete legacy.assignmentKind;
+    const notices = adoptAssignmentKind(legacy);
+    assertEqual(legacy.assignmentKind, 'conventional', 'the default was not applied');
+    assertEqual(notices.length, 1, 'the default was applied silently');
+    assert(/conventional/i.test(notices[0]), `the notice does not name the value: ${notices[0]}`);
+  });
+
+  check('kind: a file that already answered is not warned about', () => {
+    assertEqual(adoptAssignmentKind({ ...makeAssignment(), assignmentKind: 'reader' }), [],
+      'an assignment that carried its own kind was warned about anyway');
+  });
+
+  check('kind: a third value counts as unanswered rather than being kept', () => {
+    const odd = { ...makeAssignment(), assignmentKind: 'sideways' };
+    const notices = adoptAssignmentKind(odd);
+    assertEqual(odd.assignmentKind, 'conventional', 'an invented kind was kept');
+    assertEqual(notices.length, 1, 'an invented kind was replaced silently');
+  });
+
+  // The instructor-readable artifact (§4.3, "pick where; say where").
+  // §4.4 (3) — convert.py over an exported .md agrees with what the app parsed.
+  // The two parsers are required to move in lockstep and this is the field the
+  // work order added, so it is the one most likely to be added to only one.
   {
     const python = ['python', 'python3', 'py'].find(exe =>
       spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
-    const name = 'course key: convert.py reads the same block the app writes';
+    const name = 'kind: convert.py reads the same **Kind:** line the app writes';
     if (!python) results.push(`  SKIP  ${name} (no Python interpreter on PATH)`);
     else check(name, () => {
-      const work = mkdtempSync(join(tmpdir(), 'gb-course-key-'));
-      const mdPath = join(work, 'CourseKeyProbe.md');
-      writeFileSync(mdPath, assignmentToMd(keyed), 'utf8');
-      const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), mdPath], { encoding: 'utf8' });
-      assert(run.status === 0, `convert.py failed: ${run.stderr || run.stdout}`);
-      const spec = JSON.parse(readFileSync(join(work, 'CourseKeyProbe_spec.json'), 'utf8'));
-      assertEqual(spec.coursePublicKey, parseMdToAssignment(assignmentToMd(keyed)).coursePublicKey,
-        'convert.py and mdParserService disagree about the ```pem block');
-      assertEqual(spec.coursePublicKey, normalizeCoursePublicKey(coursePem),
-        'convert.py did not read the course key');
-
-      // And the same negative, so the two agree about absence too.
-      const barePath = join(work, 'CourseKeyBare.md');
-      writeFileSync(barePath, assignmentToMd(keyless), 'utf8');
-      const bare = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), barePath], { encoding: 'utf8' });
-      assert(bare.status === 0, `convert.py failed on the keyless file: ${bare.stderr || bare.stdout}`);
-      const bareSpec = JSON.parse(readFileSync(join(work, 'CourseKeyBare_spec.json'), 'utf8'));
-      assert(!('coursePublicKey' in bareSpec), 'convert.py invented a course key on a keyless file');
+      const work = mkdtempSync(join(tmpdir(), 'gb-kind-'));
+      for (const original of [conventional, reader]) {
+        const kind = original.assignmentKind;
+        const mdPath = join(work, `KindProbe_${kind}.md`);
+        writeFileSync(mdPath, assignmentToMd(original), 'utf8');
+        const run = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), mdPath], { encoding: 'utf8' });
+        assert(run.status === 0, `convert.py failed: ${run.stderr || run.stdout}`);
+        const spec = JSON.parse(readFileSync(join(work, `KindProbe_${kind}_spec.json`), 'utf8'));
+        assertEqual(spec.assignmentKind, kind, `convert.py read the wrong kind for a ${kind} assignment`);
+        assertEqual(spec.assignmentKind, parseMdToAssignment(assignmentToMd(original)).assignmentKind,
+          'convert.py and mdParserService disagree about **Kind:**');
+      }
       rmSync(work, { recursive: true, force: true });
     });
   }
+
+  check('kind: the export notice states it, so a table can be built by reading', async () => {
+    for (const a of [conventional, reader]) {
+      const entries = await exportPdfSvc.buildExportEntries(a);
+      const notice = entries[exportPdfSvc.DISTRIBUTION_NOTICE_NAME];
+      assert(typeof notice === 'string' && notice.length > 0, 'no distribution notice was written');
+      assert(notice.includes(`Assignment kind: ${a.assignmentKind}.`),
+        `the notice does not state the kind for a ${a.assignmentKind} assignment`);
+    }
+  });
 }
 
 // ---------- report ----------

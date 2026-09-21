@@ -452,30 +452,20 @@ check('a changed rectangle changes layout_id — the stale-map guard actually bi
 // `layout_id` is in the QR on every printed page and a moved hash makes the
 // Submission app refuse to crop.
 //
-// The key is generated here rather than read from disk: what is under test is
-// that a key changes no geometry, not which key it is. 4096 bits, because that
-// is the shape of the real course key.
+// What used to be here: a 4096-bit course key was generated and asserted to
+// move neither the layout hash nor the page count. Submission encryption was
+// removed from the pipeline on 2026-09-21 and there is no key to set.
+//
+// The SECOND check outlived the key it was written for and is kept. It never
+// really depended on the key: what it holds is that the restore route gives
+// back the same sheet — same rectangles, same hash, same page count — and
+// that property is exactly as load-bearing now as it was then. `layout_id` is
+// printed into the QR on paper already in students' hands, so a round trip
+// that quietly moves it is a reprint, not a redeploy.
 {
-  const pair = await webcrypto.subtle.generateKey(
-    { name: 'RSA-OAEP', modulusLength: 4096, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
-    true, ['encrypt', 'decrypt']
-  );
-  const der = Buffer.from(await webcrypto.subtle.exportKey('spki', pair.publicKey)).toString('base64');
-  const COURSE_PEM =
-    `-----BEGIN PUBLIC KEY-----\n${der.replace(/(.{64})/g, '$1\n').trimEnd()}\n-----END PUBLIC KEY-----\n`;
-
-  check('course key: setting one moves neither layout_id nor the page count', async () => {
-    const keyed = await gen.generateTemplate({ ...appendixB, coursePublicKey: COURSE_PEM });
-    assertEqual(keyed.layoutId, t.layoutId, 'setting a course key moved the layout id');
-    assertEqual(keyed.pageCount, t.pageCount, 'setting a course key changed the page count');
-  });
-
-  check('course key: layout_id survives Export .md → Import Markdown', async () => {
-    // The whole point of putting the key in the .md is that the restore route
-    // gives back the same assignment. Same rectangles, same hash, key intact.
-    const md = exportSvcForInstr.assignmentToMd({ ...appendixB, coursePublicKey: COURSE_PEM });
+  check('layout_id survives Export .md → Import Markdown', async () => {
+    const md = exportSvcForInstr.assignmentToMd(appendixB);
     const back = mdParserForKey.parseMdToAssignment(md);
-    assertEqual(back.coursePublicKey, COURSE_PEM.trim(), 'the key did not survive the .md round trip');
     const after = await gen.generateTemplate(back);
     assertEqual(after.layoutId, t.layoutId, 'the .md round trip moved the layout id');
     assertEqual(after.pageCount, t.pageCount, 'the .md round trip changed the page count');

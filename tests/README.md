@@ -7,17 +7,13 @@ ships inside Vite and runs it against the same WebCrypto the browser uses. The
 last two read the repository itself rather than the app, and are described at
 the end.
 
-- **`validateCoursePublicKey()`** — the fixture key reports 2048-bit; 2048 and
-  4096 pass clean; an off-contract 3072-bit key warns but is not hard-blocked;
-  and every rejection path returns a message that says what is actually wrong
-  (private key, PKCS#1, missing END line, empty body, non-key base64, garbage).
-- **`buildAssignmentSpec()`** — with no key the serialized spec is byte-for-byte
-  what it was before gb2 existed; with a key it carries the exact PEM and
-  nothing else changes; an unusable key or a private key aborts the export
-  rather than shipping a spec students cannot submit against.
-- **Cross-app** — a spec built here is handed to the Student Submission app's
-  `encryptJsonGb2()`, and the fixture private key opens the result. This is the
-  check that would catch the two apps drifting apart.
+- **`buildAssignmentSpec()`** — the serialized spec is byte-for-byte the
+  assignment it was built from, and survives the `gb1` encode/decode round trip.
+  A legacy course key on a stored project never reaches it.
+- **A retired course key is reported, not swallowed** — a `.md` with a
+  `` ```pem `` block still imports, the key is discarded, and the import says so
+  in words an instructor can act on. A keyless file is not warned about, and a
+  PEM quoted below the first problem is prose.
 
 - **Handwritten input mode** — the `[handwritten]` / `[handwritten:human]` media
   round-trip through `.md` export, `.md` import and `grading_rubric.json`, and a
@@ -69,14 +65,14 @@ the end.
   the fixture. A third drives the failure deliberately — drop a field from the
   serialised form and the deep-equality check must catch it.
 
-  It also holds the two consequences that make the file worth having:
+  It also holds the consequence that makes the file worth having:
   `targetPoints` survives (the `.md` route loses it, and the damage is delayed a
-  cycle — the reimport looks right and the *next* export halves every point) and
-  `coursePublicKey` survives (losing it silently reverts gb2 to gb1). And the
-  import warning is checked against a **real** student spec rather than a guess:
-  it must name the prompts, the grader notes, the answer-space settings and the
-  point target — and must **not** claim the course key is lost, because the
-  whitelist carries it. A warning that overstates gets ignored.
+  cycle — the reimport looks right and the *next* export halves every point).
+  And the import warning is checked against a **real** student spec rather than
+  a guess: it must name the prompts, the grader notes, the answer-space settings
+  and the point target — and must **not** mention a course key, which is no
+  longer a field at all. A warning that names things that cannot exist gets
+  ignored along with the real ones.
 
 - **The ZIP is split, and its notice cannot drift** (§13) — every entry is under
   `student/` or `instructor/` bar the notice at the root; `student/` holds only
@@ -478,34 +474,26 @@ bundle tests assert there is something to scan before scanning it. The existing
 `SKIP` lines, which name the absent file, were already this pattern; this
 generalises it.
 
-## The fixture
+## The fixture — no longer needed
 
-Tests need `gb2_test_fixture.json` — a throwaway 2048-bit keypair plus a
-known-good SPKI PEM.
+**There is no fixture and none is looked for.** Until 2026-09-21 the suite
+wanted `gb2_test_fixture.json`, an uncommitted throwaway keypair, without which
+a block of course-key checks reported SKIPPED. Submission encryption was removed
+from the pipeline that day, the checks went with it, and every check here now
+runs on every machine with nothing to fetch first.
 
-It is **not committed**: it contains a private key, test-only or not, and this
-repo is public. Default lookup is `../Encryption/gb2_test_fixture.json`
-relative to the repo root; override with `GB2_FIXTURE`:
+One cross-repo check still reads `GradeBridge-Student-Submission` if it is
+checked out alongside, and skips with a named reason if it is not: it compares
+the student-spec whitelist against the fields that app declares.
 
-```bash
-GB2_FIXTURE=/path/to/gb2_test_fixture.json npm test
-```
-
-Without it the suite still runs every fixture-independent check using ephemeral
-keypairs and reports the rest as SKIPPED. The cross-app check additionally
-needs `GradeBridge-Student-Submission` checked out alongside this repo.
-
-**Never add a private key to this repo.** This app handles public keys only —
-it neither generates keypairs nor accepts a private one.
+**Never add a private key to this repo.** There is now nothing in this app that
+would have a use for one.
 
 ## UI verification
 
-The paste field itself was exercised in the running app on 2026-08-10 (Chrome,
-`npm run dev`): the fixture key shows "Valid RSA public key (2048-bit) —
-exported specs will carry it"; a private key, a PKCS#1 key, garbage, and a
-truncated paste each show their specific error; an empty box reports the gb1
-default. The key saves to localStorage, survives a reload into the editor, and
-re-validates on load without needing another blur.
+*The course-key paste field was exercised in the running app on 2026-08-10. The
+field was removed on 2026-09-21 along with the rest of submission encryption, so
+that verification no longer describes a screen that exists.*
 
 Math rendering was exercised on 2026-08-15 (Chrome, `npm run dev`) by importing
 `fixtures/Math_Fixture.md` and generating every output:

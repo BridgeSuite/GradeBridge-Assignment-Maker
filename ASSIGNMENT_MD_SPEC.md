@@ -34,10 +34,11 @@ Sketch the transverse E-field and justify the maximum.
 |---|---|---|
 | `# {COURSE}: {TITLE}` | **yes** | Course code and assignment title. Exactly one, first. Format: `# EEC130A: Homework 3`. |
 | `**Input:** handwritten` | no | Marks the whole assignment as handwritten. Any other value, or the line being absent, means **electronic**. Emitted by Export only for handwritten assignments, so older electronic files have no such line. |
+| `**Kind:** reader` | no | Which of the two kinds of assignment this is. `reader` or `conventional`; **absent means `conventional`**, which is what every file written before 2026-09-21 is. Emitted by Export only for reader assignments, so older files stay byte-identical. Whole-assignment: there is no per-problem kind. **Never travels to the student** — see §13. |
 | `**Template ID:** {ID}` | no | Handwritten only. Goes in the printed QR as the layout key (`[A-Z0-9]{1,12}`, unique across the course). Emitted only when the author pinned one; absent means it is derived from the course code and title. |
 | `**AI Feedback:** on` | no | Whether students may request AI feedback on any problem in this assignment. `on` or `off`; absent means **off**. Emitted by Export only when on, so older files stay byte-identical. |
 | `**Submit at:** {address}` | no | Where students hand the work in. Printed on page 1 of the handwritten sheet, under **When you have finished writing** (§10). Single line; whitespace is collapsed. **Absent means that whole section is not printed** — not a placeholder and not a gapped sentence. Emitted by Export only when set, so older files stay byte-identical. |
-| `` ```pem `` fenced block | no | The **course public key** (SPKI PEM), the field that turns gb2 encryption on. A fenced block rather than a row, because a 4096-bit key is fourteen lines. Read from the metadata region only. Emitted by Export only when set, so older files stay byte-identical. See below. |
+| `` ```pem `` fenced block | no | **Retired 2026-09-21.** Was the course public key. Never written now; a file that still carries one imports, and the import says the key was discarded. See below. |
 | `**Preamble:** {text}` | no | Instructions shown to the student. Single line. |
 | `**Due:** {anything}` | no | **Ignored on import** — due dates are managed in Canvas. Safe to include or omit. |
 
@@ -80,49 +81,70 @@ grading, which is governed by the sub-part type tags. The feedback itself, the p
 election, and the tally are handled downstream in Gradescope, not by the Assignment Maker or the
 Student app; this line only records the instructor's choice and carries it into the exported spec.
 
-### The course public key
+### The assignment kind
 
-```pem
------BEGIN PUBLIC KEY-----
-MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA...
------END PUBLIC KEY-----
+```
+**Kind:** reader
 ```
 
-The block sits in the metadata region, above the first `## Problem`. Its contents are the
-armoured SPKI PEM exactly as it would be pasted anywhere else — nothing is re-encoded and
-nothing is reconstructed on import.
+One line, two values, and exactly one kind per assignment. There is no per-problem or
+per-sub-part kind, no assignment that is partly one and partly the other, and no runtime
+condition that changes it.
 
-**Why a fenced block and not a metadata row.** Every other row in the table above is
-single-line by construction, and a 4096-bit SPKI PEM is fourteen lines. The alternative
-considered was a single line carrying the base64 body alone, with the armour rebuilt on import;
-it was rejected because it invents a second representation of a key that is armoured
-everywhere else it appears — the editor's paste box, `assignment_spec.json`, the `.pem` file the
-institution issues, the autograder — and a reader meeting that line could not tell what it was.
+**Absent means `conventional`.** Every assignment authored before 2026-09-21 predates the field
+and all of them are conventional, so a file with no `**Kind:**` line is read as conventional and
+a conventional assignment writes no line — which is what keeps older files byte-identical
+through `Export .md` → `Import Markdown`. This is the same documented-default convention as
+`**Input:**` (absent = electronic) and `**AI Feedback:**` (absent = off).
 
-**It is read from the metadata region only.** A `` ```pem `` block below the first `## Problem`
-is prose, not the course key, so an assignment that quotes a public key in a question is not
-misread as configuring one.
+**A value that is neither is conventional, not a third kind.** `**Kind:** sideways` imports as
+conventional. The field has two legal values and the parser does not invent a third.
 
-**Emitted only when set.** A file with no key has no block, which is what every file written
-before 2026-09-05 looks like, and what an assignment using the standard (gb1) encoding means.
+**The routes that carry it, and the one that must not.** The `.md` carries it, the authoring
+backup carries it, `converter/convert.py` reads and writes it in lockstep with the app, and the
+export's `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` states it in plain text so a table of
+assignment to kind can be built by reading exports. **`assignment_spec.json` does not carry it
+and must never be given it** (§13): the student's browser has no use for it, and anything in
+that file is a claim rather than a fact, because the gb1 key ships inside the bundle. Nothing
+student-facing carries the kind at all, so there is no claim for anything downstream to
+validate. A test asserts it stays off the whitelist.
 
-**A malformed block rejects the key, never the file.** The assignment imports without a key —
-so exports fall back to gb1 — and the importer says so. Refusing the whole file would lock the
-author out of the one screen where a bad key can be replaced. The check is
-`looksLikeCoursePublicKey` in the parser (structural, synchronous) and `validateCoursePublicKey`
-in the app (a real WebCrypto import); both are the checks the export and the editor already use.
+---
 
-**The key is not a secret and this block does not make it one.** It is the *public* half. It
-already ships to every student inside `assignment_spec.json` (§13's whitelist includes
-`coursePublicKey`), because the student's browser is what encrypts with it. What must never
-appear in a `.md`, or anywhere else that travels, is the private half — the institution holds
-that and this app never touches it.
+### The course public key — RETIRED 2026-09-21
 
-**Why it is in the `.md` at all.** The `.md` is meant to be the source: the instructor authors
-there and the app imports it. Until 2026-09-05 the format could not express `coursePublicKey`,
-so `Export .md` → `Import Markdown` dropped it in silence, the next export fell back to the
-unhardened gb1 encoding, and nothing reported it. Anything the app holds that the `.md` cannot
-express is a place where the source of truth quietly moves into browser storage.
+**Submission encryption has been removed from the pipeline.** The student's work now travels in
+plaintext over TLS with integrity by hash, and the campus host receives only the answer-region
+crops. There is nothing left for a per-course key to do, so the `` ```pem `` block is no longer
+written by Export and the field no longer exists on `Assignment`.
+
+**A file that still carries one is not refused.** Every `.md` exported between 2026-09-05 and
+2026-09-21 has the block, and an authoring backup or spec JSON from that window has the field.
+All of them import, because the file is perfectly good without the key, and refusing would cost
+the author their work for no safety gain.
+
+**Nor is it dropped in silence, which is the part that matters.** The import says that the file
+carries a course public key, that submission encryption has been removed, and that the key has
+been discarded. An instructor who once pasted a key and can still see it at the top of their own
+file has no other way to learn that it stopped doing anything — and the belief that submissions
+are still being sealed is more dangerous than the inert key itself.
+
+**Structure is not examined.** A well-formed key and a malformed one now have exactly the same
+consequence, so telling them apart would imply a distinction the pipeline no longer makes. The
+detector is `hasCourseKeyBlock` in `services/mdParserService.ts`, mirrored by
+`has_course_key_block` in `converter/convert.py`; the wording is
+`courseKeyRemovedNotice` in `services/importNotices.ts`.
+
+**It is still read from the metadata region only.** A `` ```pem `` block below the first
+`## Problem` is prose, so an assignment that quotes a public key in a question is not reported as
+carrying a retired one.
+
+*What stood here — why a fenced block rather than a metadata row, and the 2026-09-05 change that
+put the key in the `.md` after `Export .md` → `Import Markdown` had been dropping it in silence —
+is kept in the completion report for that work,
+`docs/session/COMPLETION_AM_KEY_IN_MD_2026-09-05.md`. The general rule it was an instance of
+outlived it: anything the app holds that the `.md` cannot express is a place where the source of
+truth quietly moves into browser storage.*
 
 ---
 
@@ -786,7 +808,7 @@ blacklist is silent; the failure mode of a whitelist is a missing feature that s
 
 | Level | Always written | Written only when present |
 |---|---|---|
-| assignment | `id`, `courseCode`, `title`, `preamble`, `problems`, `createdAt`, `updatedAt` | `inputMode`, `aiFeedback`, `coursePublicKey` |
+| assignment | `id`, `courseCode`, `title`, `preamble`, `problems`, `createdAt`, `updatedAt` | `inputMode`, `aiFeedback` |
 | problem | `id`, `name`, `description`, `subsections` | — |
 | sub-part | `id`, `name`, `description`, `points`, `submissionType` | `minWords`, `maxImages`, `config` |
 
@@ -1033,7 +1055,7 @@ complete:
 | Route | Restores | Loses |
 |---|---|---|
 | `{stem}_authoring_backup.json` → Import JSON | **everything** | — |
-| `{stem}.md` → Import Markdown | prompts byte-for-byte, `answerLines`, `handwrittenGradingMode`, `inputMode`, `pageFormatId`, `aiFeedback`, **`targetPoints`, reconstructed from the file's own total** (2026-09-01), and **`coursePublicKey`** (2026-09-05) | `config` |
+| `{stem}.md` → Import Markdown | prompts byte-for-byte, `answerLines`, `handwrittenGradingMode`, `inputMode`, `pageFormatId`, `aiFeedback`, and **`targetPoints`, reconstructed from the file's own total** (2026-09-01) | `config` |
 | `{stem}_OPEN_IN_APP.json` → Import JSON | what a student needs | `aiGradingPrompt`, `graderNote`, `answerLines`, `handwrittenGradingMode`, `targetPoints` |
 
 Two of those losses are worse than they look:

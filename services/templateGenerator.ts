@@ -301,7 +301,7 @@ const drawHeaderLine = (doc: jsPDF, assignmentId: string, k: number, n: number, 
  * from Gradescope authenticating the upload, so a blank for it is redundant;
  * students are told not to write their name on the pages, so a labelled blank is
  * a mixed message that will get filled in; a filled-in name is exactly the PII
- * the band gate and gb2 exist to keep out of the graded artifact; and grading is
+ * the band gate exists to keep out of the graded artifact; and grading is
  * meant to be blind to identity. Appendix C says the same — because the app
  * authenticates the student, there is no identity page. Nothing replaces it.
  */

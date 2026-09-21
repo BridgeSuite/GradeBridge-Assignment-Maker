@@ -16,16 +16,17 @@
 //     and moves `layout_id` — you do not get your assignment back, you get a
 //     different one that looks like yours.
 //   - `Export .md` carries far more (prompts byte-for-byte, `answerLines`,
-//     `inputMode`, `pageFormatId`, `aiFeedback`) but not `targetPoints`,
-//     `coursePublicKey` or `config` — and the ZIP did not even contain it.
-//     `targetPoints` is the nastiest of the three because the damage is delayed
-//     one cycle: the .md carries already-scaled values, so the reimport looks
-//     right and the NEXT export normalises to 100 and halves every point.
-//     Two of those three have since been fixed at the source: `targetPoints` on
-//     2026-09-01 (the import reads the file's own total) and `coursePublicKey`
-//     on 2026-09-05 (the .md carries a fenced ```pem block). `config` remains,
-//     and so does the reason this file exists — a route that has to be
-//     re-verified every time a field is added to `Assignment` is a guarantee
+//     `inputMode`, `pageFormatId`, `aiFeedback`) but not `targetPoints` or
+//     `config` — and the ZIP did not even contain it. `targetPoints` is the
+//     nastier of the two because the damage is delayed one cycle: the .md
+//     carries already-scaled values, so the reimport looks right and the NEXT
+//     export normalises to 100 and halves every point. It was fixed at the
+//     source on 2026-09-01 (the import reads the file's own total). A third
+//     field, the per-course submission key, was lost the same way, was fixed on
+//     2026-09-05, and was then removed from the pipeline altogether on
+//     2026-09-21 — it is no longer a field this file can lose. `config`
+//     remains, and so does the reason this file exists — a route that has to
+//     be re-verified every time a field is added to `Assignment` is a guarantee
 //     that decays quietly.
 //
 //   In every case the loss was silent.
@@ -119,10 +120,10 @@ const GAPS: Gap[] = [
     present: a => subs(a).some(s => s.handwrittenGradingMode) },
   { label: 'the point target — without it the next export normalises to 100 and rescales every point',
     present: a => a.targetPoints !== undefined },
-  { label: 'the course public key — without it exports fall back from gb2 to gb1',
-    present: a => !!a.coursePublicKey },
   { label: 'the submission address — without it page 1 of the printed sheet does not tell students how to hand the work in',
     present: a => !!(a.submissionAddress || '').trim() },
+  { label: 'the assignment kind (conventional or reader) — without it the assignment opens as conventional',
+    present: a => a.assignmentKind === 'conventional' || a.assignmentKind === 'reader' },
 ];
 
 const subs = (a: any): any[] =>

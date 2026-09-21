@@ -10,6 +10,7 @@ export const createExampleAssignment = (): Assignment => {
 
   return {
     id: uuidv4(),
+    assignmentKind: 'conventional',
     courseCode: 'ENG6',
     title: 'Mini-Project 2: Motion Analysis and Plotting Lab Report (Example)',
     preamble: `This is an EXAMPLE ASSIGNMENT to help you explore the Assignment Maker features.

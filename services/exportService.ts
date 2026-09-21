@@ -1,6 +1,6 @@
 
 import { Assignment, SubmissionType } from '../types';
-import { decryptJson, encryptJson, normalizeCoursePublicKey, validateCoursePublicKey } from './cryptoService';
+import { decryptJson, encryptJson } from './cryptoService';
 import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
 import { stemForGrader } from './figureText';
 import { generateTemplate } from './templateGenerator';
@@ -825,6 +825,23 @@ export const assignmentToMd = (assignment: Assignment): string => {
     lines.push(`**Input:** handwritten`);
     lines.push('');
   }
+  // THE ASSIGNMENT KIND, written only when it is `reader`.
+  //
+  // Absent means `conventional`, exactly as an absent `**Input:**` means
+  // electronic. That is a DOCUMENTED default (ASSIGNMENT_MD_SPEC.md §2), not a
+  // silent one: the .md can express both values, neither is lost on the round
+  // trip, and a file written before the field existed stays byte-identical.
+  //
+  // The alternative — always writing the line — was considered and rejected.
+  // It would fire the "defaulted to conventional" notice on every conventional
+  // .md ever imported, and a notice that appears on nearly every import is not
+  // read. That notice is for routes where absence is genuinely an unanswered
+  // question rather than a documented default: a stored project or an authoring
+  // backup written before 2026-09-21. See `services/importNotices.ts`.
+  if (normalized.assignmentKind === 'reader') {
+    lines.push(`**Kind:** reader`);
+    lines.push('');
+  }
   // Only when the author overrode it — a derived id is recomputed on import, so
   // writing it would pin a value that is meant to follow the course code and title.
   if (normalized.pageFormatId) {
@@ -844,27 +861,6 @@ export const assignmentToMd = (assignment: Assignment): string => {
   // is the silent-loss defect this suite has already paid for twice.
   if ((normalized.submissionAddress || '').trim()) {
     lines.push(`**Submit at:** ${normalized.submissionAddress!.trim()}`);
-    lines.push('');
-  }
-  // The course public key — the field that turns gb2 on. A 4096-bit SPKI PEM is
-  // fourteen lines, and the metadata rows above are single-line by construction,
-  // so this is a fenced block rather than a row. Nothing else in the pipeline
-  // touches it: `FIGURE_FENCE_OPEN_RE` matches only ```svg, and the metadata
-  // region's body is discarded by both parsers, so the PEM never reaches a
-  // description, an escaper or the `$...$` splitter.
-  //
-  // Emitted only when set, so a keyless file stays byte-identical. Carried at
-  // all because the .md is meant to be the source: until 2026-09-05 `Export .md`
-  // -> `Import Markdown` dropped the key silently, and the next export fell back
-  // to gb1 with nothing reporting it.
-  //
-  // NOT A SECRET. This is the public half; it ships to every student inside
-  // assignment_spec.json already.
-  const coursePem = normalizeCoursePublicKey(normalized.coursePublicKey || '');
-  if (coursePem) {
-    lines.push('```pem');
-    coursePem.split('\n').forEach(l => lines.push(l));
-    lines.push('```');
     lines.push('');
   }
   if (normalized.preamble) {
@@ -1103,7 +1099,7 @@ const SPEC_ASSIGNMENT_REQUIRED = ['id', 'courseCode', 'title', 'preamble', 'prob
  *  wrongly — and so the map, which decides where their answers are cut from,
  *  is neither readable nor editable on the way. Both present or both absent,
  *  never one. See THE EMBEDDED LAYOUT below. */
-const SPEC_ASSIGNMENT_OPTIONAL = ['inputMode', 'aiFeedback', 'coursePublicKey', 'layoutCsvName', 'layoutCsv'] as const;
+const SPEC_ASSIGNMENT_OPTIONAL = ['inputMode', 'aiFeedback', 'layoutCsvName', 'layoutCsv'] as const;
 const SPEC_PROBLEM_REQUIRED = ['id', 'name', 'description', 'subsections'] as const;
 const SPEC_SUBSECTION_REQUIRED = ['id', 'name', 'description', 'points', 'submissionType'] as const;
 const SPEC_SUBSECTION_OPTIONAL = ['minWords', 'maxImages', 'config'] as const;
@@ -1157,21 +1153,7 @@ export const buildAssignmentSpec = async (
   assignment: Assignment,
   layout?: EmbeddedLayout,
 ): Promise<Assignment> => {
-  // Validate the key before building, so a malformed one stops the export
-  // rather than silently producing submissions nobody can read.
-  const pem = normalizeCoursePublicKey(assignment.coursePublicKey || '');
-  if (pem) {
-    const check = await validateCoursePublicKey(pem);
-    if (!check.ok) {
-      throw new Error(`Export stopped: the course public key on this assignment is not valid. ${check.error}`);
-    }
-  }
-
   const source = { ...(assignment as unknown as Record<string, unknown>) };
-  // An empty or whitespace-only key is not a key: omit the field entirely so
-  // the spec stays identical to a pre-gb2 export and the student app falls back
-  // to gb1.
-  if (pem) source.coursePublicKey = pem; else delete source.coursePublicKey;
 
   // Both fields or neither, refused here rather than downstream: a spec naming a
   // map it does not carry, or carrying one it cannot name, is a shape no
@@ -1242,6 +1224,7 @@ const ANSWER_BEARING: Array<[suffix: string, what: string]> = [
 const buildDistributionNotice = (
   names: string[],
   student: { studentZip: string; studentPdf: string; studentUpload: string },
+  assignmentKind: Assignment['assignmentKind'],
 ): string => {
   const base = (n: string) => n.slice(n.lastIndexOf('/') + 1);
   const instructor = names.filter(n => n.startsWith(INSTRUCTOR_DIR));
@@ -1299,6 +1282,18 @@ const buildDistributionNotice = (
     'INSTRUCTOR ONLY. DO NOT GIVE THIS FOLDER TO STUDENTS.',
     '',
     'This export contains the answer key.',
+    '',
+    // WHERE THE ASSIGNMENT KIND IS READABLE BY A HUMAN.
+    //
+    // This file rather than the grader document, because the job it has to
+    // serve is building a table of assignment to kind across many exports.
+    // This is plain text, at the archive root, present in every export in both
+    // input modes, and one fixed line that greps. The grader document is HTML,
+    // is opened one at a time, and is read for rubrics rather than metadata.
+    //
+    // Stated as a fact about the export rather than as an instruction: nothing
+    // here asks the instructor to do anything about it.
+    'Assignment kind: ' + assignmentKind + '.',
     '',
     'Files here that contain answers (in ' + INSTRUCTOR_DIR + '):',
     ...answerRows.map(row),
@@ -1395,7 +1390,8 @@ export const buildExportEntries = async (
   // The notice names the student package, so it is generated from the same
   // function that names it on disk — never from a second copy of the pattern.
   entries[DISTRIBUTION_NOTICE_NAME] =
-    buildDistributionNotice(Object.keys(entries), { studentZip, studentPdf, studentUpload });
+    buildDistributionNotice(Object.keys(entries), { studentZip, studentPdf, studentUpload },
+                            assignment.assignmentKind);
   return entries;
 };
 

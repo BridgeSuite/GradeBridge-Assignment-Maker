@@ -8,7 +8,7 @@
  * registers perfectly, crops the wrong rectangles, and raises no error anywhere.
  *
  * Naming caution: `GB1` here is the page-format tag. It is unrelated to the
- * `gb1:` / `gb2:` submission-JSON encryption prefixes.
+ * `gb1:` encoding prefix on assignment JSON.
  */
 
 import { QR_PAYLOAD_MAX_CHARS, fmt4 } from './pageFormat';

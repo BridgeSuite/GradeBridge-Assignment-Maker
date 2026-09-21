@@ -48,11 +48,43 @@ export interface Problem {
 
 export type InputMode = 'electronic' | 'handwritten';
 
+/**
+ * The two kinds of assignment. Two values, no third, and no blank once set.
+ */
+export type AssignmentKind = 'conventional' | 'reader';
+
 export interface Assignment {
   id: string;
   courseCode: string;
   title: string;
   inputMode?: InputMode; // How students answer. Absent (older assignments) means 'electronic'.
+  /**
+   * Which of the two kinds of assignment this is.
+   *
+   * **Required, and there is exactly one per assignment.** No per-problem kind,
+   * no assignment that is partly one and partly the other, and no runtime
+   * condition that changes it. It is named `assignmentKind` rather than `type`
+   * or `mode` because `submissionType` and `inputMode` already exist in this
+   * file and mean other things.
+   *
+   * **Absent on load means `'conventional'`, and the load says so.** Every
+   * assignment authored before 2026-09-21 predates the field and all of them are
+   * conventional, so the default is right in every case it will ever be applied
+   * to. It is announced anyway: "right in every case so far" is exactly the
+   * reasoning that makes a silent default dangerous later, and this repo has
+   * twice paid for a field that went missing quietly — `answerLines`, which
+   * repaginates the sheet and moves `layout_id`, and `targetPoints`, which
+   * halves every point one export cycle after the import that lost it. See
+   * `assignmentKindDefaultedNotice` in `services/importNotices.ts`.
+   *
+   * **It never reaches the student.** It is not in `STUDENT_SPEC_FIELDS` and a
+   * test asserts it stays out. The student's browser has no use for it, and
+   * anything in that file is a claim rather than a fact because the gb1 key
+   * ships inside the bundle — so the pipeline is built with nothing
+   * student-facing carrying the kind at all, which leaves no claim for anything
+   * downstream to validate.
+   */
+  assignmentKind: AssignmentKind;
   pageFormatId?: string; // QR field 2, [A-Z0-9]{1,12}. Unset = derived from courseCode + title.
   /**
    * Whether students may request the gradeless, pointer-only AI feedback on any
@@ -85,7 +117,6 @@ export interface Assignment {
    * silently ignored on import.
    */
   targetPoints?: number; // Target total for point scaling (default 100)
-  coursePublicKey?: string; // SPKI PEM (public only). Present → students produce hardened gb2 submissions; absent → gb1.
   /**
    * Where a student goes to hand this assignment in — printed on page 1 of the
    * handwritten sheet, under "When you have finished writing".

@@ -8,9 +8,10 @@ import { exportService, isRescaleDeclined } from '../services/exportService';
 import { Layout, Card, Button } from '../components/Common';
 import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
-import { parseMdToAssignment, courseKeyWarning } from '../services/mdParserService';
+import { parseMdToAssignment } from '../services/mdParserService';
+import { adoptAssignmentKind, stripRetiredFields } from '../services/importNotices';
 import { degradeRetiredTypes } from '../services/retiredTypes';
-import { isEncoded, decryptJson, validateCoursePublicKey } from '../services/cryptoService';
+import { isEncoded, decryptJson } from '../services/cryptoService';
 
 const Dashboard: React.FC = () => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -98,6 +99,19 @@ const Dashboard: React.FC = () => {
         // the part degrades to Text and the instructor is told which one.
         const retired = degradeRetiredTypes(importedAssignment);
 
+        // A file written before 2026-09-21 can still carry a course public key.
+        // It is dropped rather than kept, and said rather than dropped quietly:
+        // an instructor looking at a key in their own backup file has no other
+        // way to learn it stopped meaning anything. See `importNotices.ts`.
+        const asRecord = importedAssignment as unknown as Record<string, unknown>;
+        const legacy = [
+          ...stripRetiredFields(asRecord),
+          // A file written before 2026-09-21 has no kind. It becomes
+          // conventional and says so — a value chosen on the author's behalf
+          // is announced, where a dead field being dropped is not.
+          ...adoptAssignmentKind(asRecord),
+        ];
+
         // Ensure timestamps exist
         const now = Date.now();
         if (typeof importedAssignment.createdAt !== 'number') {
@@ -121,8 +135,9 @@ const Dashboard: React.FC = () => {
 
         storageService.save(importedAssignment);
         loadAssignments();
-        alert(retired.length
-          ? ['Assignment imported.', '', ...retired].join('\n')
+        const notices = [...retired, ...legacy];
+        alert(notices.length
+          ? ['Assignment imported.', '', ...notices].join('\n')
           : "Assignment imported successfully!");
       } catch (error) {
         console.error(error);
@@ -154,27 +169,6 @@ const Dashboard: React.FC = () => {
         const warnings: string[] = [];
         const assignment = parseMdToAssignment(content, warnings);
 
-        // THE FULL KEY CHECK, WHICH THE PARSER CANNOT DO.
-        //
-        // `parseMdToAssignment` is synchronous and screens the ```pem block
-        // structurally (`looksLikeCoursePublicKey`). `validateCoursePublicKey`
-        // round-trips through WebCrypto and is therefore async, so it runs
-        // here, on the same existing check the export and the editor already
-        // use — a key that is armoured correctly but is not an importable RSA
-        // key is caught here rather than at export time.
-        //
-        // It drops the key and says so. It never refuses the file: the editor
-        // is where a bad key gets replaced.
-        if (assignment.coursePublicKey) {
-          const check = await validateCoursePublicKey(assignment.coursePublicKey);
-          if (!check.ok) {
-            delete assignment.coursePublicKey;
-            warnings.push(courseKeyWarning(check.error || 'the browser could not import it.'));
-          } else if (check.warning) {
-            warnings.push(check.warning);
-          }
-        }
-
         // Check for existing assignment with same courseCode + title
         const existing = storageService.getAll().find(
           a => a.courseCode === assignment.courseCode && a.title === assignment.title
@@ -187,14 +181,6 @@ const Dashboard: React.FC = () => {
           if (shouldOverwrite) {
             assignment.id = existing.id;
             assignment.createdAt = existing.createdAt;
-            // The .md now carries the course public key (2026-09-05), so the
-            // file wins where it has one. This fallback stays for the two cases
-            // it still covers: a .md written before the block existed, and one
-            // whose block was rejected above — in both, an overwrite would
-            // otherwise drop the key and quietly downgrade students to gb1.
-            if (!assignment.coursePublicKey && existing.coursePublicKey) {
-              assignment.coursePublicKey = existing.coursePublicKey;
-            }
           }
           // If cancel: keep new UUID → saves as new copy
         }

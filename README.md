@@ -453,47 +453,41 @@ Font Licences, which the build emits alongside them.
 
 - **Export your JSON regularly** — data is lost if browser cache is cleared
 - **The export ZIP is instructor-only and MUST NOT be given to students.** Four files in its `instructor/` folder contain answers: `{stem}_grader_document.html`, `{stem}_grading_rubric.json`, `{stem}_authoring_backup.json` and `{stem}.md`. Students receive only `{stem}_FOR_STUDENTS.zip`, the one entry at the archive root that is not in a folder. The ZIP carries a generated `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` at its root naming every file.
-- **`{stem}_authoring_backup.json` (in `instructor/`) is the file that restores an assignment completely** — the whole authoring object, unencrypted, including the grading prompts, grader notes, answer-space settings, the point target and the course public key. It is what Import JSON should be given. `{stem}_OPEN_IN_APP.json` (the student spec) restores only what a student needs, and Import Markdown misses `config`; both now say so on import rather than losing your work silently. (Import Markdown used to miss `targetPoints` too — fixed 2026-09-01, it now reads the file's own total — and `coursePublicKey`, fixed 2026-09-05, which the `.md` now carries as a fenced `` ```pem `` block.)
+- **`{stem}_authoring_backup.json` (in `instructor/`) is the file that restores an assignment completely** — the whole authoring object, unencrypted, including the grading prompts, grader notes, answer-space settings and the point target. It is what Import JSON should be given. `{stem}_OPEN_IN_APP.json` (the student spec) restores only what a student needs, and Import Markdown misses `config`; both now say so on import rather than losing your work silently. (Import Markdown used to miss `targetPoints` too — fixed 2026-09-01, it now reads the file's own total.)
 - **`aiGradingPrompt` and `graderNote` are NOT in the student spec (`{stem}_OPEN_IN_APP.json`).** The student's file is built from an explicit whitelist of the fields the Submission app reads, so no grading prompt, grader note, answer key or reference solution travels to a student's browser. Until 2026-08-31 the spec was the whole assignment object and did carry every prompt — if you hold an export made before then, treat its rubrics as disclosed. Nothing had been distributed.
 - **To reload an assignment as a template, use `Export .md` → `Import Markdown`**, which carries the prompts and grader notes in full. Importing an exported student spec restores the questions but not the grading material, because that material is no longer in the file.
 - Your rubrics reach the autograder by their proper route, `{Course}_{Title}_grading_rubric.json`, which stays with you
 
 ---
 
-## Course public key (hardened `gb2` submissions)
+## Course public key — removed 2026-09-21
 
-Optional, per assignment, in the editor under the preamble. Paste the **public**
-key issued for your course — SPKI PEM, starting with
-`-----BEGIN PUBLIC KEY-----` — and it is carried in the exported
-`{stem}_OPEN_IN_APP.json` as `coursePublicKey`, and in the exported `.md` as a
-fenced `` ```pem `` block at the top of the file, so `Export .md` →
-`Import Markdown` gives the key back. Until 2026-09-05 that round trip dropped
-it in silence and the next export quietly fell back to `gb1`.
+**There is no longer a course public key, and no key box in the editor.**
+Submission encryption has been removed from the pipeline: student work now
+travels in plaintext over TLS with integrity by hash, and the campus host
+receives only the answer-region crops. There is nothing a per-course key would
+do, so nothing asks you for one.
 
-Setting a key selects the hardened `gb2` envelope for submissions; leaving it
-empty keeps the existing `gb1` default. Under `gb2` a per-submission AES key is
-wrapped with your course key, so only the autograder's matching private key can
-open a submission.
+**If you already set one, you need do nothing.** An assignment, an authoring
+backup, or a `.md` with a `` ```pem `` block at the top still imports. The key is
+discarded and the import tells you so — not because the leftover key is
+harmful, but because otherwise you might reasonably go on believing your
+students' submissions are still being sealed with it. They are not.
 
 **What a submission actually contains is not specified here.** This app does not
 build submissions, and a second copy of another app's contract drifts the moment
 that contract moves. The payload, its encodings and its filenames are specified
 in the Student Submission app's
 [`AUTOGRADER_ZIP_SPEC.md`](https://github.com/BridgeSuite/GradeBridge-Student-Submission/blob/main/AUTOGRADER_ZIP_SPEC.md),
-**which governs**. This page previously restated that contract, went stale when
-it changed, and described the student's name as travelling in places it no
-longer does.
+**which governs**.
 
 Identity comes from the student's authenticated upload to their institution's
 LMS.
 
-The field validates on blur and reports the key size. It refuses PKCS#1 keys
-(`BEGIN RSA PUBLIC KEY`) and — emphatically — anything containing a private
-key. **This app never generates keypairs and must never be given a private
-key**; your institution issues the pair and holds the private half. An
-assignment whose key does not validate will not save, and will not export.
-
-Leaving the field empty keeps today's behaviour exactly.
+**`gb1` is unchanged and is a different thing.** The `gb1:` encoding on
+`{stem}_OPEN_IN_APP.json` — the assignment file students load — is still
+applied. It is tamper resistance on the assignment, not confidentiality of a
+submission, and its key ships inside the app by design.
 
 ---
 
