@@ -35,7 +35,7 @@ Sketch the transverse E-field and justify the maximum.
 | `# {COURSE}: {TITLE}` | **yes** | Course code and assignment title. Exactly one, first. Format: `# EEC130A: Homework 3`. |
 | `**Input:** handwritten` | no | Marks the whole assignment as handwritten. Any other value, or the line being absent, means **electronic**. Emitted by Export only for handwritten assignments, so older electronic files have no such line. |
 | `**Finalized:** {date} layout {id} content {fingerprint}` | no | Present once the instructor has issued the assignment. After that an export that would change the student-facing content or the printed layout is refused until it is reopened. `**Finalized-was:**` lines, zero or more, are the history of earlier issues. See **Finalized assignments** below. |
-| `**Kind:** reader` | no | Which of the two kinds of assignment this is. `reader` or `conventional`; **absent means `conventional`**, which is what every file written before 2026-09-21 is. Emitted by Export only for reader assignments, so older files stay byte-identical. Whole-assignment: there is no per-problem kind. **`reader` REQUIRES `**Input:** handwritten`** — see below. **Never travels to the student** — see §13. |
+| `**Kind:** reader` | no | Which of the two kinds of assignment this is. `reader` or `conventional`; **absent means `conventional`**, which is what every file written before 2026-09-21 is. Emitted by Export only for reader assignments, so older files stay byte-identical. Whole-assignment: there is no per-problem kind. **`reader` REQUIRES `**Input:** handwritten`** — see below. **A reader assignment is not marked, so its sub-parts may be worth `[0 pts]`** — the rule is in §4, and what the sheet prints is in §10. **Never travels to the student** — see §13. |
 | `**Template ID:** {ID}` | no | Handwritten only. Goes in the printed QR as the layout key (`[A-Z0-9]{1,12}`, unique across the course). Emitted only when the author pinned one; absent means it is derived from the course code and title. |
 | `**AI Feedback:** on` | no | Whether students may request AI feedback on any problem in this assignment. `on` or `off`; absent means **off**. Emitted by Export only when on, so older files stay byte-identical. |
 | `**Submit at:** {address}` | no | **Retired 2026-09-22.** Was the submission address, printed on page 1. Never written now; a file that still carries one imports, and the import says the value was discarded. Students are told how to hand work in when they open the assignment in the Submission app. |
@@ -294,8 +294,21 @@ This auto-promotes to a single sub-part `(a)` with the problem's body as its des
 - `{letter}` — `a`, `b`, `c`, ... in lowercase parentheses.
 - `{name}` — the sub-part title.
 - `{points}` — a whole number, written `[12 pts]` (`pt` also accepted).
-- `{type}` — one type tag from §5. **The `[... pts]` and `[type]` brackets are both required** on a sub-part header.
+- `{type}` — one type tag from §5. **The `[... pts]` and `[type]` brackets are both required** on a sub-part header, **whatever the assignment's kind**.
 - Any non-blockquote text on the following lines is the sub-part **description**.
+
+**How big `{points}` may be depends on the kind (§2), and only on the kind.**
+
+| `**Kind:**` | `{points}` |
+|---|---|
+| `conventional` (or absent) | **Greater than 0** on every sub-part. A `[0 pts]` part is refused at export by the template self-test (check 2, "max_points present and positive on every row"). |
+| `reader` | **`0`**. A reader assignment is practice: nothing on it is marked and no grade is set, so a positive number would be a mark nobody awards. `[0 pts]` is accepted, and the export writes every part as `0` whatever the file says. A negative, missing or non-numeric value is still refused. |
+
+The bracket stays on a reader sub-part so the header has one shape in every file and the parser needs no
+second pattern; it is the number that carries no meaning. The kind is read from `**Kind:**`, never
+inferred from the points: an all-zero file with no `**Kind:** reader` line is a conventional assignment
+and is refused. *Added 2026-09-23*, when EEC130A's first reader assignment, correctly authored at
+`[0 pts]` throughout, was refused by a check written before reader assignments existed.
 
 An unrecognised type tag falls back to `text`. So does a **retired** tag — one this
 app once wrote but no longer authors — and the import surfaces a line naming the
@@ -535,13 +548,14 @@ Sketch the transverse field pattern.
 - **Export .md → Import Markdown is stable**: importing an exported file and re-exporting yields the same file. A legacy electronic file that has no `**Input:**` line round-trips unchanged, and so does a file carrying figures (§11).
 - **The guarantee holds between *exported* files.** A hand-authored or generated file may be normalised once, on its first import, and that is not a defect: blank lines inside a description are dropped (§4) and a figure gains the separating blank line Export writes (§11). From the first export onward the file is stable. A workflow that generates `.md` and diffs it against an export should pre-empt the normaliser rather than read the difference as a change.
 - On export, sub-part points are **normalised** to the assignment's target total, so the numbers you write are relative weights; the exported file shows the scaled values.
+- **A reader assignment has no target and is never rescaled** (§4). Every export writes its sub-parts as `0` — the `.md` as `[0 pts]`, the rubric as `max_points: 0` — and nothing below asks about it. The editor shows no points fields, total, Target box or Rescale button for a reader assignment.
 - **The file's own total is the target.** Import Markdown sets the assignment's target to the sum of the sub-part points it just read. A `.md` carries already-scaled values, so its own sum is the total its author intended, and adopting it makes the export an identity rather than a silent transformation. Only a **new, empty** assignment starts at the 100 default — it is the one case with nothing to infer from. `converter/convert.py` does the same, and writes `targetPoints` into the spec it emits.
 - **The export never silently rescales.** When the authored total and the target disagree, the export stops and asks, naming both numbers and what will happen. Declining writes nothing. The Target box and the Rescale button are unchanged: an instructor who wants a rescale still gets one, deliberately.
   - *Added 2026-09-01.* The target used to come from an invisible default whenever the file did not carry one, so a 200-point assignment listed as 200 and exported as 100. **Points sit outside the `layout_id` hash**, so every hash check, page count and geometry test passes on a halved assignment — there is no downstream check that can ever catch this, which is why the guard is at the moment of the transformation and why a badge was not enough.
 
 ---
 
-## 9. Two complete examples
+## 9. Three complete examples
 
 **Electronic assignment (mixed mediums):**
 ```markdown
@@ -571,6 +585,22 @@ Determine the cutoff frequency of the TE10 mode.
 
 ### (b) Field sketch and justification [8 pts] [handwritten:human]
 > grader_note: One half-sine across the wide dimension, maximum at the center.
+```
+
+**Reader assignment** — handwritten, never marked, so every sub-part is `[0 pts]` (§4):
+```markdown
+# EEC130A: Reader 1
+
+**Input:** handwritten
+**Kind:** reader
+
+## Problem 1: Rectangular waveguide
+### (a) Cutoff frequency [0 pts] [handwritten]
+Determine the cutoff frequency of the TE10 mode.
+> grading_prompt: Correct use of f_c = c/(2a); answer 6.55 GHz within 2%.
+
+### (b) Field sketch and justification [0 pts] [handwritten]
+> template: sketch
 ```
 
 ---
@@ -603,7 +633,15 @@ The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Pa
 | Top 25 mm, every page | The QR, the four corner marks, one header line. Nothing else, ever. |
 | **Page 1, all of it** | The **instructions page**: course and title, the standing instructions, then the author's **preamble** under its own heading. No problem, no answer region, no row in the map. See below. |
 | Above each problem's first part | `Problem 2: Rectangular waveguide` and the problem's **shared setup text**. On a later page the heading repeats as `(continued)`; the setup does not. |
-| Each region | `1(a).`, the sub-part title, the points, the **question text**, then a **bordered box** holding the part's authored number of **ruled writing lines** (blank space for a sketch). |
+| Each region | `1(a).`, the sub-part title, the points (not on a reader sheet — see below), the **question text**, then a **bordered box** holding the part's authored number of **ruled writing lines** (blank space for a sketch). |
+
+**A reader sheet prints no points at all** — no `[N pts]` label on any part, not `[0 pts]`, and no
+total (decided 2026-09-23). Nothing on it is marked, so a number would only suggest otherwise. The
+sub-part title then runs the full width of the prompt row. The rectangles do not move and neither does
+`layout_id`: points sit outside the hash, and the prompt row is the same height either way. The same
+holds for `assignment.html`, `assignment.tex` and the grader document, which also drop every points
+label and total on a reader assignment; the grading rubric still carries `max_points: 0` on every part,
+beside `assignment_kind: "reader"`.
 
 Prompt, problem and question text all go through the same KaTeX renderer as the other exports, so `$\delta_s$` and a bare `ω` print as glyphs rather than being garbled by jsPDF's Latin-1 fonts.
 
