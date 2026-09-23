@@ -796,7 +796,15 @@ def print_summary(assignment):
     print(f"  Input:      {assignment.get('inputMode', 'electronic')}")
     print(f"  Kind:       {assignment.get('assignmentKind', 'conventional')}")
     print(f"  Problems:   {len(assignment['problems'])}")
-    print(f"  Total pts:  {total_points}{' ← ' + note if note else ''}")
+    # A reader assignment is not marked: the app exports every part as 0 and
+    # prints no points, so a total here would describe nothing. Mirrors
+    # pointsAreMarked() in services/pointsService.ts. Nothing in this file
+    # refuses zero points, on either kind; the refusal is the template
+    # self-test's, and it knows the kind.
+    if assignment.get('assignmentKind') == 'reader':
+        print("  Total pts:  none (reader assignment: not marked)")
+    else:
+        print(f"  Total pts:  {total_points}{' ← ' + note if note else ''}")
     print()
     for i, prob in enumerate(assignment['problems']):
         print(f"  Problem {i+1}: {prob['name']}")
@@ -814,7 +822,10 @@ def print_summary(assignment):
             label = sub['submissionType']
             if sub['submissionType'] == 'Handwritten':
                 label += f" / {sub.get('handwrittenGradingMode', 'ai')}"
-            print(f"    - {sub['name']} ({sub['points']} pts, {label}){flag}")
+            if assignment.get('assignmentKind') == 'reader':
+                print(f"    - {sub['name']} ({label}){flag}")
+            else:
+                print(f"    - {sub['name']} ({sub['points']} pts, {label}){flag}")
     print()
     for w in PARSE_WARNINGS:
         print(f"  ⚠ {w}")

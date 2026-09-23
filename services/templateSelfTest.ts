@@ -36,6 +36,7 @@ import {
 } from './templateLayout';
 import { splitFigures } from './figureBlocks';
 import { encodeQr } from './qrEncoder';
+import { pointsAreMarked } from './pointsService';
 import { QR_MODULES, QR_VERSION } from './pageFormat';
 
 /**
@@ -218,10 +219,20 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
     add(1, 'every part is in the map, nothing extra is, and every region_id is unique', problems);
   }
 
-  // 2. max_points present and positive on every row.
-  add(2, 'max_points present and positive on every row',
-    rows.filter(r => !(typeof r.maxPoints === 'number' && isFinite(r.maxPoints) && r.maxPoints > 0))
-      .map(r => `${r.regionId} has max_points ${JSON.stringify(r.maxPoints)}`));
+  // 2. max_points present and positive on every row — on a marked assignment.
+  //    A reader assignment is never graded, so 0 is its honest value; there the
+  //    check refuses only a missing, negative or non-numeric one. The kind comes
+  //    from the assignment, never from the points: an all-zero CONVENTIONAL
+  //    assignment is still refused, with this message unchanged.
+  if (pointsAreMarked(assignment)) {
+    add(2, 'max_points present and positive on every row',
+      rows.filter(r => !(typeof r.maxPoints === 'number' && isFinite(r.maxPoints) && r.maxPoints > 0))
+        .map(r => `${r.regionId} has max_points ${JSON.stringify(r.maxPoints)}`));
+  } else {
+    add(2, 'max_points present and not negative on every row (reader assignment: not marked)',
+      rows.filter(r => !(typeof r.maxPoints === 'number' && isFinite(r.maxPoints) && r.maxPoints >= 0))
+        .map(r => `${r.regionId} has max_points ${JSON.stringify(r.maxPoints)}`));
+  }
 
   // 3. Every rectangle satisfies every safe-area rule in 4.4.
   add(3, 'every rectangle satisfies the safe areas (spec 4.4)',

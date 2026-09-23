@@ -8,6 +8,7 @@ import { Download, ArrowLeft, Edit2 } from 'lucide-react';
 import { SubmissionType } from '../types';
 import { FormattedText } from './FormattedText';
 import { FigureMapProvider } from './FigureMapContext';
+import { pointsAreMarked } from '../services/pointsService';
 
 const Preview: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -107,7 +108,9 @@ const Preview: React.FC = () => {
                                     <h4 className="text-md font-bold text-academic-800">
                                        ({String.fromCharCode(97 + j)}) {sub.name}
                                     </h4>
-                                    <span className="text-sm font-bold text-blue-700">[{sub.points} pts]</span>
+                                    {pointsAreMarked(assignment) && (
+                                      <span className="text-sm font-bold text-blue-700">[{sub.points} pts]</span>
+                                    )}
                                  </div>
                                  {sub.description && (
                                      <div className="text-academic-600 text-sm mb-2">

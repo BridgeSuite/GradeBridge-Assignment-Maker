@@ -50,6 +50,7 @@ import { splitFigures, trimAroundFigures } from './figureBlocks';
 import { resolveAssignmentFigures } from './figureRefs';
 import { SelfTestReport, runInkChecks, runSelfTest } from './templateSelfTest';
 import { finalizeLockProblem } from './finalize';
+import { pointsAreMarked } from './pointsService';
 
 const PX_PER_MM = 96 / 25.4;
 const RASTER_SCALE = 3;
@@ -413,17 +414,24 @@ const drawProblemBlock = async (
   }
 };
 
-const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
+const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[], showPoints: boolean) => {
   // The problem's heading and shared setup, above its first part. Without this
   // the sheet is not a self-contained assignment — "1(a)" means nothing on its
   // own when the givens are stated once at the top of the problem.
   if (r.problemBlock) await drawProblemBlock(doc, r.problemBlock, r.pageK, r.partId, ink);
 
-  // Points first, so the title knows how much room is left.
-  const points = `[${r.maxPoints} pts]`;
-  applyText(doc, 9, false, 0);
-  const pointsW = doc.getTextWidth(points);
-  drawPlain(doc, points, COLUMN_X1_MM, r.promptTopMm, { fontPt: 9, align: 'right' }, ink, r.pageK, 'points label');
+  // Points first, so the title knows how much room is left. A reader sheet
+  // prints no points at all — not "[0 pts]" — because nothing on it is marked
+  // (decided 2026-09-23). The name then has the full column; the rectangle and
+  // the layout_id are unaffected, since the prompt row's height is fixed.
+  let nameX1 = COLUMN_X1_MM;
+  if (showPoints) {
+    const points = `[${r.maxPoints} pts]`;
+    applyText(doc, 9, false, 0);
+    const pointsW = doc.getTextWidth(points);
+    drawPlain(doc, points, COLUMN_X1_MM, r.promptTopMm, { fontPt: 9, align: 'right' }, ink, r.pageK, 'points label');
+    nameX1 = COLUMN_X1_MM - pointsW - 3.0;
+  }
 
   const label = `${r.partId}.`;
   const labelW = drawPlain(doc, label, COLUMN_X0_MM, r.promptTopMm, { fontPt: 10, bold: true }, ink, r.pageK, 'part label') + 2.0;
@@ -439,7 +447,7 @@ const drawRegionPrompt = async (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
       doc, r.name.trim(),
       {
         x0: COLUMN_X0_MM + labelW, y0: r.promptTopMm,
-        x1: COLUMN_X1_MM - pointsW - 3.0, y1: r.promptTopMm + PROMPT_ROW_MM - 0.5,
+        x1: nameX1, y1: r.promptTopMm + PROMPT_ROW_MM - 0.5,
       },
       { fontPt: DESC_FONT_PT }, ink, r.pageK, `prompt ${r.partId}`
     );
@@ -619,7 +627,9 @@ ${lockProblem}`);
     for (const b of layout.standaloneBlocks.filter(b => b.pageK === k)) {
       await drawProblemBlock(doc, b.block, k, b.block.heading, ink);
     }
-    for (const r of layout.regions.filter(r => r.pageK === k)) await drawRegionPrompt(doc, r, ink);
+    for (const r of layout.regions.filter(r => r.pageK === k)) {
+      await drawRegionPrompt(doc, r, ink, pointsAreMarked(assignment));
+    }
   }
 
   // Checked after drawing, not before: the layout can be legal while a

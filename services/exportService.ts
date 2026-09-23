@@ -9,7 +9,7 @@ import { figureDataUri, referencedFigureIds, resolveAssignmentFigures } from './
 import { finalizeLockProblem } from './finalize';
 import { partIdentifiers } from './templateLayout';
 import { buildAuthoringBackup } from './authoringBackup';
-import { apportionPoints } from './pointsService';
+import { apportionPoints, pointsAreMarked } from './pointsService';
 import { strandedSubsectionLabels, typeAllowedInMode } from './inputModeService';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
@@ -72,7 +72,14 @@ const DEFAULT_TARGET_POINTS = 100;
 const normalizePoints = (assignment: Assignment): Assignment => {
   const target = assignment.targetPoints || DEFAULT_TARGET_POINTS;
   const allSubs = assignment.problems.flatMap(p => p.subsections);
-  const scaled = apportionPoints(allSubs.map(s => s.points), target);
+  // A reader assignment is not marked, so every part is worth 0 wherever it is
+  // exported — the rubric's max_points included. There is no target to meet
+  // and nothing to rescale. The Editor hides the points fields on a reader
+  // assignment, so a value left over from a conventional draft is not
+  // something the author can see or mean.
+  const scaled = pointsAreMarked(assignment)
+    ? apportionPoints(allSubs.map(s => s.points), target)
+    : allSubs.map(() => 0);
 
   let idx = 0;
   return {
@@ -109,6 +116,8 @@ export interface RescaleNotice { authoredTotal: number; targetPoints: number; }
 
 /** The rescale this export would perform, or null when there is nothing to do. */
 export const rescaleNotice = (assignment: Assignment): RescaleNotice | null => {
+  // A reader assignment has no points to rescale; it exports without a prompt.
+  if (!pointsAreMarked(assignment)) return null;
   const authoredTotal = (assignment.problems || [])
     .flatMap(p => p.subsections || [])
     .reduce((sum, s) => sum + (Number.isFinite(s.points) ? s.points : 0), 0);
@@ -457,7 +466,10 @@ const generatePDFContent = async (doc: jsPDF, assignment: Assignment, isTemplate
 
         // Subsection Info
         const subLabel = String.fromCharCode(97 + sIndex); // a, b, c...
-        let title = `(${subLabel}) [${sub.points} pts] ${sub.name}`;
+        // A reader assignment prints no points (decided 2026-09-23).
+        let title = pointsAreMarked(assignment)
+          ? `(${subLabel}) [${sub.points} pts] ${sub.name}`
+          : `(${subLabel}) ${sub.name}`;
         if (pageCount > 1) {
           title += ` (Page ${i + 1} of ${pageCount})`;
         }
@@ -532,6 +544,10 @@ export const generateHTML = async (assignment: Assignment): Promise<string> => {
   // dropping a drawing.
   assignment = resolveAssignmentFigures(assignment);
 
+  // A reader assignment prints no points anywhere (decided 2026-09-23). Every
+  // conditional below yields exactly the old text when the points are marked,
+  // so a conventional export is byte-identical to what it was.
+  const marked = pointsAreMarked(assignment);
   const katexCss = await katexStylesheet();
   return `<!DOCTYPE html>
 <html>
@@ -546,8 +562,7 @@ h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
 .problem { margin-top: 40px; border: 1px solid #eee; padding: 20px; border-radius: 4px; }
 .subsection { margin-left: 20px; margin-top: 20px; }
 .submission-type { font-family: monospace; background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
-.points { font-weight: bold; color: #0056b3; }
-.authored { white-space: pre-wrap; }
+${marked ? '.points { font-weight: bold; color: #0056b3; }\n' : ''}.authored { white-space: pre-wrap; }
 </style>
 </head>
 <body>
@@ -561,7 +576,7 @@ h1 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
       <p class="authored">${toHtml(p.description || '', `p${i}f`)}</p>
       ${p.subsections.map((s, j) => `
         <div class="subsection">
-          <h4>(${String.fromCharCode(97 + j)}) ${toHtml(s.name)} <span class="points">[${s.points} pts]</span></h4>
+          <h4>(${String.fromCharCode(97 + j)}) ${toHtml(s.name)}${marked ? ` <span class="points">[${s.points} pts]</span>` : ''}</h4>
           <p class="authored">${toHtml(s.description || '', `p${i}s${j}f`)}</p>
           <div class="submission-type">
             Submission: ${escapeHtml(s.submissionType)}
@@ -596,7 +611,10 @@ export const generateLaTeX = (assignment: Assignment): string => {
   // dropping a drawing.
   assignment = resolveAssignmentFigures(assignment);
 
-  // Calculate total points
+  // Calculate total points. A reader assignment prints none — no total, no
+  // per-problem sum, no \pts label, not even the macro — and a conventional
+  // export is byte-identical to what it was.
+  const marked = pointsAreMarked(assignment);
   const totalPoints = assignment.problems.reduce((sum, prob) =>
     sum + prob.subsections.reduce((s, sub) => s + sub.points, 0), 0
   );
@@ -632,16 +650,15 @@ export const generateLaTeX = (assignment: Assignment): string => {
 \\cfoot{\\thepage}
 
 % ---- Custom Commands ----
-\\newcommand{\\pts}[1]{\\textbf{[#1 pts]}}
-\\newcommand{\\submissiontype}[1]{\\textcolor{gray}{\\texttt{[#1]}}}
+${marked ? '\\newcommand{\\pts}[1]{\\textbf{[#1 pts]}}\n' : ''}\\newcommand{\\submissiontype}[1]{\\textcolor{gray}{\\texttt{[#1]}}}
 
 % ============================================================
 \\begin{document}
 
 % ---- Title Section ----
 \\begin{center}
-{\\LARGE\\bfseries ${toLatexBody(assignment.courseCode)}: ${toLatexBody(assignment.title)}}\\\\[0.5em]
-{\\large Total Points: ${totalPoints}}
+{\\LARGE\\bfseries ${toLatexBody(assignment.courseCode)}: ${toLatexBody(assignment.title)}}${marked ? `\\\\[0.5em]
+{\\large Total Points: ${totalPoints}}` : ''}
 \\end{center}
 
 \\vspace{1em}
@@ -667,7 +684,7 @@ export const generateLaTeX = (assignment: Assignment): string => {
     latex += `% ============================================================
 % Problem ${pIndex + 1}
 % ============================================================
-\\section*{Problem ${pIndex + 1}: ${toLatexBody(prob.name)} \\hfill \\normalsize{(${problemPoints} points)}}
+\\section*{Problem ${pIndex + 1}: ${toLatexBody(prob.name)}${marked ? ` \\hfill \\normalsize{(${problemPoints} points)}` : ''}}
 
 `;
 
@@ -681,7 +698,7 @@ export const generateLaTeX = (assignment: Assignment): string => {
     prob.subsections.forEach((sub, sIndex) => {
       const subLabel = String.fromCharCode(97 + sIndex); // a, b, c...
 
-      latex += `\\subsection*{(${subLabel}) ${toLatexBody(sub.name)} \\pts{${sub.points}}}
+      latex += `\\subsection*{(${subLabel}) ${toLatexBody(sub.name)}${marked ? ` \\pts{${sub.points}}` : ''}}
 
 `;
 
@@ -1022,6 +1039,9 @@ export const generateGraderHTML = async (assignment: Assignment): Promise<string
   assignment = resolveAssignmentFigures(assignment);
 
   const katexCss = await katexStylesheet();
+  // A reader assignment shows no points: no per-part label, no problem sum, no
+  // total. The conventional document is byte-identical to what it was.
+  const marked = pointsAreMarked(assignment);
   const totalPoints = assignment.problems.reduce((sum, prob) =>
     sum + prob.subsections.reduce((s, sub) => s + sub.points, 0), 0
   );
@@ -1062,8 +1082,8 @@ export const generateGraderHTML = async (assignment: Assignment): Promise<string
           <div class="sub-header">
             <span class="sub-id">(${letter})</span>
             <span class="sub-name">${toHtml(sub.name)}</span>
-            <span class="sub-pts">${sub.points} pts</span>
-            <span class="sub-type">${escapeHtml(typeLabel)}</span>
+            ${marked ? `<span class="sub-pts">${sub.points} pts</span>
+            ` : ''}<span class="sub-type">${escapeHtml(typeLabel)}</span>
           </div>
           ${sub.description ? `<p class="sub-desc">${toHtml(sub.description, `gp${pIdx}s${sIdx}f`)}</p>` : ''}
           ${referenceBlock}
@@ -1073,8 +1093,8 @@ export const generateGraderHTML = async (assignment: Assignment): Promise<string
     return `
       <div class="problem">
         <div class="prob-header">
-          <span class="prob-num">Problem ${pIdx + 1}: ${toHtml(prob.name)}</span>
-          <span class="prob-pts">${problemPoints} pts</span>
+          <span class="prob-num">Problem ${pIdx + 1}: ${toHtml(prob.name)}</span>${marked ? `
+          <span class="prob-pts">${problemPoints} pts</span>` : ''}
         </div>
         ${prob.description ? `<p class="prob-desc">${toHtml(prob.description, `gp${pIdx}f`)}</p>` : ''}
         ${subsRows}
@@ -1095,14 +1115,12 @@ ${katexCss}
   .problem { margin-top: 36px; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
   .prob-header { background: #1e3a5f; color: #fff; padding: 10px 16px; display: flex; justify-content: space-between; align-items: baseline; }
   .prob-num { font-weight: bold; font-size: 1.05em; }
-  .prob-pts { font-size: 0.9em; opacity: 0.85; }
-  .prob-desc { margin: 10px 16px 0; color: #444; font-size: 0.95em; }
+${marked ? '  .prob-pts { font-size: 0.9em; opacity: 0.85; }\n' : ''}  .prob-desc { margin: 10px 16px 0; color: #444; font-size: 0.95em; }
   .subsection { border-top: 1px solid #e5e5e5; padding: 12px 16px; }
   .sub-header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
   .sub-id { font-weight: bold; color: #1e3a5f; min-width: 28px; }
   .sub-name { font-weight: bold; flex: 1; }
-  .sub-pts { font-size: 0.9em; color: #555; white-space: nowrap; }
-  .sub-type { font-size: 0.82em; font-family: monospace; background: #f0f0f0; padding: 1px 6px; border-radius: 3px; color: #444; }
+${marked ? '  .sub-pts { font-size: 0.9em; color: #555; white-space: nowrap; }\n' : ''}  .sub-type { font-size: 0.82em; font-family: monospace; background: #f0f0f0; padding: 1px 6px; border-radius: 3px; color: #444; }
   .sub-desc { color: #555; font-size: 0.93em; margin: 2px 0 8px 28px; white-space: pre-wrap; }
   .prob-desc, .sub-name { white-space: pre-wrap; }
   .ref-block { margin: 8px 0 0 28px; padding: 10px 14px; border-radius: 4px; font-size: 0.93em; }
@@ -1124,7 +1142,7 @@ ${katexCss}
 <body>
   <div class="confidential-banner">CONFIDENTIAL — INSTRUCTOR / TA USE ONLY — NOT FOR DISTRIBUTION</div>
   <h1>${toHtml(`${assignment.courseCode}: ${assignment.title}`)} — Grader Reference</h1>
-  <div class="meta">Total: ${totalPoints} pts &nbsp;|&nbsp; Generated by GradeBridge Assignment Maker &nbsp;|&nbsp; Blue = AI rubric &nbsp;|&nbsp; Green = Answer key / What to look for</div>
+  <div class="meta">${marked ? `Total: ${totalPoints} pts` : 'Reader assignment: not marked'} &nbsp;|&nbsp; Generated by GradeBridge Assignment Maker &nbsp;|&nbsp; Blue = AI rubric &nbsp;|&nbsp; Green = Answer key / What to look for</div>
   ${assignment.preamble ? `<p class="prob-desc"><em>${toHtml(assignment.preamble)}</em></p>` : ''}
   ${subsectionRows}
 </body>

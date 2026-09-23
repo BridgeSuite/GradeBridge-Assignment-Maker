@@ -23,7 +23,7 @@ import { parseFigureRefs, referencedFigureIds } from '../services/figureRefs';
 import { figureFileProblems } from '../services/figureGuards';
 import { parseFigureFilename } from '../services/figureImport';
 import { REOPEN_WARNING, finalizeAssignment, reopenAssignment } from '../services/finalize';
-import { apportionPoints } from '../services/pointsService';
+import { apportionPoints, pointsAreMarked } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { FigureMapProvider } from '../components/FigureMapContext';
 import { FigureCard } from '../components/FigureCard';
@@ -632,6 +632,9 @@ const Editor: React.FC = () => {
   const totalPoints = assignment.problems.flatMap(p => p.subsections).reduce((sum, s) => sum + s.points, 0);
   const targetPoints = assignment.targetPoints || 100;
   const pointsAtTarget = totalPoints === targetPoints;
+  // A reader assignment is not marked: no points fields, no total, no rescale.
+  // Every export writes its parts as 0 and prints no points (2026-09-23).
+  const pointsMarked = pointsAreMarked(assignment);
 
   return (
     // Wrapped once, so every preview inside — stems, part descriptions, the
@@ -651,29 +654,38 @@ const Editor: React.FC = () => {
             className="hidden"
             onChange={handleFileUpload}
           />
-          {/* Total points badge + rescale control */}
-          <span className={`text-xs font-bold px-2 py-1 rounded-full border ${
-            pointsAtTarget
-              ? 'bg-green-50 text-green-700 border-green-300'
-              : 'bg-amber-50 text-amber-700 border-amber-300'
-          }`}>
-            {totalPoints} pts total
-          </span>
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-academic-500">Target:</span>
-            <input
-              type="number"
-              min={1}
-              value={targetPoints}
-              onChange={e => handleSetTarget(e.target.value)}
-              className="w-16 text-xs border border-academic-300 rounded px-1 py-0.5 text-center"
-            />
-            <span className="text-xs text-academic-500">pts</span>
-          </div>
-          {!pointsAtTarget && (
-            <Button variant="secondary" onClick={handleRescale} className="text-xs">
-              Rescale
-            </Button>
+          {/* Total points badge + rescale control. A reader assignment is not
+              marked, so it has no total, no target and nothing to rescale. */}
+          {pointsMarked ? (
+            <>
+              <span className={`text-xs font-bold px-2 py-1 rounded-full border ${
+                pointsAtTarget
+                  ? 'bg-green-50 text-green-700 border-green-300'
+                  : 'bg-amber-50 text-amber-700 border-amber-300'
+              }`}>
+                {totalPoints} pts total
+              </span>
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-academic-500">Target:</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={targetPoints}
+                  onChange={e => handleSetTarget(e.target.value)}
+                  className="w-16 text-xs border border-academic-300 rounded px-1 py-0.5 text-center"
+                />
+                <span className="text-xs text-academic-500">pts</span>
+              </div>
+              {!pointsAtTarget && (
+                <Button variant="secondary" onClick={handleRescale} className="text-xs">
+                  Rescale
+                </Button>
+              )}
+            </>
+          ) : (
+            <span className="text-xs font-bold px-2 py-1 rounded-full border bg-academic-50 text-academic-600 border-academic-300">
+              Reader: not marked
+            </span>
           )}
           {!isEdit && (
             <Button variant="secondary" onClick={handleLoadTemplate}>
@@ -935,6 +947,13 @@ const Editor: React.FC = () => {
                 </div>
               </dl>
 
+              {kindAnswered && assignmentKind === 'reader' && (
+                <p className="text-xs text-academic-600 mt-2 leading-relaxed">
+                  <strong>A reader assignment is not marked, so it has no points.</strong> The points
+                  fields are hidden, every part exports as 0, and the printed sheet shows no points.
+                </p>
+              )}
+
               {inputMode !== 'handwritten' && (
                 <p className="text-xs text-academic-600 mt-2 leading-relaxed">
                   <strong>Reader is unavailable on an electronic assignment.</strong> The reader works by
@@ -1101,7 +1120,7 @@ const Editor: React.FC = () => {
                               className="text-sm"
                            />
                          </div>
-                         <div className="md:col-span-6">
+                         <div className={pointsMarked ? 'md:col-span-6' : 'md:col-span-8'}>
                            <TextAreaWithPreview
                               placeholder="Description (LaTeX supported)"
                               value={sub.description}
@@ -1110,6 +1129,7 @@ const Editor: React.FC = () => {
                               rows={2}
                            />
                          </div>
+                         {pointsMarked && (
                          <div className="md:col-span-2">
                            <Input
                               type="number"
@@ -1120,6 +1140,7 @@ const Editor: React.FC = () => {
                               title="Points"
                            />
                          </div>
+                         )}
                       </div>
 
                       <button

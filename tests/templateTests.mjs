@@ -1162,6 +1162,77 @@ check('the prompt row is the authored name alone, and an unnamed part has none',
   assertEqual(g.ink.filter(b => b.what === 'points label').length, 2, 'a part lost its [N pts] label');
 });
 
+// ---------- a reader assignment has no points (2026-09-23) ----------
+// WORKORDER_AM_READER_ZERO_POINTS_2026-09-23. Check 2 refused an EEC130A reader
+// assignment whose parts were all 0 — right for a conventional assignment,
+// wrong for one nothing marks. The kind is read from the assignment, never from
+// the points, so the same all-zero parts are refused on a conventional one.
+//
+// MUTATION-TESTED BOTH WAYS (2026-09-23): making check 2 unconditional fails
+// the reader check below; making it lenient on every kind fails the
+// conventional one. Both mutants were run against the source and watched fail.
+{
+  const zeroParts = () => [
+    [part('Read the circuit', 0), part('Name the nodes', 0)],
+    [part('Sketch the field', 0, { isDrawing: true })],
+  ];
+  const CHECK2 = 'check 2 — max_points present and positive on every row';
+
+  check('reader: all-zero points pass the self-test and emit a sheet', async () => {
+    const g = await gen.generateTemplate(makeAssignment(zeroParts(), { assignmentKind: 'reader' }));
+    assert(g.pdf && g.pdf.size > 0, 'no PDF');
+    assert(g.csv.split('\n').slice(1).filter(Boolean).every(l => l.endsWith(',0')),
+      'the map does not carry max_points 0 on every row');
+  });
+
+  check('conventional: all-zero points are still refused, message unchanged', async () => {
+    let err = null;
+    try { await gen.generateTemplate(makeAssignment(zeroParts(), { assignmentKind: 'conventional' })); }
+    catch (e) { err = e; }
+    assert(err, 'a conventional assignment with 0-point parts was emitted');
+    assert(err.message.includes(`${CHECK2}: p1a has max_points 0; p1b has max_points 0; p2 has max_points 0`),
+      `the conventional refusal changed:\n${err.message}`);
+  });
+
+  check('an assignment with no kind is conventional here too, and refused', async () => {
+    let err = null;
+    try { await gen.generateTemplate(makeAssignment(zeroParts())); } catch (e) { err = e; }
+    assert(err && err.message.includes(CHECK2), 'an unkinded all-zero assignment was emitted');
+  });
+
+  for (const [label, bad] of [['negative', -1], ['non-numeric', 'five'], ['missing', undefined]]) {
+    check(`reader: a ${label} max_points is still refused`, async () => {
+      const probs = zeroParts();
+      probs[0][1] = { ...probs[0][1], points: bad };
+      let err = null;
+      try { await gen.generateTemplate(makeAssignment(probs, { assignmentKind: 'reader' })); }
+      catch (e) { err = e; }
+      assert(err && /check 2 — max_points present and not negative on every row/.test(err.message)
+        && err.message.includes('p1b has max_points'),
+        `a reader part with a ${label} max_points was emitted`);
+    });
+  }
+
+  check('reader: the sheet prints no points label and no "pts" anywhere', async () => {
+    const g = await gen.generateTemplate(makeAssignment(zeroParts(), { assignmentKind: 'reader' }));
+    assertEqual(g.ink.filter(b => b.what === 'points label').length, 0, 'a reader sheet drew a points label');
+    const raw = Buffer.from(await g.pdf.arrayBuffer()).toString('latin1');
+    const text = [...raw.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' | ');
+    assert(!/\bpts\b|\bpoints?\b/i.test(text), `a reader sheet printed points: ${text.match(/.{0,30}\bpts?\b.{0,10}/i)}`);
+    assertEqual(g.ink.filter(b => b.what === 'part label').length, 3, 'a part lost its label');
+  });
+
+  check('reader: the name takes the whole prompt row, and the rectangles do not move', async () => {
+    const withPts = makeAssignment([[part('Read the circuit', 5), part('Name the nodes', 5)],
+      [part('Sketch the field', 5, { isDrawing: true })]], { assignmentKind: 'conventional' });
+    const reader = makeAssignment(zeroParts(), { assignmentKind: 'reader' });
+    const [c, r] = [await gen.generateTemplate(withPts), await gen.generateTemplate(reader)];
+    // Points are outside the hash, so the geometry is the same sheet.
+    assertEqual(r.layoutId, c.layoutId, 'dropping the points label moved the layout');
+    assertEqual(r.pageCount, c.pageCount, 'dropping the points label changed the page count');
+  });
+}
+
 // ---------- the problem heading wraps inside the column (2026-08-18) ----------
 // It was the one printed row with no width budget at all: a single unwrapped,
 // untruncated line drawn from COLUMN_X0_MM. Two ENG17 HW4 titles fitted the

@@ -3397,6 +3397,109 @@ ${r.problem_statement}`);
   });
 }
 
+// =====================================================
+// A READER ASSIGNMENT HAS NO POINTS
+// =====================================================
+// WORKORDER_AM_READER_ZERO_POINTS_2026-09-23. A reader assignment is practice:
+// nothing is marked, so every export writes its parts as 0, prints no points
+// label or total anywhere, and never asks about a rescale. A conventional
+// export is unchanged — byte-identical on ENG17 HW1–HW3, measured by a
+// before/after harness recorded in the completion report; the checks below
+// hold the conventional labels in place so that a change which dropped them for
+// every kind fails here too.
+{
+  const { normalizePointsConfirmed, rescaleNotice, setRescaleConfirm } = exportSvc;
+  const readerParts = (pts) => [
+    { id: 'p1', name: 'Nodes', description: 'Label every node.', subsections: [
+      { id: 's1', name: 'Read the circuit', description: 'Say what it does.', points: pts[0], submissionType: 'Handwritten', handwrittenGradingMode: 'ai' },
+      { id: 's2', name: 'Name the nodes', description: '', points: pts[1], submissionType: 'Handwritten', handwrittenGradingMode: 'ai' },
+    ] },
+    { id: 'p2', name: 'Field', description: '', subsections: [
+      { id: 's3', name: 'Sketch it', description: '', points: pts[2], submissionType: 'Handwritten', isDrawing: true },
+    ] },
+  ];
+  const readerA = (pts = [0, 0, 0], extra = {}) => makeAssignment({
+    courseCode: 'EEC130A', title: 'Reader 1', inputMode: 'handwritten', assignmentKind: 'reader',
+    problems: readerParts(pts), ...extra,
+  });
+  const conventionalA = () => ({ ...readerA([30, 30, 40]), assignmentKind: 'conventional', targetPoints: 100 });
+  const POINTS_TEXT = /\bpts\b|Total Points|\bpoints\)|Total:/;
+
+  check('reader: no rescale is ever asked, whatever the target, and every part exports as 0', () => {
+    const asked = [];
+    setRescaleConfirm(m => { asked.push(m); return false; });
+    try {
+      for (const a of [readerA(), readerA([5, 7, 9], { targetPoints: 100 }), readerA([0, 0, 0], { targetPoints: 200 })]) {
+        assertEqual(rescaleNotice(a), null, 'a reader assignment wanted a rescale');
+        const out = normalizePointsConfirmed(a);
+        assertEqual(out.problems.flatMap(p => p.subsections.map(s => s.points)), [0, 0, 0],
+          'a reader assignment exported with points');
+      }
+      assertEqual(asked.length, 0, 'the instructor was asked about points on a reader assignment');
+    } finally { setRescaleConfirm(() => true); }
+  });
+
+  check('conventional: an authored total off target still asks, unchanged', () => {
+    const asked = [];
+    setRescaleConfirm(m => { asked.push(m); return true; });
+    try {
+      const a = { ...conventionalA(), targetPoints: 200 };
+      assertEqual(rescaleNotice(a), { authoredTotal: 100, targetPoints: 200 }, 'the conventional notice changed');
+      normalizePointsConfirmed(a);
+      assertEqual(asked.length, 1, 'a conventional rescale was not asked');
+    } finally { setRescaleConfirm(() => true); }
+  });
+
+  check('reader: assignment.html, assignment.tex and the grader document print no points', async () => {
+    const a = normalizePointsConfirmed(readerA());
+    for (const [what, text] of [['assignment.html', await generateHTML(a)], ['assignment.tex', generateLaTeX(a)],
+                                ['grader document', await generateGraderHTML(a)]]) {
+      const hit = text.match(new RegExp(`.{0,40}(${POINTS_TEXT.source}).{0,20}`));
+      assert(!hit, `${what} printed points on a reader assignment: ${hit && hit[0]}`);
+    }
+  });
+
+  check('conventional: every points label and total is still printed', async () => {
+    const a = normalizePointsConfirmed(conventionalA());
+    const html = await generateHTML(a), tex = generateLaTeX(a), grader = await generateGraderHTML(a);
+    assert(html.includes('<span class="points">[30 pts]</span>'), 'assignment.html lost its [N pts] label');
+    assert(tex.includes('{\\large Total Points: 100}'), 'assignment.tex lost its total');
+    assert(tex.includes('\\hfill \\normalsize{(60 points)}'), 'assignment.tex lost its problem sum');
+    assert(tex.includes(' \\pts{40}}'), 'assignment.tex lost its \\pts label');
+    assert(grader.includes('<span class="sub-pts">30 pts</span>'), 'the grader document lost its part points');
+    assert(grader.includes('<span class="prob-pts">60 pts</span>'), 'the grader document lost its problem points');
+    assert(grader.includes('Total: 100 pts'), 'the grader document lost its total');
+  });
+
+  check('reader: the rubric carries max_points 0 on every part, beside assignment_kind', () => {
+    const rubric = generateGradingRubric(normalizePointsConfirmed(readerA([5, 7, 9])));
+    assertEqual(rubric.assignment_kind, 'reader', 'the rubric does not say it is a reader assignment');
+    const items = Object.values(rubric.rubrics);
+    assertEqual(items.length, 3, 'a part is missing from the rubric');
+    assertEqual(items.map(r => r.max_points), [0, 0, 0], 'a reader rubric carried points, or dropped the field');
+  });
+
+  check('reader: a 0-point assignment survives Export .md → Import Markdown unchanged', () => {
+    const first = assignmentToMd(readerA());
+    const back = parseMdToAssignment(first);
+    assertEqual(back.assignmentKind, 'reader', 'the kind changed on import');
+    assertEqual(back.problems.flatMap(p => p.subsections.map(s => s.points)), [0, 0, 0], 'points changed on import');
+    assertEqual(assignmentToMd(back), first, 'the second export differs from the first');
+  });
+
+  check('reader: an all-zero assignment exports end to end — sheet, student package, rubric, grader document', async () => {
+    const a = normalizePointsConfirmed(readerA());
+    const entries = await exportPdfSvc.buildExportEntries(a);
+    const names = Object.keys(entries);
+    for (const want of [/^student\/.*\.pdf$/, /^student\/.*_OPEN_IN_APP\.json$/, /_grading_rubric\.json$/,
+                        /_grader_document\.html$/, /layout_.*\.csv$/]) {
+      assert(names.some(n => want.test(n)), `the reader export has no ${want}`);
+    }
+    const { studentNames } = await exportPdfSvc.buildOuterEntries(entries, a);
+    assert(studentNames.length === 2, `the student package holds ${studentNames.length} files`);
+  });
+}
+
 // ---------- report ----------
 // Every async check has to land before anything is counted.
 await Promise.all(pending);

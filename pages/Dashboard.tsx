@@ -11,6 +11,7 @@ import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssig
 import { parseMdToAssignment } from '../services/mdParserService';
 import { adoptAssignmentKind, stripRetiredFields } from '../services/importNotices';
 import { assignmentKindProblem } from '../services/inputModeService';
+import { pointsAreMarked } from '../services/pointsService';
 import { collectFigures, unreferencedNotice } from '../services/figureImport';
 import { hasFigureRef, referencedFigureIds } from '../services/figureRefs';
 import JSZip from 'jszip';
@@ -392,7 +393,9 @@ const Dashboard: React.FC = () => {
                 <div className="text-sm text-academic-500 flex flex-wrap gap-x-4">
                   <span>{assignment.problems.length} Problems</span>
                   <span>•</span>
-                  <span>Total Points: {assignment.problems.reduce((acc, p) => acc + p.subsections.reduce((sAcc, s) => sAcc + s.points, 0), 0)}</span>
+                  {pointsAreMarked(assignment)
+                    ? <span>Total Points: {assignment.problems.reduce((acc, p) => acc + p.subsections.reduce((sAcc, s) => sAcc + s.points, 0), 0)}</span>
+                    : <span>Reader: not marked</span>}
                   <span>•</span>
                   <span>Updated {new Date(assignment.updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
                 </div>

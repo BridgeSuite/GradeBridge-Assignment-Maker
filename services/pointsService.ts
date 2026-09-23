@@ -34,7 +34,24 @@
  * One extra rule on top: **a part the author gave points to never scales to
  * zero.** A 1-point part in a 400-point assignment would otherwise round to
  * nothing, and a graded region worth zero is not a thing.
+ *
+ * ## A reader assignment has no points (2026-09-23)
+ *
+ * A reader assignment is practice: the student gets a reading back, no grade is
+ * set, nothing enters the course record. Points on it are meaningless, so every
+ * export writes them as 0, prints none, and never asks about a rescale. The kind
+ * is read from the assignment itself, never inferred from the points — an
+ * all-zero conventional assignment is still refused by the template self-test.
  */
+
+import type { Assignment } from '../types';
+
+/**
+ * True when the assignment's points mean something: every kind except reader.
+ * An assignment that predates `assignmentKind` is conventional, as everywhere.
+ */
+export const pointsAreMarked = (assignment: Pick<Assignment, 'assignmentKind'>): boolean =>
+  assignment.assignmentKind !== 'reader';
 
 /**
  * Scale `points` so they sum to `target`, in whole numbers.
