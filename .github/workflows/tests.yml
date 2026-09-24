@@ -35,9 +35,11 @@
 # `name:` below deliberately, so the tab in the Actions UI and the file on disk
 # agree.
 #
-# The Student Submission copy adopts this and adjusts exactly one thing: it has
-# a tracked lockfile, so its install step is `npm ci` where this one is
-# `npm install`. Any other difference is drift.
+# Both repositories track `package-lock.json` and install with `npm ci`, with
+# the npm cache keyed on it. Until 2026-09-24 this comment said the Student
+# Submission copy differed from this one in exactly that step; it was this one
+# that was wrong (see the install step below). Any difference between the two
+# files is drift.
 name: tests
 
 on:
@@ -69,12 +71,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
 
-      # No lockfile is tracked (see .gitignore), so `npm ci` cannot run and
-      # there is nothing to cache. `package.json` pins the versions that matter
-      # exactly — tailwindcss and both @fontsource packages — which is what
-      # makes the build reproducible without one.
-      - run: npm install
+      # THE LOCKFILE IS TRACKED, and this installs exactly what it records.
+      #
+      # This step used to be `npm install`, with a comment saying `package.json`
+      # pinned the versions that mattered and that this made the build
+      # reproducible without a lockfile. CI run 22 (2026-09-24) disproved it:
+      # `katex` is `^0.16.9`, this runner resolved 0.16.47 where the machine
+      # that wrote the byte-for-byte goldens had 0.16.40, and the two HTML
+      # documents that embed KaTeX differed. `jspdf` and `qrcode-generator` are
+      # carets too, and they draw every PDF and every QR code this app emits.
+      #
+      # So a dependency update is now a deliberate act, a change to
+      # `package-lock.json` that somebody made and CI saw. That is the cost,
+      # and it is the intended one: the point of a byte-for-byte golden is that
+      # a change in bytes means a change somebody made.
+      # (WORKORDER_AM_GENERIC_ANSWER_PAGE_2026-09-24_SUPPLEMENT_1, item 2.)
+      - run: npm ci
 
       # tsc, then the full suite: run-tests, templateTests, bundle-tests,
       # no-personal-names, no-process-records.

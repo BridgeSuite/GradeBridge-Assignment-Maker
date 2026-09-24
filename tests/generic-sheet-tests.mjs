@@ -25,7 +25,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  GOLDEN_FIXTURES, KATEX_DEPENDENT, hashExport, katexVersion, loadExportPath, pinnedAssignment,
+  GOLDEN_FIXTURES, hashExport, katexVersion, loadExportPath, pinnedAssignment,
 } from './exportHashes.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -173,6 +173,33 @@ await check('ruling 1: 25 writing bands of exactly 8.0 mm, 24 feint rules, none 
     .map(x => Math.round((H - Number(x[2]) / k) * 100) / 100);
   const want = Array.from({ length: 24 }, (_, i) => Math.round((57 + 8 * (i + 1)) * 100) / 100);
   assertEqual(rules, want, 'the rules are not at y = 57 + 8.0k for k = 1 to 24');
+});
+
+await check('Supplement 1, item 1: the 24 rules are drawn with NO dash pattern active, 0.5 pt, 75% grey', () => {
+  // Walk the content stream in order, tracking the graphics state jsPDF sets
+  // (dash `d`, width `w`, stroke grey `G` or RGB `RG`), and read it at each rule.
+  const k = 72 / 25.4, H = fmt.PAGE_H_MM;
+  const xs = (gp.GENERIC_BOX_MM.x0 + gp.GENERIC_RULE_INSET_MM) * k;
+  const ops = [...pdfBytes.matchAll(
+    /\[([^\]]*)\]\s+([-\d.]+)\s+d\b|([-\d.]+)\s+w\b|([-\d.]+)\s+G\b|([-\d.]+) ([-\d.]+) ([-\d.]+) RG\b|([-\d.]+) ([-\d.]+) m\s+([-\d.]+) ([-\d.]+) l/g)];
+  let dash = '', width = null, grey = null;
+  const seen = [];
+  for (const o of ops) {
+    if (o[2] !== undefined) dash = o[1].trim();
+    else if (o[3] !== undefined) width = Number(o[3]);
+    else if (o[4] !== undefined) grey = Number(o[4]);
+    else if (o[5] !== undefined) grey = o[5] === o[6] && o[6] === o[7] ? Number(o[5]) : -1;
+    else if (Math.abs(Number(o[8]) - xs) < 0.05) {
+      seen.push({ y: Math.round((H - Number(o[9]) / k) * 100) / 100, dash, width, grey });
+    }
+  }
+  assertEqual(seen.length, 24, 'did not find the 24 rules');
+  const bad = seen.filter(r => r.dash !== '');
+  assertEqual(bad.map(r => `${r.y}: [${r.dash}]`), [], 'a rule is drawn with a dash pattern active');
+  for (const r of seen) {
+    assert(Math.abs(r.width - 0.5) < 0.01, `rule at ${r.y} is ${r.width} pt, not 0.5 pt`);
+    assert(Math.abs(r.grey - 0.749) < 0.01, `rule at ${r.y} is grey ${r.grey}, not 75%`);
+  }
 });
 
 await check('every approved string is printed, verbatim', () => {
@@ -381,26 +408,25 @@ await check('a generic package carrying a PER-ASSIGNMENT map is refused', async 
 // =====================================================
 
 const goldens = JSON.parse(readFileSync(join(REPO, 'tests', 'fixtures', 'pre_generic_sheet_goldens.json'), 'utf8'));
-// The two HTML documents embed KaTeX, so they are compared only when this
-// install has the KaTeX the goldens were written with. Said in the check's
-// name, so a run that could not compare them does not look as if it did.
-const sameKatex = katexVersion() === goldens._katex;
-const htmlNote = sameKatex ? 'every entry'
-  : `every entry but the two HTML documents (KaTeX ${katexVersion()} here, goldens ${goldens._katex})`;
+// EVERY entry, the two HTML documents included, on every machine
+// (Supplement 1, item 2). The tracked lockfile is what makes that possible;
+// this check is what notices if it stops being true.
+await check('the installed KaTeX is the one the goldens were written with', () => {
+  assertEqual(katexVersion(), goldens._katex,
+    'KaTeX moved. Either the lockfile was changed deliberately, and the goldens with it, or it is not being honoured');
+});
 for (const f of GOLDEN_FIXTURES) {
-  await check(`byte for byte against d6f4af5, ${htmlNote}: ${f}`, async () => {
+  await check(`byte for byte against d6f4af5, every entry, the HTML documents compared: ${f}`, async () => {
     const md = readFileSync(join(REPO, 'tests', 'fixtures', f), 'utf8');
     const now = await hashExport(m, pinnedAssignment(m, md));
     const was = goldens[f];
     const diffs = [];
     for (const n of new Set([...Object.keys(was.entries), ...Object.keys(now.entries)])) {
-      if (!sameKatex && KATEX_DEPENDENT(n)) {
-        // Still present on both sides: a missing document is a real difference.
-        if (!(n in was.entries) || !(n in now.entries)) diffs.push(`entry ${n} missing`);
-        continue;
-      }
       if (was.entries[n] !== now.entries[n]) diffs.push(`entry ${n}`);
     }
+    // Asserted, not assumed: the comparison above really covered them.
+    assertEqual(Object.keys(now.entries).filter(n => n.endsWith('.html')).length, 2,
+      'the two HTML documents were not both in the export, so they were not compared');
     for (const n of new Set([...Object.keys(was.studentPackage), ...Object.keys(now.studentPackage)])) {
       if (was.studentPackage[n] !== now.studentPackage[n]) diffs.push(`student ${n}`);
     }
@@ -501,5 +527,14 @@ await check('PRINTED SHEET: the spec never carries sheet or parts', async () => 
 
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped`);
-rmSync(outDir, { recursive: true, force: true });
+// Cleanup is not a check. On Windows the directory holding the bundles this
+// run imported can still be locked when it ends, and on 2026-09-24 an
+// uncaught EBUSY here turned a 39-of-39 run into a failed suite with no FAIL
+// line — the same signature as the unexplained intermittents recorded in
+// CLAUDE.md. Retry, then say so and move on; the exit code reports the checks.
+try {
+  rmSync(outDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+} catch (err) {
+  console.log(`  note: could not remove ${outDir} (${err.code}); it is a temp directory and is left behind`);
+}
 process.exit(failed ? 1 : 0);

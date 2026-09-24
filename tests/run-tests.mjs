@@ -2126,12 +2126,28 @@ ${r.problem_statement}`);
     .split(/[^A-Za-z]+/)
     .filter(Boolean);
 
+  // THE ONE THING NOT READ AS TEXT: a lockfile's `"integrity"` digest.
+  //
+  // `package-lock.json` has been tracked since 2026-09-24 (Supplement 1 to the
+  // generic answer page work order). Its `sha512-…` values are base64, 86
+  // random letters and digits each, and among 256 of them two happened to hold
+  // a letter run that hashes like a listed name. That is noise, not a name.
+  //
+  // This is narrower than exempting the file, which the comment below forbids,
+  // and it is safe for a reason specific to this field: the digest is the hash
+  // of the package tarball, so nobody can write a name into it without
+  // breaking `npm ci` on every machine. Every other field of the lockfile,
+  // `"name"` and `"resolved"` included, is still scanned. The check after this
+  // one proves both halves.
+  const INTEGRITY_DIGEST = /("integrity":\s*")sha(?:1|256|384|512)-[A-Za-z0-9+/]+=*(")/g;
+  const scannable = (line) => line.replace(INTEGRITY_DIGEST, '$1$2');
+
   /** Findings for one blob of text, as {token, line} with 1-based lines. */
   const scanText = (text) => {
     const found = [];
     const lines = String(text).split('\n');
     for (let i = 0; i < lines.length; i++) {
-      for (const tok of tokens(lines[i])) {
+      for (const tok of tokens(scannable(lines[i]))) {
         if (FORBIDDEN_NAME_HASHES.has(hashName(tok))) {
           found.push({ line: i + 1, text: lines[i] });
           break;   // one finding per line is enough to act on
@@ -2253,6 +2269,16 @@ ${r.problem_statement}`);
     assert(seen(`// see ${INVENTED}Brief for details`), 'a camelCase occurrence was missed');
     assert(seen(`* ${INVENTED}-Smith`), 'a hyphenated occurrence was missed');
     assert(!seen('const author = "somebody else";'), 'an unrelated string matched');
+
+    // Only a lockfile's integrity DIGEST is set aside, and nothing else in it.
+    const seenScanned = (text) => tokens(scannable(text)).some(t => localList.has(hashName(t)));
+    assert(!seenScanned(`"integrity": "sha512-a9${INVENTED}Qx+/b==",`),
+      'an integrity digest was read as text');
+    assert(seenScanned(`"name": "${INVENTED.toLowerCase()}-utils",`), 'a lockfile "name" was not scanned');
+    assert(seenScanned(`"resolved": "https://registry.npmjs.org/${INVENTED.toLowerCase()}/-/x.tgz",`),
+      'a lockfile "resolved" URL was not scanned');
+    assert(seenScanned(`"integrity": "sha512-abc==", "author": "${INVENTED}"`),
+      'text after a digest on the same line was not scanned');
 
     // Accents fold, so a name cannot be smuggled past by writing it properly.
     assert(hashName('Zylquörth') === hashName('Zylquorth'), 'accents did not fold');

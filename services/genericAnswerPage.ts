@@ -257,19 +257,30 @@ const drawBox = (doc: jsPDF, ink: InkBox[]) => {
   edge('left', b.x0, b.y0, round4(b.x0 + BORDER_MM), b.y1);
   edge('right', round4(b.x1 - BORDER_MM), b.y0, b.x1, b.y1);
 
-  // 24 feint rules make 25 equal bands, none on the border. The same stroke as
-  // today's writing lines — dashed, 0.5 pt, 75% grey — for the same reason: a
-  // solid rule beside handwritten maths reads as a fraction bar, and a pale
-  // dash is what lets a sketch drawn over it still read.
+  // 24 feint rules make 25 equal bands, none on the border. SOLID, 0.5 pt, 75%
+  // grey, as in the approved drawing.
+  //
+  // They shipped dashed on 2026-09-24, the same stroke as the printed sheet's
+  // writing lines, and Supplement 1 to the work order put them back
+  // (WORKORDER_AM_GENERIC_ANSWER_PAGE_2026-09-24_SUPPLEMENT_1, item 1). The
+  // approved drawing is the artifact, and a change after approval comes back
+  // as a question, not as a commit. A sketch drawn over the rule reads because
+  // the rule is faint, not because it is broken. And at phone-photograph
+  // resolution a pale 1.2 mm dash degrades into specks that look like pencil
+  // grit, where a pale solid line degrades into a fainter line, which is easy
+  // to filter. That last point is reasoning, not measurement: a print test
+  // may overturn it, and nothing else should.
+  //
+  // The dash pattern is reset explicitly rather than assumed, and a test
+  // asserts no dash is active when these rules are drawn.
   const x0 = b.x0 + GENERIC_RULE_INSET_MM, x1 = b.x1 - GENERIC_RULE_INSET_MM;
   doc.setDrawColor(191);
   doc.setLineWidth(0.5 * 25.4 / 72);
-  doc.setLineDashPattern([1.2, 1.2], 0);
+  doc.setLineDashPattern([], 0);
   for (let k = 1; k < GENERIC_BANDS; k++) {
     const y = round4(b.y0 + k * GENERIC_BAND_MM);
     doc.line(x0, y, x1, y);
   }
-  doc.setLineDashPattern([], 0);
   doc.setDrawColor(0);
   ink.push({
     pageK: 1, what: `writing lines ${GENERIC_PART_ID}`,

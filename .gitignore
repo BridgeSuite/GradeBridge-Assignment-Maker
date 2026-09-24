@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
-package-lock.json
+# package-lock.json is TRACKED since 2026-09-24: see the install step in
+# .github/workflows/tests.yml for why.
 
 # Build outputs
 dist/

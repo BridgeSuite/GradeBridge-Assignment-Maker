@@ -18,12 +18,13 @@
 // random ids and timestamps; gb1's random IV (the student file is decrypted
 // before hashing); and jsPDF's creation date and file id.
 //
-// A fourth varies between MACHINES: the two HTML documents embed KaTeX's
-// stylesheet and KaTeX-rendered markup, so their bytes follow whichever KaTeX
-// `npm install` resolved. There is no lockfile, and on 2026-09-24 this machine
-// had 0.16.40 while CI resolved 0.16.47, which moved those two entries and
-// nothing else. So the goldens record the KaTeX they were written with, and
-// the HTML entries (`KATEX_DEPENDENT`) are compared only where it matches.
+// Nothing else is allowed to vary, including the dependency tree. The two HTML
+// documents embed KaTeX's stylesheet and rendered markup, and CI run 22 failed
+// on them when a floating install resolved a newer KaTeX than the machine that
+// wrote these goldens. The fix is the tracked `package-lock.json`, which pins
+// KaTeX, jsPDF and qrcode-generator everywhere, not an exemption here: every
+// entry is compared byte for byte, on every machine. `_katex` stays in the
+// goldens as a recorded fact and gates nothing.
 
 import { build } from 'esbuild';
 import { createHash, webcrypto } from 'node:crypto';
@@ -37,9 +38,6 @@ globalThis.crypto ??= webcrypto;
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAIN = resolve(HERE, '..');
 const req = createRequire(join(MAIN, 'package.json'));
-
-/** Entries whose bytes follow the installed KaTeX, not this app's code. */
-export const KATEX_DEPENDENT = (name) => name.endsWith('.html');
 
 /** The KaTeX this checkout's export path would embed. */
 export const katexVersion = () => req('katex/package.json').version;

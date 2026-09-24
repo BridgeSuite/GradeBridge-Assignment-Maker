@@ -662,17 +662,23 @@ ink checks.
 | Bold, y 37 and 42.5 | `Write only inside the box. Anything outside it is not collected.` and **`Do not write your name, student ID or email address anywhere on this page.`** |
 | y 47.6 and 51.6 | `Write with a soft pencil (2B or B) or a pen. Hard pencils come out faint and photograph badly.` and `Print on US Letter at 100%, not "fit to page", single or double sided. All four black corner squares must appear.` |
 | The writing box | x 12.0 to 203.9, **y 57.0 to 257.0**, a 1 pt border |
-| Ruled lines | **25 bands of exactly 8.0 mm**, as 24 feint dashed rules at y = 57 + 8.0k (k = 1 to 24), inset 3 mm from each side |
+| Ruled lines | **25 bands of exactly 8.0 mm**, as 24 feint **solid** rules, 0.5 pt at 75% grey, at y = 57 + 8.0k (k = 1 to 24), inset 3 mm from each side |
 
-Three of those values differ from the drawn mockup, by ruling, and the reasons are recorded in the work order:
+**The page as built is `specs/generic_answer_page/generic_answer_page_AS_BUILT_2026-09-24.pdf`,
+produced by this app, and it is the approved artifact from Supplement 1 onward.** The drawn mockup it
+replaced is kept beside it as the record of what was approved on the day. Two things differ from that
+mockup, both by ruling, and the reasons are recorded in the work order:
 
 - **The box closes at 257.0, not 262.0 (ruling 1).** The registration-corner keep-outs start at y 257.4,
   so a box running to 262.0 fails the self-test. The top of the box and every text position stay as
   approved, and the bands tightened from 8.2 mm to 8.0 mm.
 - **The pencil sentence differs from the printed sheet's, deliberately (ruling 3).** The printed sheet
   still reads "... scan badly. Darker beats bigger."
-- **The rules are dashed**, the same stroke as the printed sheet's writing lines, for the same reason:
-  a solid rule next to handwritten maths reads as a fraction bar.
+
+**The rules are solid, as in the approved mockup, and unlike the printed sheet's writing lines,
+which stay dashed.** They first shipped dashed and Supplement 1 put them back. A test fails if a dash
+pattern is active when they are drawn. A print test showing dashes photograph better could reopen
+this, and nothing else should.
 
 **Its map is one row, the same for every assignment (ruling 4):**
 
