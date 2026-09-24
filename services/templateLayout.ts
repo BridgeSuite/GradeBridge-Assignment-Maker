@@ -325,9 +325,15 @@ export const BOX_INSTRUCTION_CONVENTIONAL =
  * 266): no reader, no stages, no model, no reading step. "The route is what is
  * read" is as far as it goes. The first two sentences are the conventional
  * ones verbatim, so the two sheets differ in this passage and nowhere else.
+ *
+ * Supplement 1 (2026-09-24, approved by Andre): "Work THE PROBLEM out" rather
+ * than a bare "it", and a closing sentence for the student who did not reach an
+ * answer. The course counts where they got stuck and what they tried as a
+ * genuine attempt; without the sentence, "copy across the working that leads to
+ * your answer" told that student there was nothing to write.
  */
 export const BOX_INSTRUCTION_READER =
-  'Write each answer inside its printed box. Only what is inside the box is collected. Work it out on scratch paper first if you like, then write the whole route into the box, from the question to your answer, because the route is what is read. The box is not scratch paper: copy across the working that leads to your answer, not everything you tried.';
+  'Write each answer inside its printed box. Only what is inside the box is collected. Work the problem out on scratch paper first if you like, then write the whole route into the box, from the question to your answer, because the route is what is read. The box is not scratch paper: copy across the working that leads to your answer, not everything you tried. If you did not reach an answer, write how far you got and where you stopped, which is a route too.';
 
 export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: readonly string[] }> = [
   {

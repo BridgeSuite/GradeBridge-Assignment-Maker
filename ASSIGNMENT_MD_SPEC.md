@@ -788,10 +788,11 @@ is read for its method, so a student who obeys the conventional sentence, workin
 only the composed answer in the box, hands in an answer with no working, and nothing errors on the way.
 A reader sheet therefore prints, in the same place:
 
-> Write each answer inside its printed box. Only what is inside the box is collected. Work it out on
-> scratch paper first if you like, then write the whole route into the box, from the question to your
-> answer, because the route is what is read. The box is not scratch paper: copy across the working
-> that leads to your answer, not everything you tried.
+> Write each answer inside its printed box. Only what is inside the box is collected. Work the problem
+> out on scratch paper first if you like, then write the whole route into the box, from the question to
+> your answer, because the route is what is read. The box is not scratch paper: copy across the working
+> that leads to your answer, not everything you tried. If you did not reach an answer, write how far
+> you got and where you stopped, which is a route too.
 
 The first two sentences are the conventional ones verbatim. A reader page 1 and a conventional page 1 differ in
 this passage and nowhere else, and a test holds that. The text names nothing the student did not
@@ -799,7 +800,9 @@ experience: no reader, no stages, no model. "The route is what is read" is as fa
 from `**Kind:**`, never inferred. Page 1 carries no region, so the text does not move `layout_id`. The
 self-test's duplicate-instruction guard reads the sentence the sheet actually prints, so a reader
 preamble echoing it is refused, as a conventional one echoing the conventional sentence is. *Wording
-approved by Andre, 2026-09-24.* The closing line, "Neat handwriting is not marked. Clear working is.",
+approved by Andre, 2026-09-24, and amended the same day (Supplement 1): "the problem" in place of a
+bare "it", and a last sentence for the student who did not reach an answer, which the course counts as
+a genuine attempt when it says where they stopped.* The closing line, "Neat handwriting is not marked. Clear working is.",
 is unchanged on both kinds, by decision. Whether its "is [marked]" should also vary on a reader sheet
 is open.
 

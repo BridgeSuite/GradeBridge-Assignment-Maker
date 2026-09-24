@@ -749,6 +749,18 @@ check('every problem starts a new page; no page mixes two problems', () => {
       assertEqual(r[differing[0]], lay.BOX_INSTRUCTION_READER, 'the wrong reader row differs');
     });
 
+    check('box instruction: both passages are exactly the approved text, byte for byte', () => {
+      // Written out here, not read from the module, so an edit to the constant
+      // that has not been approved fails rather than being compared with itself.
+      // Reader: approved 2026-09-24, as amended by Supplement 1 the same day.
+      assertEqual(lay.BOX_INSTRUCTION_READER,
+        'Write each answer inside its printed box. Only what is inside the box is collected. Work the problem out on scratch paper first if you like, then write the whole route into the box, from the question to your answer, because the route is what is read. The box is not scratch paper: copy across the working that leads to your answer, not everything you tried. If you did not reach an answer, write how far you got and where you stopped, which is a route too.',
+        'the reader box instruction is not the approved text');
+      assertEqual(lay.BOX_INSTRUCTION_CONVENTIONAL,
+        'Write each answer inside its printed box. Only what is inside the box is collected. Work the problem out on scratch paper first, then write into the box the solution you want read. The box is not scratch paper. It is sized for a composed answer, not for everything you tried.',
+        'the conventional box instruction changed');
+    });
+
     check('box instruction: the reader text names nothing the student did not experience', () => {
       // The reader lane's decision 266. "The route is what is read" is the limit.
       for (const banned of [/\breader\b/i, /\bAI\b/, /\bmodel\b/i, /\bstage/i, /\bmachine\b/i,
