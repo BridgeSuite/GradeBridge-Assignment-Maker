@@ -17,6 +17,13 @@
 // removed, exactly as the ENG17 harness in app_records does it: the parser's
 // random ids and timestamps; gb1's random IV (the student file is decrypted
 // before hashing); and jsPDF's creation date and file id.
+//
+// A fourth varies between MACHINES: the two HTML documents embed KaTeX's
+// stylesheet and KaTeX-rendered markup, so their bytes follow whichever KaTeX
+// `npm install` resolved. There is no lockfile, and on 2026-09-24 this machine
+// had 0.16.40 while CI resolved 0.16.47, which moved those two entries and
+// nothing else. So the goldens record the KaTeX they were written with, and
+// the HTML entries (`KATEX_DEPENDENT`) are compared only where it matches.
 
 import { build } from 'esbuild';
 import { createHash, webcrypto } from 'node:crypto';
@@ -30,6 +37,12 @@ globalThis.crypto ??= webcrypto;
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAIN = resolve(HERE, '..');
 const req = createRequire(join(MAIN, 'package.json'));
+
+/** Entries whose bytes follow the installed KaTeX, not this app's code. */
+export const KATEX_DEPENDENT = (name) => name.endsWith('.html');
+
+/** The KaTeX this checkout's export path would embed. */
+export const katexVersion = () => req('katex/package.json').version;
 
 /** The fixtures the goldens cover, one per path that must not move. */
 export const GOLDEN_FIXTURES = [
@@ -121,13 +134,14 @@ export const hashExport = async (m, assignment) => {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [repoRoot, outJson] = process.argv.slice(2);
   const m = await loadExportPath(repoRoot);
-  const result = {};
+  const result = { _katex: katexVersion() };
   for (const f of GOLDEN_FIXTURES) {
     const md = readFileSync(join(MAIN, 'tests', 'fixtures', f), 'utf8');
     result[f] = await hashExport(m, pinnedAssignment(m, md));
   }
   writeFileSync(outJson, JSON.stringify(result, null, 2) + '\n');
   for (const [f, r] of Object.entries(result)) {
+    if (f.startsWith('_')) continue;
     console.log(basename(f), Object.keys(r.entries).length, 'entries,', Object.keys(r.studentPackage).length, 'packaged');
   }
 }

@@ -24,7 +24,9 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { GOLDEN_FIXTURES, hashExport, loadExportPath, pinnedAssignment } from './exportHashes.mjs';
+import {
+  GOLDEN_FIXTURES, KATEX_DEPENDENT, hashExport, katexVersion, loadExportPath, pinnedAssignment,
+} from './exportHashes.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -379,13 +381,24 @@ await check('a generic package carrying a PER-ASSIGNMENT map is refused', async 
 // =====================================================
 
 const goldens = JSON.parse(readFileSync(join(REPO, 'tests', 'fixtures', 'pre_generic_sheet_goldens.json'), 'utf8'));
+// The two HTML documents embed KaTeX, so they are compared only when this
+// install has the KaTeX the goldens were written with. Said in the check's
+// name, so a run that could not compare them does not look as if it did.
+const sameKatex = katexVersion() === goldens._katex;
+const htmlNote = sameKatex ? 'every entry'
+  : `every entry but the two HTML documents (KaTeX ${katexVersion()} here, goldens ${goldens._katex})`;
 for (const f of GOLDEN_FIXTURES) {
-  await check(`byte for byte against d6f4af5: ${f} exports exactly as it did before`, async () => {
+  await check(`byte for byte against d6f4af5, ${htmlNote}: ${f}`, async () => {
     const md = readFileSync(join(REPO, 'tests', 'fixtures', f), 'utf8');
     const now = await hashExport(m, pinnedAssignment(m, md));
     const was = goldens[f];
     const diffs = [];
     for (const n of new Set([...Object.keys(was.entries), ...Object.keys(now.entries)])) {
+      if (!sameKatex && KATEX_DEPENDENT(n)) {
+        // Still present on both sides: a missing document is a real difference.
+        if (!(n in was.entries) || !(n in now.entries)) diffs.push(`entry ${n} missing`);
+        continue;
+      }
       if (was.entries[n] !== now.entries[n]) diffs.push(`entry ${n}`);
     }
     for (const n of new Set([...Object.keys(was.studentPackage), ...Object.keys(now.studentPackage)])) {
