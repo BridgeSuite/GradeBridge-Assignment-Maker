@@ -806,9 +806,18 @@ def print_summary(assignment):
     else:
         print(f"  Total pts:  {total_points}{' ← ' + note if note else ''}")
     print()
+    is_reader = assignment.get('assignmentKind') == 'reader'
     for i, prob in enumerate(assignment['problems']):
         print(f"  Problem {i+1}: {prob['name']}")
         for sub in prob['subsections']:
+            # A reader assignment is not graded: there is no grader, no note to
+            # write and no prompt to miss, and the [handwritten] /
+            # [handwritten:human] suffix is ignored (ASSIGNMENT_MD_SPEC.md §5).
+            # Warning about any of it on a correct file teaches authors to stop
+            # reading warnings. Mirrors the app, 2026-09-24.
+            if is_reader:
+                print(f"    - {sub['name']} ({sub['submissionType']})")
+                continue
             flag = ''
             is_ai_handwritten = (sub['submissionType'] == 'Handwritten'
                                  and sub.get('handwrittenGradingMode', 'ai') != 'human')
@@ -822,10 +831,7 @@ def print_summary(assignment):
             label = sub['submissionType']
             if sub['submissionType'] == 'Handwritten':
                 label += f" / {sub.get('handwrittenGradingMode', 'ai')}"
-            if assignment.get('assignmentKind') == 'reader':
-                print(f"    - {sub['name']} ({label}){flag}")
-            else:
-                print(f"    - {sub['name']} ({sub['points']} pts, {label}){flag}")
+            print(f"    - {sub['name']} ({sub['points']} pts, {label}){flag}")
     print()
     for w in PARSE_WARNINGS:
         print(f"  ⚠ {w}")

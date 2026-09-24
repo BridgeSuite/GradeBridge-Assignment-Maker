@@ -32,7 +32,7 @@ import {
 import {
   BORDER_MM, COLUMN_X0_MM, COLUMN_X1_MM, LayoutRow, MIN_ANSWER_LINES, MIN_BOX_MM,
   REGION_BOTTOM_MM, STANDING_CLOSING, STANDING_INSTRUCTIONS, TemplateLayout, WRITING_LINE_MM,
-  answerBoxMm, csvUnsafeFields, enumerateParts,
+  answerBoxMm, csvUnsafeFields, enumerateParts, standingSections,
 } from './templateLayout';
 import { splitFigures } from './figureBlocks';
 import { encodeQr } from './qrEncoder';
@@ -160,12 +160,16 @@ const WINDOW_WORDS = 6;
  * thing an author writes into a preamble before the tool ever said it.
  */
 export const duplicatedStandingInstructions = (
-  preamble: string, extraSentences: readonly string[] = []
+  preamble: string, extraSentences: readonly string[] = [],
+  // The sections this sheet actually prints — a reader sheet's box instruction
+  // differs (2026-09-24), and a guard that knew only the conventional one would
+  // go quiet on exactly the sentence a reader author is likely to echo.
+  sections: ReadonlyArray<{ items: readonly string[] }> = STANDING_INSTRUCTIONS,
 ): string[] => {
   const hay = ` ${NORMALISE(preamble || '')} `;
   if (hay.trim().length === 0) return [];
   const sentences = [
-    ...STANDING_INSTRUCTIONS.flatMap(sec => sec.items),
+    ...sections.flatMap(sec => sec.items),
     ...extraSentences,
     STANDING_CLOSING,
   ];
@@ -448,11 +452,10 @@ export const runSelfTest = async (input: SelfTestInput): Promise<SelfTestReport>
   // Guard 3. The tool must not print an instruction the author's preamble also
   // prints. See `duplicatedStandingInstructions` — the duplication is the reason
   // the split exists, so it is checked rather than trusted.
-  // The submission section was removed on 2026-09-22, so there are no
-  // conditional items left for a preamble to duplicate — only the standing
-  // ones, which `duplicatedStandingInstructions` reads for itself.
+  // Checked against the sections THIS sheet prints, which differ by kind in one
+  // sentence (2026-09-24), not against the conventional list.
   add(0, 'the preamble does not repeat a standing instruction',
-    duplicatedStandingInstructions(assignment.preamble || '', []));
+    duplicatedStandingInstructions(assignment.preamble || '', [], standingSections(assignment)));
 
   // Guard 4. "Problems begin on page 2, always" breaks if the standing
   // instructions plus a long preamble overflow the page, so an overflow refuses

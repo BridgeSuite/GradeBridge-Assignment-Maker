@@ -432,6 +432,7 @@ including the ones nobody has thought of yet.
 
 Notes:
 - **Handwritten sub-parts take no image count.** Pages are an assignment-level pool, not a per-part count, so `handwritten:3` is not a thing — use `[handwritten]` or `[handwritten:human]`.
+- **On a reader assignment the `:human` suffix is ignored, not refused** (2026-09-24). Nothing grades a reader assignment, so "AI first pass" and "Human" are both untrue of it. `[handwritten]` and `[handwritten:human]` give the same export, and **the rubric carries no `grading_type` on any part**. `assignment_kind: "reader"` already says who grades it, which is nobody, and an absent field is an absence rather than a false statement: the same rule `answer_modality` follows (§12). Every part still carries `max_points: 0` (§4), and the rubric still carries `assignment_kind` and `input_mode`. A conventional assignment's `grading_type` values are unchanged: `ai_handwritten`, `human_handwritten`, `ai`, `human_image`, `human`.
 - The word-count ranges for the `ai-graded:*` tiers are suggestions surfaced in the UI, not enforced.
 
 ---
@@ -509,6 +510,13 @@ Wrap long guidance across multiple lines by starting each continuation line with
 ```
 
 A `handwritten` (AI) sub-part should carry a `> grading_prompt:`; a `handwritten:human` sub-part should carry a `> grader_note:`.
+
+**On a reader assignment neither is expected, and a missing one is not a warning.** There is no grader
+and no note to write, so neither the app nor `converter/convert.py` flags a missing `grading_prompt` or
+`grader_note` there: a warning on a correct file teaches authors to stop reading warnings. The suffix
+is ignored (§5), so which key you use does not change the export. A `> grading_prompt:` you do write
+reaches the rubric's `grading_prompt` under either suffix, and the grader document shows anything you
+typed as **your note (not used for marking)**. It makes no answer-key claim.
 
 A third key configures the **printed QR template** (§10) and is handwritten-only:
 
@@ -725,8 +733,9 @@ for word" is the shape the failure actually takes.
 
 The tool prints, once, on page 1, in this order: that the work must be the student's own; how to print
 the sheet and check the corner marks; not to write a name or student ID; that only what is inside a
-box is collected, and that the box wants a composed answer rather than a workspace; how to cancel
-abandoned work; and to write darker rather than bigger. The author's preamble keeps everything about
+box is collected, and that the box wants a composed answer rather than a workspace (**on a reader
+sheet, that it wants the whole route instead** — see below); how to cancel abandoned work; and to write
+darker rather than bigger. The author's preamble keeps everything about
 the work — show your working, give units, course conventions such as a cover-sheet rule, and **what
 assistance is permitted**.
 
@@ -773,6 +782,26 @@ to work the problem out on scratch paper and write into the box the solution you
 teaches something, drops the implicit accusation, makes the space question largely disappear, and is
 honest about the artifact — a box that collects only what is inside it should say plainly that it
 wants a solution rather than a workspace.
+
+**A reader sheet says the opposite about the route, and only that** (2026-09-24). A reader assignment
+is read for its method, so a student who obeys the conventional sentence, working elsewhere and putting
+only the composed answer in the box, hands in an answer with no working, and nothing errors on the way.
+A reader sheet therefore prints, in the same place:
+
+> Write each answer inside its printed box. Only what is inside the box is collected. Work it out on
+> scratch paper first if you like, then write the whole route into the box, from the question to your
+> answer, because the route is what is read. The box is not scratch paper: copy across the working
+> that leads to your answer, not everything you tried.
+
+The first two sentences are the conventional ones verbatim. A reader page 1 and a conventional page 1 differ in
+this passage and nowhere else, and a test holds that. The text names nothing the student did not
+experience: no reader, no stages, no model. "The route is what is read" is as far as it goes. The kind is read
+from `**Kind:**`, never inferred. Page 1 carries no region, so the text does not move `layout_id`. The
+self-test's duplicate-instruction guard reads the sentence the sheet actually prints, so a reader
+preamble echoing it is refused, as a conventional one echoing the conventional sentence is. *Wording
+approved by Andre, 2026-09-24.* The closing line, "Neat handwriting is not marked. Clear working is.",
+is unchanged on both kinds, by decision. Whether its "is [marked]" should also vary on a reader sheet
+is open.
 
 **The governing rule for anything added to the tool's half:**
 
@@ -1109,6 +1138,15 @@ one file that is not in a folder" is a thing a person can actually do correctly.
 **generated from the entry list**, never hand-maintained — a notice that drifts out of step with the
 folder is worse than none, because it will be believed. A test asserts every file it names is present,
 that it names all four answer-bearing files, and that it never tells anyone to hand out one of them.
+
+**On a reader export the notice names the same four files and claims no answer key** (2026-09-24).
+Nothing grades a reader assignment, so none of them is one, and the conventional wording sent the
+instructor looking for a key that was never written. A missing key reads as a failed export. The
+reader notice says the export has no marking rubric and no answer key because nothing grades it, and
+describes each file by what it holds. The four files are still instructor-only, and the notice still
+says so: they carry the questions ahead of release and any note the author typed. The grader document
+does the same, labelling each part "reader, not marked" and showing anything authored as the author's
+note. The conventional notice and grader document are unchanged.
 
 Nothing in the suite unzips this archive by a hand-written path, so the shape breaks no consumer.
 

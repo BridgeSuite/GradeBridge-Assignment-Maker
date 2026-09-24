@@ -305,6 +305,30 @@ export const MIN_ANSWER_LINES = Math.max(1, Math.ceil(
  * the bar goes up rather than down: every line below earns its place with a
  * human grader too.
  */
+/**
+ * The box instruction on a CONVENTIONAL sheet: a person grades the answer, so
+ * the box wants the composed solution, not the working that found it.
+ */
+export const BOX_INSTRUCTION_CONVENTIONAL =
+  'Write each answer inside its printed box. Only what is inside the box is collected. Work the problem out on scratch paper first, then write into the box the solution you want read. The box is not scratch paper. It is sized for a composed answer, not for everything you tried.';
+
+/**
+ * The box instruction on a READER sheet (2026-09-24, wording approved by Andre).
+ *
+ * A reader assignment is read for its METHOD. A student who follows the
+ * conventional sentence — work it out elsewhere, write the answer in the box
+ * neatly — hands in a final answer with no working, which is refused, and the
+ * one response they get teaches them nothing. Nothing errors on the way there:
+ * the export, the submission and the student all did what the page said.
+ *
+ * It names nothing the student did not experience (the reader lane's decision
+ * 266): no reader, no stages, no model, no reading step. "The route is what is
+ * read" is as far as it goes. The first two sentences are the conventional
+ * ones verbatim, so the two sheets differ in this passage and nowhere else.
+ */
+export const BOX_INSTRUCTION_READER =
+  'Write each answer inside its printed box. Only what is inside the box is collected. Work it out on scratch paper first if you like, then write the whole route into the box, from the question to your answer, because the route is what is read. The box is not scratch paper: copy across the working that leads to your answer, not everything you tried.';
+
 export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: readonly string[] }> = [
   {
     // First on the page, above the printing instructions, so it is read rather
@@ -353,7 +377,10 @@ export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: read
       // question largely disappear. It also makes the sheet honest about the
       // artifact: a box that collects only what is inside it should say plainly
       // that it wants a solution, not a workspace.
-      'Write each answer inside its printed box. Only what is inside the box is collected. Work the problem out on scratch paper first, then write into the box the solution you want read. The box is not scratch paper. It is sized for a composed answer, not for everything you tried.',
+      //
+      // A READER assignment prints `BOX_INSTRUCTION_READER` in this place
+      // instead — see `standingSections`.
+      BOX_INSTRUCTION_CONVENTIONAL,
       'One line through anything you have abandoned.',
       // Amended 2026-09-02. It previously read "Darker beats bigger. A faint
       // pencil scans badly." — which is a diagnosis, not an instruction: it
@@ -418,14 +445,25 @@ export const STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: read
  * guard and the tests alike — or a sentence the tool prints stops being one the
  * guards know about.
  *
- * There is nothing conditional left on page 1 since the submission section was
- * removed on 2026-09-22, so this is now the same list for every assignment. The
- * indirection stays because it is what the guards read: collapsing it would
- * mean the next conditional section arrives with nowhere to be registered.
+ * One thing on page 1 is conditional, and it varies on the assignment's KIND,
+ * read from the assignment and never inferred: a reader sheet swaps
+ * `BOX_INSTRUCTION_CONVENTIONAL` for `BOX_INSTRUCTION_READER` (2026-09-24). The
+ * sections, headings and order are otherwise identical. This indirection is
+ * what made that a one-place change — the submission section it was built for
+ * was removed on 2026-09-22, and keeping the seam is why the next condition had
+ * somewhere to be registered.
  */
 export const standingSections = (
-  _assignment: Assignment
-): ReadonlyArray<{ heading: string; items: readonly string[] }> => STANDING_INSTRUCTIONS;
+  assignment: Pick<Assignment, 'assignmentKind'>
+): ReadonlyArray<{ heading: string; items: readonly string[] }> =>
+  assignment.assignmentKind === 'reader' ? READER_STANDING_INSTRUCTIONS : STANDING_INSTRUCTIONS;
+
+/** `STANDING_INSTRUCTIONS` with the reader's box instruction in its place. */
+export const READER_STANDING_INSTRUCTIONS: ReadonlyArray<{ heading: string; items: readonly string[] }> =
+  STANDING_INSTRUCTIONS.map(sec => ({
+    heading: sec.heading,
+    items: sec.items.map(item => item === BOX_INSTRUCTION_CONVENTIONAL ? BOX_INSTRUCTION_READER : item),
+  }));
 
 /**
  * Not decoration. Students read "your work is scanned" as "my handwriting is

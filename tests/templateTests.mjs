@@ -678,23 +678,102 @@ check('every problem starts a new page; no page mixes two problems', () => {
       `the failure does not say by how much: ${threw.message}`);
   });
 
-  check('the standing instructions are printed once, on page 1, and nowhere else', async () => {
-    const g = await gen.generateTemplate(instr());
-    const rows = g.ink.filter(b => /^instructions /.test(b.what));
-    assert(rows.length > 0, 'the standing instructions were not drawn at all');
-    assertEqual([...new Set(rows.map(b => b.pageK))], [1],
-      'standing instructions were drawn on a page other than page 1');
-    // Each sanctioned sentence appears exactly once in the drawn text.
-    const bytes = Buffer.from(await g.pdf.arrayBuffer()).toString('latin1');
-    const text = [...bytes.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' ')
-      .toLowerCase().replace(/[^a-z0-9]+/g, ' ');
-    for (const sentence of [...lay.STANDING_INSTRUCTIONS.flatMap(x => x.items), lay.STANDING_CLOSING]) {
-      const norm = sentence.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-      const first = norm.split(' ').slice(0, 6).join(' ');
-      const hits = text.split(first).length - 1;
-      assertEqual(hits, 1, `"${first}..." appears ${hits} times; it must appear exactly once`);
-    }
-  });
+  // Both kinds: a reader sheet swaps one sentence (2026-09-24) and is held to
+  // every page-1 rule the conventional one is.
+  for (const kind of ['conventional', 'reader']) {
+    check(`${kind}: the standing instructions are printed once, on page 1, and nowhere else`, async () => {
+      const a = instr({ assignmentKind: kind });
+      const g = await gen.generateTemplate(a);
+      const rows = g.ink.filter(b => /^instructions /.test(b.what));
+      assert(rows.length > 0, 'the standing instructions were not drawn at all');
+      assertEqual([...new Set(rows.map(b => b.pageK))], [1],
+        'standing instructions were drawn on a page other than page 1');
+      // Each sanctioned sentence appears exactly once in the drawn text. The
+      // passage is split into its sentences here: the reader and conventional
+      // versions share their first two, so a whole-item probe would only ever
+      // test the shared opening.
+      const bytes = Buffer.from(await g.pdf.arrayBuffer()).toString('latin1');
+      const text = [...bytes.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' ')
+        .toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+      const sentences = [...lay.standingSections(a).flatMap(x => x.items), lay.STANDING_CLOSING]
+        .flatMap(s => s.split(/(?<=\.)\s+(?=[A-Z])/));
+      assert(sentences.length >= 10, `only ${sentences.length} sentences collected`);
+      for (const sentence of sentences) {
+        const norm = sentence.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        const first = norm.split(' ').slice(0, 6).join(' ');
+        const hits = text.split(first).length - 1;
+        assertEqual(hits, 1, `"${first}..." appears ${hits} times; it must appear exactly once`);
+      }
+    });
+  }
+
+  // ---------- the box instruction varies by kind (2026-09-24) ----------
+  // WORKORDER_AM_READER_SHEET_AND_EXPORT_2026-09-24, item 1. A reader
+  // assignment is read for its method; the conventional sentence tells the
+  // student to work elsewhere and put only the composed answer in the box, and a
+  // student who obeys hands in an answer with no working.
+  //
+  // MUTATION-TESTED (2026-09-24): `standingSections` always conventional fails
+  // the reader half; always reader fails the conventional half.
+  {
+    const READER_MARK = 'route is what is read';
+    const CONVENTIONAL_MARK = 'sized for a composed answer';
+    const sheetText = async (a) => {
+      const g = await gen.generateTemplate(a);
+      const bytes = Buffer.from(await g.pdf.arrayBuffer()).toString('latin1');
+      return { g, text: [...bytes.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' ')
+        .toLowerCase().replace(/[^a-z0-9]+/g, ' ') };
+    };
+
+    check('box instruction: a reader sheet prints the reader text and not the conventional', async () => {
+      const { text } = await sheetText(instr({ assignmentKind: 'reader' }));
+      assert(text.includes(READER_MARK), 'the reader sheet does not say the route is what is read');
+      assert(!text.includes(CONVENTIONAL_MARK), 'the reader sheet tells the student to write only a composed answer');
+    });
+
+    check('box instruction: a conventional sheet prints the conventional text and not the reader', async () => {
+      for (const a of [instr({ assignmentKind: 'conventional' }), instr()]) {
+        const { text } = await sheetText(a);
+        assert(text.includes(CONVENTIONAL_MARK), 'the conventional sheet lost its box instruction');
+        assert(!text.includes(READER_MARK), 'the conventional sheet printed the reader text');
+      }
+    });
+
+    check('box instruction: the two page 1s differ in that passage and nowhere else', () => {
+      const texts = (kind) => lay.buildLayout(instr({ assignmentKind: kind })).instructionsPage.rows.map(r => r.text);
+      const c = texts('conventional'), r = texts('reader');
+      assertEqual(r.length, c.length, 'the reader page 1 has a different number of rows');
+      const differing = c.map((t, i) => t === r[i] ? null : i).filter(i => i !== null);
+      assertEqual(differing.length, 1, `page 1 differs in ${differing.length} rows`);
+      assertEqual(c[differing[0]], lay.BOX_INSTRUCTION_CONVENTIONAL, 'the wrong conventional row differs');
+      assertEqual(r[differing[0]], lay.BOX_INSTRUCTION_READER, 'the wrong reader row differs');
+    });
+
+    check('box instruction: the reader text names nothing the student did not experience', () => {
+      // The reader lane's decision 266. "The route is what is read" is the limit.
+      for (const banned of [/\breader\b/i, /\bAI\b/, /\bmodel\b/i, /\bstage/i, /\bmachine\b/i,
+                            /\bautomat/i, /\bsoftware\b/i, /\bscann/i, /\bcomputer\b/i]) {
+        assert(!banned.test(lay.BOX_INSTRUCTION_READER), `the reader text names ${banned}`);
+      }
+    });
+
+    check('box instruction: page 1 carries no region, so the text cannot move layout_id', async () => {
+      const { g: c } = await sheetText(instr({ assignmentKind: 'conventional' }));
+      const { g: r } = await sheetText(instr({ assignmentKind: 'reader' }));
+      assertEqual(r.layoutId, c.layoutId, 'the reader box instruction moved layout_id');
+      assert(!r.layout.regions.some(x => x.pageK === 1), 'a region reached page 1 of a reader sheet');
+    });
+
+    check('guard 3 on a reader sheet reads the reader sentence, not only the conventional', async () => {
+      // A reader author echoing the reader instruction must be refused; a guard
+      // that knew only the conventional list would wave it through.
+      const echo = 'Work it out on scratch paper first if you like, then write the whole route into the box.';
+      let threw = null;
+      try { await gen.generateTemplate(instr({ assignmentKind: 'reader', preamble: echo })); } catch (e) { threw = e; }
+      assert(threw && /repeats the standing instruction/.test(threw.message),
+        'a reader preamble repeating the reader box instruction was emitted');
+    });
+  }
 
   check('the closing line survives, because it is the one that stops students writing bigger', () => {
     assert(/neat handwriting is not marked/i.test(lay.STANDING_CLOSING),
@@ -736,6 +815,8 @@ check('every problem starts a new page; no page mixes two problems', () => {
   check('page 1: no fixed sentence carries a URL, a domain, a deployment or an institution', () => {
     const fixed = [
       ...lay.STANDING_INSTRUCTIONS.flatMap(s => [s.heading, ...s.items]),
+      // The reader sheet's one differing sentence is fixed text too (2026-09-24).
+      lay.BOX_INSTRUCTION_READER,
       lay.STANDING_CLOSING,
       lay.PREAMBLE_HEADING,
     ];
@@ -759,13 +840,19 @@ check('every problem starts a new page; no page mixes two problems', () => {
     // The list above is read from the module. This asserts the module's list is
     // what reaches the page, so the guard cannot be satisfied by a constant
     // nobody prints.
-    const g = await gen.generateTemplate(instr({}));
-    const drawn = JSON.stringify(g.layout.instructionsPage);
-    for (const s of lay.STANDING_INSTRUCTIONS) {
-      assert(drawn.includes(s.heading), `a standing heading is not on the page: "${s.heading}"`);
+    for (const kind of ['conventional', 'reader']) {
+      const a = instr({ assignmentKind: kind });
+      const g = await gen.generateTemplate(a);
+      const drawn = JSON.stringify(g.layout.instructionsPage);
+      for (const s of lay.standingSections(a)) {
+        assert(drawn.includes(s.heading), `${kind}: a standing heading is not on the page: "${s.heading}"`);
+        for (const item of s.items) {
+          assert(drawn.includes(JSON.stringify(item).slice(1, -1)), `${kind}: a standing item is not on the page: "${item}"`);
+        }
+      }
+      assert(drawn.includes(lay.STANDING_CLOSING), `${kind}: the standing closing is not on the page`);
+      assert(drawn.includes(lay.PREAMBLE_HEADING), `${kind}: the preamble heading is not on the page`);
     }
-    assert(drawn.includes(lay.STANDING_CLOSING), 'the standing closing is not on the page');
-    assert(drawn.includes(lay.PREAMBLE_HEADING), 'the preamble heading is not on the page');
   });
 
   // ---------- the submission section is GONE (2026-09-22) ----------
@@ -1030,6 +1117,25 @@ check('item 1: no name, student ID or date field anywhere on the template', () =
   // A rule to write on is a field whatever it is labelled, and underscores do
   // not survive normalising, so this one runs on the raw text.
   assert(!/_{5,}/.test(text), `the template prints a fill-in rule: "${text.slice(0, 200)}"`);
+});
+
+check('item 1, reader sheet: no name, student ID, date field or fill-in rule either', async () => {
+  // The same scan as above, over a reader sheet, whose page 1 carries one
+  // different sentence (2026-09-24).
+  const a = { ...appendixB, assignmentKind: 'reader' };
+  const g = await gen.generateTemplate(a);
+  const raw = Buffer.from(await g.pdf.arrayBuffer()).toString('latin1');
+  const text = [...raw.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(m => m[1]).join(' | ');
+  const norm = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+  let scan = norm(text);
+  for (const sentence of [...lay.standingSections(a).flatMap(s => s.items), lay.STANDING_CLOSING]) {
+    scan = scan.split(norm(sentence)).join(' ');
+  }
+  assert(scan.length < norm(text).length, 'the standing instructions are not on the reader page at all');
+  for (const banned of [/\bname\b/, /\bstudent id\b/, /\bdate\b/]) {
+    assert(!banned.test(scan), `the reader sheet prints an identity field matching ${banned}`);
+  }
+  assert(!/_{5,}/.test(text), 'the reader sheet prints a fill-in rule');
 });
 
 check('item 2: nothing printed enters the QR keep-out, on any page', () => {

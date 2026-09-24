@@ -3500,6 +3500,156 @@ ${r.problem_statement}`);
   });
 }
 
+// =====================================================
+// WHAT A READER EXPORT CLAIMS
+// =====================================================
+// WORKORDER_AM_READER_SHEET_AND_EXPORT_2026-09-24, items 2–4. Nothing grades a
+// reader assignment, so its export makes no grading claim: no grading_type, no
+// "answer key" in the readme or the grader document, no warning about a grader
+// note nobody will write. Conventional output is unchanged — held here by
+// exact strings, and measured byte-identical on ENG17 HW1–HW3 by the harness
+// recorded in the completion report.
+{
+  const { normalizePointsConfirmed } = exportSvc;
+  const hwPart = (id, name, mode, extra = {}) => ({
+    id, name, description: 'Show the working.', points: 0, submissionType: 'Handwritten',
+    handwrittenGradingMode: mode, ...extra,
+  });
+  const readerWith = (mode, extra = {}) => makeAssignment({
+    courseCode: 'EEC130A', title: 'Reader 2', inputMode: 'handwritten', assignmentKind: 'reader',
+    problems: [{ id: 'p1', name: 'Nodes', description: '', subsections: [
+      hwPart('s1', 'Read the circuit', mode, extra), hwPart('s2', 'Name the nodes', mode, extra),
+    ] }],
+  });
+  const conventionalHw = () => ({
+    ...readerWith('ai'), assignmentKind: 'conventional', targetPoints: 100,
+    problems: [{ id: 'p1', name: 'Nodes', description: '', subsections: [
+      { ...hwPart('s1', 'Read the circuit', 'ai'), points: 50 },
+      { ...hwPart('s2', 'Name the nodes', 'human'), points: 50 },
+    ] }],
+  });
+
+  // ---- item 4: no grading_type on a reader rubric ---------------------------
+  check('reader rubric: no grading_type on any part, whichever suffix was authored', () => {
+    for (const mode of ['ai', 'human']) {
+      const r = generateGradingRubric(normalizePointsConfirmed(readerWith(mode)));
+      assertEqual(r.assignment_kind, 'reader', 'assignment_kind is missing');
+      assertEqual(r.input_mode, 'handwritten', 'input_mode is missing');
+      for (const [k, item] of Object.entries(r.rubrics)) {
+        assert(!('grading_type' in item), `${mode}: ${k} carries grading_type ${item.grading_type}`);
+        assertEqual(item.max_points, 0, `${mode}: ${k} lost max_points 0`);
+      }
+    }
+  });
+
+  check('reader rubric: [handwritten] and [handwritten:human] give the same rubric', () => {
+    const withPrompt = { aiGradingPrompt: 'Look for KCL at every node.' };
+    const ai = generateGradingRubric(normalizePointsConfirmed(readerWith('ai', withPrompt)));
+    const human = generateGradingRubric(normalizePointsConfirmed(readerWith('human', withPrompt)));
+    assertEqual(human, ai, 'the suffix still changes a reader rubric');
+  });
+
+  check('conventional rubric: grading_type values unchanged', () => {
+    const r = generateGradingRubric(normalizePointsConfirmed(conventionalHw()));
+    assertEqual(Object.values(r.rubrics).map(i => i.grading_type), ['ai_handwritten', 'human_handwritten'],
+      'a conventional grading_type changed');
+    // And where it sits: the key order a consumer's diff would see.
+    const keys = Object.keys(Object.values(r.rubrics)[0]);
+    assertEqual(keys.slice(keys.indexOf('answer_modality'), keys.indexOf('answer_modality') + 3),
+      ['answer_modality', 'grading_type', 'grading_prompt'], 'grading_type moved in a conventional rubric');
+  });
+
+  // ---- item 3: the readme names no answer key a reader export has not got ----
+  check('reader readme: no answer-key claim, and says why there is none', async () => {
+    const entries = await exportPdfSvc.buildExportEntries(normalizePointsConfirmed(readerWith('ai')));
+    const notice = entries[exportPdfSvc.DISTRIBUTION_NOTICE_NAME];
+    for (const claim of [/answer key and rubrics/i, /the same rubrics/i, /contains answers/i,
+                         /contain answers/i, /This export contains the answer key/i, /grading material/i,
+                         /rubrics included/i]) {
+      assert(!claim.test(notice), `the reader readme still claims ${claim}`);
+    }
+    assert(/no\s+marking rubric and no answer key, and none is missing/.test(notice),
+      'the reader readme does not say there is no rubric and no key, and why');
+    assert(/Nothing grades it/.test(notice), 'the reader readme does not say nothing grades it');
+    assert(/DO NOT GIVE THIS FOLDER TO STUDENTS/.test(notice), 'the reader readme lost the do-not-distribute line');
+    assert(notice.includes('Assignment kind: reader.'), 'the reader readme lost its kind line');
+  });
+
+  check('conventional readme: text unchanged', async () => {
+    const entries = await exportPdfSvc.buildExportEntries(normalizePointsConfirmed(conventionalHw()));
+    const notice = entries[exportPdfSvc.DISTRIBUTION_NOTICE_NAME];
+    for (const line of ['This export contains the answer key.', 'the answer key and rubrics, for you and your TAs',
+                        'the same rubrics, for the autograder', 'the complete assignment, rubrics included',
+                        'the authored source, rubrics included', 'contains answers.',
+                        'Files here that contain answers (in instructor/):',
+                        'Keep everything else. It is your backup and your grading material.']) {
+      assert(notice.includes(line), `the conventional readme lost "${line}"`);
+    }
+    assert(!/Nothing grades it/.test(notice), 'the conventional readme printed the reader text');
+  });
+
+  check('reader grader document: no answer-key or grading claim', async () => {
+    for (const extra of [{}, { aiGradingPrompt: 'Look for KCL.', graderNote: 'Nodes A, B, C.' }]) {
+      const html = await generateGraderHTML(normalizePointsConfirmed(readerWith('human', extra)));
+      // The one sanctioned mention is the denial; it is required, then removed
+      // before the scan, so a positive claim anywhere else still fails.
+      const denial = 'not marked, so there is no rubric and no answer key';
+      assert(html.includes(denial), 'the reader grader document does not say there is no key');
+      const scan = html.split(denial).join('');
+      for (const claim of [/Answer key/i, /AI Rubric/, /Expected answer/i, /Human review required/i,
+                           /\(AI graded\)/, /\(human review\)/]) {
+        assert(!claim.test(scan), `the reader grader document claims ${claim}`);
+      }
+    }
+  });
+
+  check('conventional grader document: labels unchanged', async () => {
+    const html = await generateGraderHTML(normalizePointsConfirmed(conventionalHw()));
+    for (const s of ['Handwritten (AI graded)', 'Handwritten (human review)', 'Green = Answer key / What to look for',
+                     'Human review required']) {
+      assert(html.includes(s), `the conventional grader document lost "${s}"`);
+    }
+  });
+
+  // ---- item 2: no warnings on a reader assignment ----------------------------
+  check('reader: Import Markdown raises no warnings', () => {
+    for (const mode of ['ai', 'human']) {
+      const warnings = [];
+      parseMdToAssignment(assignmentToMd(readerWith(mode)), warnings);
+      assertEqual(warnings, [], `${mode}: importing a correct reader file warned`);
+    }
+  });
+
+  {
+    const python = ['python', 'python3', 'py'].find(exe =>
+      spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
+    const name = 'convert.py: a reader assignment converts with no warnings; conventional warnings unchanged';
+    if (!python) results.push(`  SKIP  ${name} (no Python interpreter on PATH)`);
+    else check(name, () => {
+      const work = mkdtempSync(join(tmpdir(), 'gb-warn-'));
+      const run = (label, a) => {
+        const md = join(work, `${label}.md`);
+        writeFileSync(md, assignmentToMd(a), 'utf8');
+        const r = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), md],
+          { encoding: 'utf8', env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+        assert(r.status === 0, `convert.py failed on ${label}: ${r.stderr || r.stdout}`);
+        return r.stdout;
+      };
+      for (const mode of ['ai', 'human']) {
+        const out = run(`reader_${mode}`, readerWith(mode));
+        assert(!out.includes('⚠'), `${mode}: convert.py warned on a correct reader file:\n${out}`);
+        assert(!/grader_note|grading_prompt|AI graded/.test(out), `${mode}: convert.py flagged grading on a reader file:\n${out}`);
+      }
+      const conv = run('conventional', conventionalHw());
+      assert(conv.includes('(50 pts, Handwritten / ai) [AI graded] ⚠ no grading_prompt!'),
+        `the conventional AI warning changed:\n${conv}`);
+      assert(conv.includes('(50 pts, Handwritten / human) [⚠ no grader_note]'),
+        `the conventional grader-note warning changed:\n${conv}`);
+      rmSync(work, { recursive: true, force: true });
+    });
+  }
+}
+
 // ---------- report ----------
 // Every async check has to land before anything is counted.
 await Promise.all(pending);
