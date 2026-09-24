@@ -1,0 +1,38 @@
+{
+  "Math_Fixture.md": {
+    "entries": {
+      "student/DEMO101_Math_Rendering_Fixture_OPEN_IN_APP.json": "0fd3a7bdb15e897a",
+      "instructor/DEMO101_Math_Rendering_Fixture_authoring_backup.json": "6820d59bb57babcb",
+      "instructor/DEMO101_Math_Rendering_Fixture.md": "93a7dc6e3f35da76",
+      "instructor/assignment.html": "88de70f6604f23f7",
+      "instructor/assignment.tex": "0c3b5a342cec80ea",
+      "instructor/DEMO101_Math_Rendering_Fixture_grading_rubric.json": "b8f024f6865a711c",
+      "instructor/DEMO101_Math_Rendering_Fixture_grader_document.html": "706e9ef02637cc21",
+      "student/DEMO101_Math_Rendering_Fixture.pdf": "fc665787f807c3e2",
+      "instructor/template.pdf": "2e4dd98ff66fe3fc",
+      "00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt": "6441aa996485e6de"
+    },
+    "studentPackage": {
+      "DEMO101_Math_Rendering_Fixture.pdf": "fc665787f807c3e2",
+      "DEMO101_Math_Rendering_Fixture_OPEN_IN_APP.json": "0fd3a7bdb15e897a"
+    }
+  },
+  "Handwritten_HW_Fixture.md": {
+    "entries": {
+      "student/DEMO101_Homework_3_OPEN_IN_APP.json": "67917dcf2c56c053",
+      "instructor/DEMO101_Homework_3_authoring_backup.json": "a3abdc1a075c52e1",
+      "instructor/DEMO101_Homework_3.md": "273cd5bc3c250345",
+      "instructor/assignment.html": "10a3c31d85cfce78",
+      "instructor/assignment.tex": "59e5cda675e8e99c",
+      "instructor/DEMO101_Homework_3_grading_rubric.json": "3002a63f4c94208a",
+      "instructor/DEMO101_Homework_3_grader_document.html": "aa0b094f88df6f94",
+      "student/DEMO101_Homework_3.pdf": "348d8a8392e59b8d",
+      "instructor/layout_DEMO101H97D4.csv": "926e7e38a709b66b",
+      "00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt": "97f17881f75cb084"
+    },
+    "studentPackage": {
+      "DEMO101_Homework_3.pdf": "348d8a8392e59b8d",
+      "DEMO101_Homework_3_OPEN_IN_APP.json": "67917dcf2c56c053"
+    }
+  }
+}

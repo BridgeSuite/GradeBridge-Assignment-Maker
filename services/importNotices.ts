@@ -154,6 +154,41 @@ export const adoptAssignmentKind = (imported: Record<string, unknown>): string[]
   return [assignmentKindDefaultedNotice()];
 };
 
+/**
+ * Shown when an imported ELECTRONIC assignment says `sheet: generic`.
+ *
+ * Reported and discarded, the way a retired field is: the file is otherwise
+ * fine, and refusing it would cost the instructor their work for a setting that
+ * cannot mean anything on an electronic assignment.
+ */
+export const sheetDiscardedNotice = (): string =>
+  'This file asks for the generic answer page, but it is an electronic '
+  + 'assignment: students type and upload their answers, so there is no answer '
+  + 'page to print. The setting has been discarded. Nothing else about the '
+  + 'assignment has changed.';
+
+/**
+ * Drop `sheet` from a freshly parsed assignment that cannot carry it, returning
+ * the notice. Anything but `generic` on a handwritten assignment is dropped too,
+ * with the same sentence adjusted: a value this app does not know is not a
+ * choice it can honour, and the printed sheet is what absent means.
+ */
+export const adoptSheet = (imported: Record<string, unknown>): string[] => {
+  if (!('sheet' in imported)) return [];
+  const sheet = imported.sheet;
+  if (sheet === undefined) { delete imported.sheet; return []; }
+  if (imported.inputMode !== 'handwritten') {
+    delete imported.sheet;
+    return [sheetDiscardedNotice()];
+  }
+  if (sheet !== 'generic') {
+    delete imported.sheet;
+    return [`This file names the answer sheet "${String(sheet)}", which this app does not know. `
+      + 'It has been opened with the printed sheet. Set it to generic in the editor if that was meant.'];
+  }
+  return [];
+};
+
 export const stripRetiredFields = (imported: Record<string, unknown>): string[] => {
   const notices: string[] = [];
   for (const [field, notice] of RETIRED_ASSIGNMENT_FIELDS) {

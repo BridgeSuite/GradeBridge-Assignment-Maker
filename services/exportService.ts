@@ -4,7 +4,11 @@ import { decryptJson, encryptJson } from './cryptoService';
 import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
 import { stemForGrader } from './figureText';
 import { generateTemplate } from './templateGenerator';
-import { assignmentKindProblem } from './inputModeService';
+import { assignmentKindProblem, sheetProblem } from './inputModeService';
+import {
+  GENERIC_LAYOUT_CSV, GENERIC_LAYOUT_CSV_NAME, GENERIC_LAYOUT_ID, GENERIC_PDF_NAME, GENERIC_TEMPLATE_ID,
+  generateGenericAnswerPage,
+} from './genericAnswerPage';
 import { figureDataUri, referencedFigureIds, resolveAssignmentFigures } from './figureRefs';
 import { finalizeLockProblem } from './finalize';
 import { partIdentifiers } from './templateLayout';
@@ -875,6 +879,13 @@ export const generateGradingRubric = (assignment: Assignment): object => {
     // uses (types.ts, ASSIGNMENT_MD_SPEC.md §2). Resolved here rather than
     // passed through, so the rubric states a fact and not a default.
     input_mode: assignment.inputMode === 'handwritten' ? 'handwritten' : 'electronic',
+    // THE GENERIC SHEET, stated to the grading side only when it is true, so
+    // every other rubric is byte-identical. On this path `region_id` below
+    // names no region in any map — the one generic region holds whichever part
+    // the student chose — so a consumer joins the student's crop to its entry
+    // by `part_id`, which the Submission app writes beside the crop with
+    // `part_source: "student"`.
+    ...(isGenericSheet(assignment) ? { sheet: 'generic' } : {}),
     // No model, temperature or token budget travels with the rubric. The
     // Assignment Maker describes the work; the grading system decides how to
     // grade it and allocates its own resources — see ASSIGNMENT_MD_SPEC.md §12.
@@ -909,6 +920,13 @@ export const assignmentToMd = (assignment: Assignment): string => {
   if (normalized.inputMode === 'handwritten') {
     lines.push(`**Input:** handwritten`);
     lines.push('');
+    // The generic answer page. Written only when chosen, and only under a
+    // handwritten `**Input:**`, so every file that does not use it — and every
+    // electronic file — stays byte-identical.
+    if (normalized.sheet === 'generic') {
+      lines.push(`**Sheet:** generic`);
+      lines.push('');
+    }
   }
   // THE ASSIGNMENT KIND, written only when it is `reader`.
   //
@@ -1216,7 +1234,10 @@ const SPEC_ASSIGNMENT_REQUIRED = ['id', 'courseCode', 'title', 'preamble', 'prob
  *  wrongly — and so the map, which decides where their answers are cut from,
  *  is neither readable nor editable on the way. Both present or both absent,
  *  never one. See THE EMBEDDED LAYOUT below. */
-const SPEC_ASSIGNMENT_OPTIONAL = ['inputMode', 'aiFeedback', 'layoutCsvName', 'layoutCsv'] as const;
+const SPEC_ASSIGNMENT_OPTIONAL = ['inputMode', 'aiFeedback', 'layoutCsvName', 'layoutCsv', 'sheet', 'parts'] as const;
+// `sheet` and `parts` are written ONLY on a generic-sheet assignment (see THE
+// GENERIC SHEET below). Every other spec, electronic or handwritten on the
+// printed sheet, is byte-for-byte what it was.
 const SPEC_PROBLEM_REQUIRED = ['id', 'name', 'description', 'subsections'] as const;
 const SPEC_SUBSECTION_REQUIRED = ['id', 'name', 'description', 'points', 'submissionType'] as const;
 const SPEC_SUBSECTION_OPTIONAL = ['minWords', 'maxImages', 'config'] as const;
@@ -1266,10 +1287,82 @@ export interface EmbeddedLayout {
   csv: string;
 }
 
+// =====================================================
+// THE GENERIC SHEET
+// =====================================================
+// `sheet: "generic"` (WORKORDER_AM_GENERIC_ANSWER_PAGE_2026-09-24 §2, the
+// interface both apps build to). The instructor posts their own question PDF;
+// every student writes on the one generic answer page and tells the Submission
+// app which part each page is. So the spec, on this path:
+//
+//   - embeds the GENERIC layout map (`layout_GBGEN1.csv`, layout id
+//     `5F0B10BC`) in place of a per-assignment one, verbatim as always;
+//   - carries `sheet: "generic"` and `parts`, the ordered list the app offers;
+//   - carries NO question text. Every description is the empty string. Names
+//     and points stay: they are what the student labels pages with.
+//
+// **The printed page no longer says which part an answer is.** The student
+// says so, and the Submission app writes `part_source: "student"` beside the
+// crop, where the printed sheet's path writes `"layout"`. That field is how the
+// two paths stay distinguishable downstream without inference.
+
+/** One entry of the spec's `parts` list. Snake case, as the interface is written. */
+export interface GenericPart {
+  part_id: string;
+  problem_number: number;
+  subsection_letter: string;
+  label: string;
+  /** Conventional only. A reader assignment is not marked and omits it. */
+  max_points?: number;
+}
+
+/**
+ * The parts, in order. `part_id` comes from `partIdentifiers`, the one
+ * derivation the layout map and the rubric already share (`1(a)`, or a plain
+ * `2` for a problem with one part), so a crop the student labels joins to its
+ * rubric entry exactly as a crop from the printed sheet does.
+ *
+ * `subsection_letter` is `a` on a single-part problem too, matching
+ * `grading_rubric.json`; the label then names the problem alone: `Problem 2`.
+ */
+export const genericParts = (assignment: Assignment): GenericPart[] => {
+  const marked = pointsAreMarked(assignment);
+  return (assignment.problems || []).flatMap((prob, pIdx) =>
+    (prob.subsections || []).map((sub, sIdx) => {
+      const { partId } = partIdentifiers(pIdx, sIdx, prob.subsections.length);
+      const letter = String.fromCharCode(97 + sIdx);
+      const single = prob.subsections.length === 1;
+      return {
+        part_id: partId,
+        problem_number: pIdx + 1,
+        subsection_letter: letter,
+        label: single ? `Problem ${pIdx + 1}` : `Problem ${pIdx + 1}, part (${letter})`,
+        ...(marked ? { max_points: sub.points } : {}),
+      };
+    }));
+};
+
+/** The map a generic-sheet spec embeds: always the one generic map. */
+export const GENERIC_EMBEDDED_LAYOUT: EmbeddedLayout = {
+  name: GENERIC_LAYOUT_CSV_NAME,
+  csv: GENERIC_LAYOUT_CSV,
+};
+
+/** Handwritten AND generic. The same `=== 'handwritten'` test as every mode rule. */
+export const isGenericSheet = (assignment: Pick<Assignment, 'inputMode' | 'sheet'>): boolean =>
+  assignment.inputMode === 'handwritten' && assignment.sheet === 'generic';
+
 export const buildAssignmentSpec = async (
   assignment: Assignment,
   layout?: EmbeddedLayout,
 ): Promise<Assignment> => {
+  // The sheet rule, backstop for the same reason as the kind rule below: the
+  // imports report and discard a stray `sheet`, so reaching here with one on an
+  // electronic assignment means a route bypassed them. Refused, because the
+  // electronic spec must not change by a byte.
+  const sheetIssue = sheetProblem(assignment);
+  if (sheetIssue) throw new Error(`Export stopped: ${sheetIssue}`);
+
   // THE BACKSTOP. A reader assignment must be handwritten
   // (`WORKORDER_..._SUPPLEMENT_1`). The editor and both imports refuse this
   // pairing before it can be stored, so reaching here means one of them was
@@ -1329,11 +1422,40 @@ export const buildAssignmentSpec = async (
     source.layoutCsv = layout.csv;
   }
 
+  // THE GENERIC SHEET. Set here from the assignment, never copied from the
+  // source object: `parts` is derived, and `sheet` is written only when it is
+  // true of this assignment.
+  const generic = isGenericSheet(assignment);
+  delete source.sheet;
+  delete source.parts;
+  if (generic) {
+    // The map must be the generic one. It is a constant, so a caller that
+    // passes none gets it; a caller that passes any OTHER map is refused,
+    // because a per-assignment map here would crop a box the student's page
+    // does not have.
+    if (layout && (layout.csv !== GENERIC_LAYOUT_CSV || layout.name !== GENERIC_LAYOUT_CSV_NAME)) {
+      throw new Error(
+        'Export stopped: a generic-sheet assignment must embed the generic answer page\'s map ' +
+        `(${GENERIC_LAYOUT_CSV_NAME}, layout ${GENERIC_LAYOUT_ID}), and this export was about to embed ` +
+        `${layout.name}.`);
+    }
+    source.layoutCsvName = GENERIC_LAYOUT_CSV_NAME;
+    source.layoutCsv = GENERIC_LAYOUT_CSV;
+    source.sheet = 'generic';
+    source.parts = genericParts(assignment);
+  }
+
   const spec = pickFields(source, SPEC_ASSIGNMENT_REQUIRED, SPEC_ASSIGNMENT_OPTIONAL);
   spec.problems = (assignment.problems || []).map(prob => {
     const p = pickFields(prob as unknown as Record<string, unknown>, SPEC_PROBLEM_REQUIRED);
     p.subsections = (prob.subsections || []).map(sub =>
       pickFields(sub as unknown as Record<string, unknown>, SPEC_SUBSECTION_REQUIRED, SPEC_SUBSECTION_OPTIONAL));
+    // No question text reaches a generic-sheet student: the instructor posts
+    // their own. The keys stay, empty, because the student app reads them.
+    if (generic) {
+      p.description = '';
+      for (const sub of p.subsections as Record<string, unknown>[]) sub.description = '';
+    }
     return p;
   });
 
@@ -1397,6 +1519,7 @@ const buildDistributionNotice = (
   names: string[],
   student: { studentZip: string; studentPdf: string; studentUpload: string },
   assignmentKind: Assignment['assignmentKind'],
+  generic = false,
 ): string => {
   const base = (n: string) => n.slice(n.lastIndexOf('/') + 1);
   const instructor = names.filter(n => n.startsWith(INSTRUCTOR_DIR));
@@ -1408,7 +1531,10 @@ const buildDistributionNotice = (
   const STUDENT_ORDER = [student.studentPdf, student.studentUpload];
   const studentWhat = (b: string) =>
       b === student.studentPdf ? 'the sheet they print and write on'
-    : b === student.studentUpload ? 'they load this into the Submission app; the map is inside it'
+    : b === student.studentUpload
+      ? (generic
+        ? 'they load this into the Submission app; it lists the parts they label their pages with'
+        : 'they load this into the Submission app; the map is inside it')
     : '';
   const rank = (b: string) => {
     const i = STUDENT_ORDER.indexOf(b);
@@ -1449,9 +1575,25 @@ const buildDistributionNotice = (
   // in a hurry reads the top of a file and stops, so what they must do goes
   // there and the explanation goes below it.
   return [
-    'Attach ' + student.studentZip + ' to your Canvas assignment. That',
-    'one file is everything your students need: the sheet they print, and the',
-    'file they load into the submission app. Post nothing else from this',
+    ...(generic ? [
+      // THE GENERIC SHEET (2026-09-24). The package carries no printed sheet,
+      // so the first lines say what else students need and where it comes from.
+      'Attach ' + student.studentZip + ' to your Canvas assignment. It holds',
+      'the one file your students load into the submission app. Post your own',
+      'assignment PDF, with the questions, separately: this export does not',
+      'carry the questions for students.',
+      '',
+      'Students write their answers on the GradeBridge generic answer page',
+      '(' + GENERIC_TEMPLATE_ID + '), the same page for every assignment and every course.',
+      'Print it from "Generic answer page" on the Assignment Maker\'s dashboard',
+      '(' + GENERIC_PDF_NAME + '), then post it once for the course or',
+      'leave copies at the front desk. Students say in the submission app which',
+      'part each page answers. Post nothing else from this',
+    ] : [
+      'Attach ' + student.studentZip + ' to your Canvas assignment. That',
+      'one file is everything your students need: the sheet they print, and the',
+      'file they load into the submission app. Post nothing else from this',
+    ]),
     ...(reader
       ? ['archive. Everything under ' + INSTRUCTOR_DIR + ' is for you alone.']
       : ['archive. Everything under ' + INSTRUCTOR_DIR + ' contains answers.']),
@@ -1476,6 +1618,9 @@ const buildDistributionNotice = (
     // Stated as a fact about the export rather than as an instruction: nothing
     // here asks the instructor to do anything about it.
     'Assignment kind: ' + assignmentKind + '.',
+    // Only on a generic-sheet export, so every other notice is byte-identical.
+    // One fixed line that greps, like the kind above.
+    ...(generic ? ['Answer sheet: generic (' + GENERIC_TEMPLATE_ID + ', layout ' + GENERIC_LAYOUT_ID + ').'] : []),
     '',
     reader
       ? 'Files here that are for you alone (in ' + INSTRUCTOR_DIR + '):'
@@ -1544,7 +1689,14 @@ export const buildExportEntries = async (
   // generateTemplate() runs the spec 8.7 self-test and throws rather than
   // emitting a non-compliant template, so a failure stops the whole export —
   // which is the intent.
-  const template = handwritten ? await generateTemplate(assignment) : null;
+  //
+  // A GENERIC-SHEET assignment has no template of its own: its students write
+  // on the one generic answer page, and its spec embeds that page's map.
+  const generic = isGenericSheet(assignment);
+  const template = handwritten && !generic ? await generateTemplate(assignment) : null;
+  const embedded: EmbeddedLayout | undefined = generic
+    ? GENERIC_EMBEDDED_LAYOUT
+    : template ? { name: template.csvFilename, csv: template.csv } : undefined;
 
   const entries: Record<string, Blob | string> = {
     // ---- student/ : the only files a student may receive --------------------
@@ -1553,9 +1705,7 @@ export const buildExportEntries = async (
     // all. On a handwritten assignment it also carries the layout map verbatim,
     // so this is the only file a student uploads. The Student Submission app
     // decodes it on load; Import JSON here handles encoded files too.
-    [`${STUDENT_DIR}${studentUpload}`]: await encryptJson(await buildAssignmentSpec(
-      assignment,
-      template ? { name: template.csvFilename, csv: template.csv } : undefined)),
+    [`${STUDENT_DIR}${studentUpload}`]: await encryptJson(await buildAssignmentSpec(assignment, embedded)),
 
     // ---- instructor/ : backup, grading material, readable documents ---------
     // THE BACKUP. The one file whose job is completeness — see
@@ -1580,7 +1730,14 @@ export const buildExportEntries = async (
     [`${INSTRUCTOR_DIR}${stem}_grader_document.html`]: await generateGraderHTML(assignment),
   };
 
-  if (template) {
+  if (generic) {
+    // NO PRINTED SHEET. The instructor posts their own question PDF, which is
+    // not ours to carry, and students write on the generic answer page, which
+    // is exported on its own (Dashboard, "Generic answer page"). The student
+    // package is the one file they load; the instructor folder is unchanged in
+    // kind. There is no instructor copy of the map either: it is the same map
+    // for every generic assignment, and no Gradescope outline is built from it.
+  } else if (template) {
     // The page-format sheet is the assignment.
     entries[`${STUDENT_DIR}${studentPdf}`] = template.pdf;
     // The sidecar map, INSTRUCTOR-SIDE since 2026-09-06. Its filename carries
@@ -1603,7 +1760,7 @@ export const buildExportEntries = async (
   // function that names it on disk — never from a second copy of the pattern.
   entries[DISTRIBUTION_NOTICE_NAME] =
     buildDistributionNotice(Object.keys(entries), { studentZip, studentPdf, studentUpload },
-                            assignment.assignmentKind);
+                            assignment.assignmentKind, generic);
   return entries;
 };
 
@@ -1664,6 +1821,14 @@ export const buildExportEntries = async (
  */
 export const studentFileContract = (assignment: Assignment) => {
   const { studentPdf, studentUpload } = exportFilenames(assignment);
+  // A generic-sheet student gets ONE file. There is no sheet of ours to print:
+  // the questions are the instructor's own PDF, and the answer page is the
+  // generic one, exported separately.
+  if (isGenericSheet(assignment)) {
+    return [
+      { label: `the file to upload (${studentUpload})`, match: (n: string) => n === studentUpload },
+    ];
+  }
   return [
     { label: `the sheet to print (${studentPdf})`, match: (n: string) => n === studentPdf },
     { label: `the file to upload (${studentUpload})`, match: (n: string) => n === studentUpload },
@@ -1950,6 +2115,31 @@ export const embeddedLayoutProblems = async (
   const csvPath = Object.keys(entries).find(n => /^instructor\/layout_.*\.csv$/.test(n));
   const csvName = csvPath ? csvPath.slice(INSTRUCTOR_DIR.length) : null;
 
+  if (isGenericSheet(assignment)) {
+    // THE GENERIC SHEET: the embedded map must be the generic one, byte for
+    // byte, and nothing else. A per-assignment map here would crop a box the
+    // student's page does not have. Compared against the constant, since there
+    // is no instructor copy to compare with.
+    if (spec.layoutCsv !== GENERIC_LAYOUT_CSV) {
+      problems.push(
+        `${studentUpload} does not carry the generic answer page's map (${GENERIC_LAYOUT_CSV_NAME}, ` +
+        `layout ${GENERIC_LAYOUT_ID}), so its pages could not be cropped`);
+    }
+    if (spec.layoutCsvName !== GENERIC_LAYOUT_CSV_NAME) {
+      problems.push(`${studentUpload} names its map "${String(spec.layoutCsvName)}", not ${GENERIC_LAYOUT_CSV_NAME}`);
+    }
+    if (csvPath) {
+      problems.push(`${csvPath} is in the export, but a generic-sheet assignment has no layout of its own`);
+    }
+    if (spec.sheet !== 'generic' || !Array.isArray(spec.parts)) {
+      problems.push(`${studentUpload} does not say sheet: "generic" with its parts list`);
+    }
+    return problems;
+  }
+  if ('sheet' in spec || 'parts' in spec) {
+    problems.push(`${studentUpload} carries sheet or parts, but this assignment is not on the generic sheet`);
+  }
+
   if (assignment.inputMode === 'handwritten') {
     if (!csvPath) {
       problems.push(`the export has no ${INSTRUCTOR_DIR}layout_*.csv to compare the embedded map against`);
@@ -2034,7 +2224,7 @@ export const packagedStudentZipProblems = async (
   const opened = await JSZip.loadAsync(innerBytes);
   const names = Object.keys(opened.files).filter(n => !opened.files[n].dir).sort();
 
-  const expected = [studentPdf, studentUpload].sort();
+  const expected = (isGenericSheet(assignment) ? [studentUpload] : [studentPdf, studentUpload]).sort();
   if (JSON.stringify(names) !== JSON.stringify(expected)) {
     problems.push(
       `the packaged student ZIP holds ${JSON.stringify(names)}, not ${JSON.stringify(expected)}`);
@@ -2052,7 +2242,12 @@ export const packagedStudentZipProblems = async (
 
   // The map, read back out of the packaged spec rather than out of the entry
   // map. This is the one number that is printed on paper.
-  if (assignment.inputMode === 'handwritten' && names.includes(studentUpload)) {
+  if (isGenericSheet(assignment) && names.includes(studentUpload)) {
+    const spec = await decryptJson(await opened.file(studentUpload)!.async('string')) as Record<string, unknown>;
+    if (spec.layoutCsv !== GENERIC_LAYOUT_CSV) {
+      problems.push(`the map inside the packaged ${studentUpload} is not the generic answer page's map`);
+    }
+  } else if (assignment.inputMode === 'handwritten' && names.includes(studentUpload)) {
     const csvPath = Object.keys(entries).find(n => /^instructor\/layout_.*\.csv$/.test(n));
     const spec = await decryptJson(await opened.file(studentUpload)!.async('string')) as Record<string, unknown>;
     if (!csvPath) {
@@ -2247,5 +2442,19 @@ export const exportService = {
     save(content, zipFilename);
 
     return { ...template, zipFilename };
-  }
+  },
+
+  /**
+   * THE GENERIC ANSWER PAGE, on its own (2026-09-24).
+   *
+   * Not part of any assignment export, so a department can print a stack
+   * without authoring anything. One PDF, one download. There is no map beside
+   * it: the map is embedded in every generic-sheet assignment's spec, and it is
+   * the same map for all of them.
+   */
+  downloadGenericAnswerPage: async () => {
+    const page = await generateGenericAnswerPage();
+    saveOne(page.pdf, page.pdfFilename);
+    return page;
+  },
 };

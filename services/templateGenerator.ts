@@ -81,7 +81,7 @@ export const resolvePageFormatId = async (assignment: Assignment): Promise<strin
 // ---- Drawing -------------------------------------------------------------
 
 /** Four solid 5 mm squares, spec 3.1. Same four on every page, no exceptions. */
-const drawMarks = (doc: jsPDF) => {
+export const drawMarks = (doc: jsPDF) => {
   doc.setFillColor(0, 0, 0);
   for (const [x, y] of MARK_ORIGINS_MM) {
     doc.rect(x, y, MARK_SIZE_MM, MARK_SIZE_MM, 'F');
@@ -93,7 +93,7 @@ const drawMarks = (doc: jsPDF) => {
  * the edges stay crisp at any print resolution and no rasteriser sits between
  * the matrix and the paper. The quiet zone is a printed white field (spec 2.3).
  */
-const drawQr = (doc: jsPDF, payload: string) => {
+export const drawQr = (doc: jsPDF, payload: string) => {
   const { dark, moduleCount } = encodeQr(payload);
   const modMm = QR_SIZE_MM / moduleCount;
 
@@ -267,7 +267,7 @@ const applyText = (doc: jsPDF, fontPt: number, bold: boolean, grey: number, font
 };
 
 /** Draw plain ASCII vector text and record the box it occupies. */
-const drawPlain = (
+export const drawPlain = (
   doc: jsPDF, text: string, xMm: number, yMm: number,
   opts: { fontPt: number; bold?: boolean; grey?: number; align?: 'left' | 'right' },
   ink: InkBox[], pageK: number, what: string
@@ -575,6 +575,17 @@ export const generateTemplate = async (assignment: Assignment): Promise<Generate
     throw new Error(`Export stopped: this assignment is finalized.
 
 ${lockProblem}`);
+  }
+
+  // A GENERIC-SHEET assignment has no printed sheet of its own: its students
+  // write on the one generic answer page. Refused here rather than on a button,
+  // for the reason the lock above gives — this function is what produces a
+  // sheet, wherever it is asked for.
+  if (assignment.inputMode === 'handwritten' && assignment.sheet === 'generic') {
+    throw new Error(
+      'This assignment uses the generic answer page, so it has no printed sheet of its own. '
+      + 'Students write on the generic answer page (Dashboard, "Generic answer page") and '
+      + 'you post your own question PDF.');
   }
 
   // Figure blocks are resolved before anything measures or draws, so the layout

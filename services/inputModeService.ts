@@ -63,6 +63,36 @@ export const MODE_LABEL: Record<InputMode, string> = {
   handwritten: 'Handwritten',
 };
 
+// =====================================================
+// A GENERIC SHEET IS HANDWRITTEN ONLY
+// =====================================================
+// `sheet: "generic"` chooses the answer surface a handwritten student writes on.
+// An electronic assignment has no answer surface to choose, and it must not
+// change by a byte for this feature — ENG6 is electronic and must see no
+// difference at all. The same `=== 'handwritten'` test as the kind rule above,
+// for the same reason: absent `inputMode` means electronic.
+//
+// Imports REPORT and discard a stray value (`adoptSheet` in importNotices.ts);
+// the export backstop REFUSES one that got past them, because by then something
+// was bypassed and the instructor is at a terminal-equivalent with recourse.
+
+/** Why this assignment's sheet cannot stand, or `null` when it can. */
+export const sheetProblem = (
+  assignment: Pick<Assignment, 'inputMode' | 'sheet'>,
+): string | null => {
+  const sheet = (assignment as { sheet?: unknown }).sheet;
+  if (sheet === undefined) return null;
+  if (sheet !== 'generic') {
+    return `The answer sheet "${String(sheet)}" is not one this app knows. `
+      + 'Leave it unset for the printed sheet, or set it to generic.';
+  }
+  return assignment.inputMode === 'handwritten'
+    ? null
+    : 'The generic answer page is for handwritten assignments only. An electronic '
+      + 'assignment has students type and upload their answers, so it has no answer '
+      + 'page to choose. Either set the input mode to Handwritten, or use no answer sheet setting.';
+};
+
 /** Handwritten mode is strictly handwritten-only; electronic mode offers everything else. */
 export const typeAllowedInMode = (type: SubmissionType, inputMode: InputMode): boolean =>
   inputMode === 'handwritten'

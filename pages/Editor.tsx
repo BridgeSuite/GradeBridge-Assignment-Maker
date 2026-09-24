@@ -17,7 +17,7 @@ import {
 import { DEFAULT_ANSWER_LINES, answerLinesFor } from '../services/templateLayout';
 import { derivePageFormatId } from '../services/qrPayload';
 import { describeImportGaps, isAuthoringBackup, readAuthoringBackup } from '../services/authoringBackup';
-import { assignmentKindDefaultedNotice, downgradeAutoImageGrading } from '../services/importNotices';
+import { adoptSheet, assignmentKindDefaultedNotice, downgradeAutoImageGrading } from '../services/importNotices';
 import { describeExtraction, extractFigures } from '../services/figureExtract';
 import { parseFigureRefs, referencedFigureIds } from '../services/figureRefs';
 import { figureFileProblems } from '../services/figureGuards';
@@ -201,7 +201,11 @@ const Editor: React.FC = () => {
         // A stored project may still have an image part set to mark itself.
         // Downgraded and reported, never switched in silence: somebody now has
         // to look at those uploads who previously did not.
-        const autoNotices = downgradeAutoImageGrading(sanitized as unknown as Record<string, unknown>);
+        const autoNotices = [
+          ...downgradeAutoImageGrading(sanitized as unknown as Record<string, unknown>),
+          // A stored electronic assignment cannot carry the generic sheet.
+          ...adoptSheet(sanitized as unknown as Record<string, unknown>),
+        ];
 
         setAssignment(sanitized);
         if (kindWasAbsent) alert(assignmentKindDefaultedNotice());
@@ -479,8 +483,12 @@ const Editor: React.FC = () => {
       if (!ok) return;
     }
 
+    // The generic answer page is handwritten only, so leaving handwritten
+    // leaves it too. Nothing to ask: there is no answer page on an electronic
+    // assignment for the choice to apply to, and coming back is one click.
+    const { sheet: _sheet, ...withoutSheet } = assignment;
     setAssignment({
-      ...assignment,
+      ...(mode === 'handwritten' ? assignment : withoutSheet),
       inputMode: mode,
       problems: assignment.problems.map(p => ({
         ...p,
@@ -576,8 +584,12 @@ const Editor: React.FC = () => {
           return;
         }
 
+        const loadNotices = [
+          ...downgradeAutoImageGrading(newAssignment as unknown as Record<string, unknown>),
+          ...adoptSheet(newAssignment as unknown as Record<string, unknown>),
+        ];
         setAssignment(newAssignment);
-        for (const n of downgradeAutoImageGrading(newAssignment as unknown as Record<string, unknown>)) alert(n);
+        for (const n of loadNotices) alert(n);
         setAiFeedbackAnswered(true); // the file carries a value; show it as a plain toggle
         setKindAnswered(true);
 
@@ -741,7 +753,7 @@ const Editor: React.FC = () => {
             <Lock className="w-4 h-4 mr-2" />
             Grader Doc
           </Button>
-          {inputMode === 'handwritten' && (
+          {inputMode === 'handwritten' && assignment.sheet !== 'generic' && (
             <Button variant="secondary" onClick={handleDownloadQrTemplate}>
               <QrCode className="w-4 h-4 mr-2" />
               QR Template
@@ -827,7 +839,44 @@ const Editor: React.FC = () => {
                     : 'Electronic assignment — students type answers and upload images. Sub-parts can be Electronic text, Image, Text + Image, or AI graded.'}
                   {' '}Set this before adding questions; changing it later converts any sub-part the new mode cannot express.
                 </p>
+                {/* THE ANSWER SHEET. Handwritten only; switching is allowed
+                    before finalize, and the finalize lock holds it after. */}
                 {inputMode === 'handwritten' && (
+                  <div className="mt-3 pt-3 border-t border-academic-200">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-xs font-medium text-academic-700">What students write on</span>
+                      <div className="flex items-center gap-2">
+                        {([
+                          { value: undefined,           label: 'Printed sheet with the questions' },
+                          { value: 'generic' as const,  label: 'Generic answer page' },
+                        ]).map(({ value, label }) => (
+                          <button
+                            key={label}
+                            type="button"
+                            onClick={() => {
+                              if (assignment.sheet === value) return;
+                              const { sheet: _s, ...rest } = assignment;
+                              setAssignment(value ? { ...rest, sheet: value } : rest);
+                            }}
+                            className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                              assignment.sheet === value
+                                ? 'bg-academic-700 text-white border-academic-700'
+                                : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-xs text-academic-500 mt-1 leading-relaxed">
+                      {assignment.sheet === 'generic'
+                        ? 'Generic answer page. You post your own question PDF, and every student writes on the one generic answer page (Dashboard, "Generic answer page"), then says in the Submission app which part each page answers. This app prints no sheet for this assignment. Question text is optional here: students receive only the name and points of each part.'
+                        : 'Printed sheet. This app prints the questions with one answer box per part, and the Submission app knows which part each box is.'}
+                    </p>
+                  </div>
+                )}
+                {inputMode === 'handwritten' && assignment.sheet !== 'generic' && (
                   <div className="mt-3 pt-3 border-t border-academic-200">
                     <label className="block text-xs font-medium text-academic-700 mb-1">
                       Template ID <span className="font-normal text-academic-500">— goes in the printed QR code</span>

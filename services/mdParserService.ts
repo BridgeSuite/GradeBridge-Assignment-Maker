@@ -5,7 +5,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { courseKeyRemovedNotice, submissionAddressRemovedNotice } from './importNotices';
+import { adoptSheet, courseKeyRemovedNotice, submissionAddressRemovedNotice } from './importNotices';
 import { figureRefProblems, parseFigureRefs, splitFigureRefs } from './figureRefs';
 import { Assignment, AssignmentKind, FinalizeStamp, InputMode, Problem, Subsection, SubmissionType } from '../types';
 import { LEGACY_SPACE_LINES } from './templateLayout';
@@ -134,14 +134,14 @@ function hasCourseKeyBlock(lines: string[]): boolean {
 }
 
 function parseMetadata(lines: string[], warnings?: string[]): Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode' | 'assignmentKind'>
-    & { pageFormatId?: string; aiFeedback: boolean;
+    & { pageFormatId?: string; aiFeedback: boolean; sheet?: string;
         finalized?: FinalizeStamp; finalizeHistory?: FinalizeStamp[] } {
   // Every optional line here defaults to the value a file written before it
   // existed would have had, so older .md files round-trip byte-for-byte:
   // **Input:** absent → electronic, **Template ID:** absent → derived,
   // **AI Feedback:** absent → off, **Kind:** absent → conventional.
   const meta: Pick<Assignment, 'courseCode' | 'title' | 'preamble' | 'inputMode' | 'assignmentKind'>
-      & { pageFormatId?: string; aiFeedback: boolean;
+      & { pageFormatId?: string; aiFeedback: boolean; sheet?: string;
           finalized?: FinalizeStamp; finalizeHistory?: FinalizeStamp[] } =
     { courseCode: '', title: '', preamble: '', inputMode: 'electronic' as InputMode,
       aiFeedback: false, assignmentKind: 'conventional' as AssignmentKind };
@@ -169,6 +169,11 @@ function parseMetadata(lines: string[], warnings?: string[]): Pick<Assignment, '
       else meta.finalizeHistory = [...(meta.finalizeHistory || []), stamp];
       continue;
     }
+    // `**Sheet:** generic` — the generic answer page. Kept raw here and resolved
+    // against `**Input:**` after the loop, because the two lines may come in
+    // either order. Absent means today's printed sheet.
+    m = l.match(/^\*\*Sheet:\*\*\s+(.+)$/i);
+    if (m) { meta.sheet = m[1].trim().toLowerCase(); continue; }
     m = l.match(/^\*\*Kind:\*\*\s+(.+)$/i);
     if (m) { meta.assignmentKind = m[1].trim().toLowerCase() === 'reader' ? 'reader' : 'conventional'; continue; }
     m = l.match(/^\*\*Template ID:\*\*\s+(.+)$/i);
@@ -191,6 +196,12 @@ function parseMetadata(lines: string[], warnings?: string[]): Pick<Assignment, '
       if (m[1].trim()) warnings?.push(submissionAddressRemovedNotice());
       continue;
     }
+  }
+  // Handwritten only: on an electronic file the line is reported and dropped.
+  if (meta.sheet !== undefined) {
+    const probe: Record<string, unknown> = { inputMode: meta.inputMode, sheet: meta.sheet };
+    warnings?.push(...adoptSheet(probe));
+    meta.sheet = probe.sheet as string | undefined;
   }
   return meta;
 }
@@ -560,6 +571,7 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
     title: meta.title,
     inputMode: meta.inputMode,
     assignmentKind: meta.assignmentKind,
+    ...(meta.sheet === 'generic' ? { sheet: 'generic' as const } : {}),
     // Only when the file carried one; an assignment that was never finalized
     // must not come back looking as though it was.
     ...(meta.finalized ? { finalized: meta.finalized } : {}),

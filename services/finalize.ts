@@ -32,6 +32,7 @@ import { resolveAssignmentFigures } from './figureRefs';
 import { buildLayout } from './templateLayout';
 import { computeLayoutId } from './qrPayload';
 import { mmRectToFraction } from './pageFormat';
+import { GENERIC_LAYOUT_ID } from './genericAnswerPage';
 
 /**
  * The student-facing fields, by name.
@@ -51,6 +52,11 @@ const FINGERPRINTED_ASSIGNMENT = [
   // Naming both here means the lock does not depend on what the whitelist
   // happens to contain.
   'inputMode', 'assignmentKind',
+  // The answer sheet: switching between the printed sheet and the generic page
+  // after issue changes what every student prints and holds, so it is locked
+  // with the rest. Absent on every assignment that predates it, and `pick`
+  // skips an absent key, so no existing fingerprint moves.
+  'sheet',
   'aiFeedback',
 ] as const;
 
@@ -137,6 +143,8 @@ export const contentFingerprint = async (assignment: Assignment): Promise<string
  */
 export const currentLayoutId = async (assignment: Assignment): Promise<string> => {
   if (assignment.inputMode !== 'handwritten') return '';
+  // The generic page's layout is the same for every assignment that uses it.
+  if (assignment.sheet === 'generic') return GENERIC_LAYOUT_ID;
   const resolved = resolveAssignmentFigures(assignment);
   const layout = buildLayout(resolved);
   if (!layout.regions.length) return '';

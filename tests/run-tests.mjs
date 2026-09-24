@@ -1536,6 +1536,8 @@ ${r.problem_statement}`);
     title: 'HW 1',
     inputMode: 'handwritten',
     assignmentKind: 'reader',
+    // The generic answer page (2026-09-24): the backup must restore the choice.
+    sheet: 'generic',
     // A figure file, so the completeness round trip covers the map as well as
     // the blocks that refer to it.
     figures: { 'p1-fig1': { format: 'svg', base64: 'PHN2Zy8+', filename: 'p1-fig1.svg' } },

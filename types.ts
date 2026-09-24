@@ -104,11 +104,27 @@ export interface FinalizeStamp {
  */
 export type AssignmentKind = 'conventional' | 'reader';
 
+/** The only non-default answer sheet. See `Assignment.sheet`. */
+export type SheetKind = 'generic';
+
 export interface Assignment {
   id: string;
   courseCode: string;
   title: string;
   inputMode?: InputMode; // How students answer. Absent (older assignments) means 'electronic'.
+  /**
+   * What a handwritten student writes on. **Absent means today's app-printed
+   * sheet** — the questions and one box per part, with a layout of its own.
+   * `'generic'` means the instructor posts their own question PDF and every
+   * student writes on the one generic answer page (`services/genericAnswerPage.ts`),
+   * telling the Submission app which part each page holds.
+   *
+   * **Handwritten only.** An electronic assignment never carries it: an import
+   * reports and discards it, and the export refuses one that still does
+   * (`sheetProblem` in `services/inputModeService.ts`). One value and no second,
+   * so that every file written before it existed means what it always meant.
+   */
+  sheet?: SheetKind;
   /**
    * Which of the two kinds of assignment this is.
    *

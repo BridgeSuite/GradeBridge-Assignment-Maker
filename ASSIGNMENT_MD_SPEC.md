@@ -34,6 +34,7 @@ Sketch the transverse E-field and justify the maximum.
 |---|---|---|
 | `# {COURSE}: {TITLE}` | **yes** | Course code and assignment title. Exactly one, first. Format: `# EEC130A: Homework 3`. |
 | `**Input:** handwritten` | no | Marks the whole assignment as handwritten. Any other value, or the line being absent, means **electronic**. Emitted by Export only for handwritten assignments, so older electronic files have no such line. |
+| `**Sheet:** generic` | no | **Handwritten only.** Students write on the one **generic answer page** instead of a printed sheet of this assignment's questions, and the instructor posts their own question PDF. **Absent means today's printed sheet.** Emitted by Export only when chosen, directly under `**Input:** handwritten`, so every other file stays byte-identical. **On an electronic file the line is reported on import and discarded**; no part of the generic sheet ever reaches an electronic assignment. See **The generic answer page** in §10. |
 | `**Finalized:** {date} layout {id} content {fingerprint}` | no | Present once the instructor has issued the assignment. After that an export that would change the student-facing content or the printed layout is refused until it is reopened. `**Finalized-was:**` lines, zero or more, are the history of earlier issues. See **Finalized assignments** below. |
 | `**Kind:** reader` | no | Which of the two kinds of assignment this is. `reader` or `conventional`; **absent means `conventional`**, which is what every file written before 2026-09-21 is. Emitted by Export only for reader assignments, so older files stay byte-identical. Whole-assignment: there is no per-problem kind. **`reader` REQUIRES `**Input:** handwritten`** — see below. **A reader assignment is not marked, so its sub-parts may be worth `[0 pts]`** — the rule is in §4, and what the sheet prints is in §10. **Never travels to the student** — see §13. |
 | `**Template ID:** {ID}` | no | Handwritten only. Goes in the printed QR as the layout key (`[A-Z0-9]{1,12}`, unique across the course). Emitted only when the author pinned one; absent means it is derived from the course code and title. |
@@ -632,6 +633,104 @@ The editor's **QR Template** button emits the same sheet plus its map as a stand
 
 The geometry is not ours to choose. It is fixed by `GradeBridge2026/QR Format Page/GradeBridge_Page_Format_v1.md`, transcribed into `services/pageFormat.ts`, and enforced by the spec 8.7 self-test that runs on every generation — a template that fails any check is not emitted at all.
 
+### The generic answer page (`**Sheet:** generic`)
+
+*Added 2026-09-24. Work order `WORKORDER_AM_GENERIC_ANSWER_PAGE_2026-09-24`, and its four rulings.*
+
+**None of this reaches an electronic assignment.** An electronic assignment has no `sheet`, no `parts`,
+no answer page and no layout map. It exports exactly as it did before, byte for byte, and a test holds it
+to that. The printed sheet described in the rest of this section is **unchanged** too, including its
+layout ids. The generic page is a choice made per assignment, and it does not replace the printed sheet.
+
+**What it is for.** The printed sheet does two jobs: it prints the questions in this app's format, and it
+gives the software a surface to crop. The generic sheet separates the two. **The instructor posts their
+own question PDF**, in their own format, and **every student writes on one generic answer page**. That
+page is the same for every assignment in every course. The consequence: **the page does not say which
+part an answer belongs to. The student says so in the Submission app.**
+
+**The page.** One page, one PDF, course-independent, generated once and versioned as `GBGEN1`. It is
+exported on its own, from **Generic answer page** on the dashboard (`GradeBridge_answer_page_GBGEN1.pdf`),
+and never inside an assignment export, so a department can print a stack of pages without authoring
+anything. It is built like every other page in this format and passes the same spec 8.7 self-test and
+ink checks.
+
+| Element | Where, mm on US Letter |
+|---|---|
+| Corner marks, QR | Identical to every page in this format (§3.1, §2.3) |
+| Header line, the only thing in the top 25 mm | `GradeBridge   answer page   GBGEN1`, at (20.0, 10.0) |
+| Three written fields, y 28 | `Problem __________   Part __________   Page ______ of ______`. The fields are for the student and anyone holding loose paper. **Nothing reads them, ever**, and they have no name, date or section label. |
+| Bold, y 37 and 42.5 | `Write only inside the box. Anything outside it is not collected.` and **`Do not write your name, student ID or email address anywhere on this page.`** |
+| y 47.6 and 51.6 | `Write with a soft pencil (2B or B) or a pen. Hard pencils come out faint and photograph badly.` and `Print on US Letter at 100%, not "fit to page", single or double sided. All four black corner squares must appear.` |
+| The writing box | x 12.0 to 203.9, **y 57.0 to 257.0**, a 1 pt border |
+| Ruled lines | **25 bands of exactly 8.0 mm**, as 24 feint dashed rules at y = 57 + 8.0k (k = 1 to 24), inset 3 mm from each side |
+
+Three of those values differ from the drawn mockup, by ruling, and the reasons are recorded in the work order:
+
+- **The box closes at 257.0, not 262.0 (ruling 1).** The registration-corner keep-outs start at y 257.4,
+  so a box running to 262.0 fails the self-test. The top of the box and every text position stay as
+  approved, and the bands tightened from 8.2 mm to 8.0 mm.
+- **The pencil sentence differs from the printed sheet's, deliberately (ruling 3).** The printed sheet
+  still reads "... scan badly. Darker beats bigger."
+- **The rules are dashed**, the same stroke as the printed sheet's writing lines, for the same reason:
+  a solid rule next to handwritten maths reads as a fraction bar.
+
+**Its map is one row, the same for every assignment (ruling 4):**
+
+```
+assignment_id,layout_id,region_id,part_id,page_k,x0,y0,x1,y1,is_drawing,max_points
+GBGEN1,5F0B10BC,gen,generic,1,0.0572,0.2053,0.9428,0.9186,0,0
+```
+
+**Its layout id is `5F0B10BC`.** It is a constant in both apps and in this spec, the way `95438EDF` is
+for ENG17 HW1. The rectangle is the interior of the box, inside its border, just as on the printed sheet.
+Changing any of this geometry would be a new page version (`GBGEN2`), not an edit to `GBGEN1`.
+
+**Its QR uses today's grammar (ruling 2):** `GB1-GBGEN1-HWMSTR-1-1-5F0B10BC`. `GBGEN1` stands where an
+assignment id would, and it names the page. The QR carries no assignment identity, no part, no student
+identifier and no geometry. It still orients the page, since the corner marks are unkeyed. It is a
+version-4 symbol, like every page in this format, so **it is no easier to photograph than today's QR.**
+The work order's first draft claimed otherwise, and that claim was struck.
+
+**Double-sided printing is supported.** Each side carries its own marks and QR and is registered on its
+own.
+
+**The export, when `sheet` is generic:**
+
+- **The student package is one file**, `{stem}_OPEN_IN_APP.json`. **There is no printed sheet.** The
+  questions are the instructor's own PDF, which this app does not carry.
+- **The spec embeds the generic map** (`layoutCsvName: "layout_GBGEN1.csv"`, verbatim, in the same place
+  as today's map) and carries two new fields:
+  - `sheet: "generic"`.
+  - `parts`: the ordered list the Submission app offers. Each entry has `part_id` (`1(a)`, or `2` for a
+    problem with one part, derived the same way as the map and the rubric), `problem_number`,
+    `subsection_letter` (`a` for a single-part problem too, matching the rubric), `label`
+    (`Problem 1, part (a)`, or `Problem 2`), and, **on a conventional assignment only**, `max_points`.
+- **The spec carries no question text.** Every problem and sub-part `description` is the empty string.
+  Names and points stay, because they are what the student labels pages with. **So a sub-part
+  description may be empty on this path**, and the export does not refuse one.
+- **The instructor folder is unchanged in kind:** the grader document, the grading rubric, the authoring
+  backup and the `.md`. There is no `layout_*.csv` in it, since the map is the same for every generic
+  assignment. **The rubric still carries every part, its `max_points` and its grading prompt**, and gains
+  one top-level line, `sheet: "generic"`, only on this path. On this path each entry's `region_id` names
+  no region in any map, so **the grading side joins a crop to its entry by `part_id`**.
+- **The notice** tells the instructor to post their own question PDF separately and where the answer
+  page comes from, and it carries one greppable line:
+  `Answer sheet: generic (GBGEN1, layout 5F0B10BC).`
+- **A reader assignment works here too.** It still carries `assignment_kind: "reader"`, `max_points: 0`
+  and no `grading_type`, and its `parts` omit `max_points`.
+
+**`part_source`, which is written by the Submission app, not by this app.** For each captured page the
+Submission app writes the `part_id` the student chose and `part_source: "student"`. On the printed-sheet
+path it writes `part_source: "layout"`. **That field is how the two paths stay distinguishable downstream
+without inference.** The archive side is specified in `GradeBridge-Student-Submission/AUTOGRADER_ZIP_SPEC.md`.
+
+**The rules around it.** The **QR Template** button is hidden for a generic-sheet assignment, and the
+generator refuses one. Switching between the printed sheet and the generic page is allowed before
+finalize, and the finalize lock holds the choice afterwards: `sheet` is part of the content fingerprint,
+and a finalized generic assignment records layout `5F0B10BC`. `converter/convert.py` reads the line,
+carries it into its JSON, reports it in its summary, and discards it on an electronic file, the same way
+the app does.
+
 ### What the printed sheet holds
 
 **The sheet is the whole assignment.** A student prints it, reads it, writes on it and photographs it — there is no companion document, so everything they need to answer is on the paper:
@@ -970,10 +1069,10 @@ the artifacts never said who reads them. So, per artifact:
 
 | Artifact | Read by | Authoritative for | Never carries |
 |---|---|---|---|
-| `{stem}_OPEN_IN_APP.json` (the student spec) | the Student Submission app | what the student is asked, how they are allowed to answer it, and — handwritten only — **the layout map, embedded verbatim** (§13) | **grading prompts, grader notes, answer keys, reference solutions, grading-resource settings** — anything a student must not see |
+| `{stem}_OPEN_IN_APP.json` (the student spec) | the Student Submission app | what the student is asked, how they are allowed to answer it, and — handwritten only — **the layout map, embedded verbatim** (§13). On a generic-sheet assignment only, also `sheet` and `parts`, the generic map, and no question text (§10) | **grading prompts, grader notes, answer keys, reference solutions, grading-resource settings** — anything a student must not see |
 | `instructor/{stem}_authoring_backup.json` | this app, on Import JSON | **restoring an assignment completely** — it is the only artifact that does | *(no restriction: it is the whole assignment, and it is why the ZIP must never be given to students)* |
 | `layout_{TemplateID}.csv` | the page consumer that crops (§10) — reached through `{stem}_OPEN_IN_APP.json`, or as the instructor's own copy under `instructor/` | **where** each region is on the page — nothing else | anything a grader needs in order to grade |
-| `{stem}_grading_rubric.json` | the grading system | what each item asks, what it is worth, what a grader is told, the answer's **modality**, and — at the top level beside `assignment_id` — `assignment_kind` and `input_mode` | **model names, temperature, token budgets, or any other grading-system resource decision** |
+| `{stem}_grading_rubric.json` | the grading system | what each item asks, what it is worth, what a grader is told, the answer's **modality**, and — at the top level beside `assignment_id` — `assignment_kind` and `input_mode`, plus `sheet: "generic"` on a generic-sheet assignment only | **model names, temperature, token budgets, or any other grading-system resource decision** |
 | `{stem}_grader_document.html` | a human TA, on screen or on paper | the answer key and the rubric in readable form | anything machine-parsed — nothing may depend on its markup |
 | `{stem}.pdf` | the student, on paper | the whole assignment | identity fields — no name, ID or date blank (§10) |
 | `instructor/{stem}.md` | this app, on Import Markdown; and a human editing it | the authored source — the format an author actually writes | *(it carries the grading prompts, so it is instructor-only)* |

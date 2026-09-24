@@ -169,6 +169,14 @@ COURSE_KEY_REMOVED_NOTICE = (
 )
 
 
+# Mirrors sheetDiscardedNotice() in services/importNotices.ts, word for word.
+SHEET_DISCARDED_NOTICE = (
+    'This file asks for the generic answer page, but it is an electronic '
+    'assignment: students type and upload their answers, so there is no answer '
+    'page to print. The setting has been discarded. Nothing else about the '
+    'assignment has changed.')
+
+
 def has_course_key_block(lines):
     """Whether the metadata region carries a ```pem block at all."""
     for line in lines:
@@ -462,6 +470,14 @@ def parse_metadata(lines):
             meta['assignmentKind'] = 'reader' if m.group(1).strip().lower() == 'reader' else 'conventional'
             continue
 
+        # Answer sheet: **Sheet:** generic -- the generic answer page. Kept raw
+        # and resolved against **Input:** after the loop, since the two lines may
+        # come in either order. Absent means today's printed sheet.
+        m = re.match(r'^\*\*Sheet:\*\*\s+(.+)$', line, re.IGNORECASE)
+        if m:
+            meta['sheet'] = m.group(1).strip().lower()
+            continue
+
         # Page-format template id: **Template ID:** HW3
         m = re.match(r'^\*\*Template ID:\*\*\s+(.+)$', line, re.IGNORECASE)
         if m:
@@ -487,6 +503,20 @@ def parse_metadata(lines):
             if m.group(1).strip():
                 PARSE_WARNINGS.append(SUBMISSION_ADDRESS_REMOVED_NOTICE)
             continue
+
+    # Handwritten only. Mirrors adoptSheet() in services/importNotices.ts: on an
+    # electronic file the line is reported and dropped, and a value this app
+    # does not know is dropped with its own sentence.
+    if 'sheet' in meta:
+        sheet = meta.pop('sheet')
+        if meta['inputMode'] != 'handwritten':
+            PARSE_WARNINGS.append(SHEET_DISCARDED_NOTICE)
+        elif sheet != 'generic':
+            PARSE_WARNINGS.append(
+                f'This file names the answer sheet "{sheet}", which this app does not know. '
+                'It has been opened with the printed sheet. Set it to generic in the editor if that was meant.')
+        else:
+            meta['sheet'] = 'generic'
 
     return meta
 
@@ -765,6 +795,9 @@ def parse_md(filepath):
         'title': meta['title'],
         'inputMode': meta['inputMode'],
         'assignmentKind': meta['assignmentKind'],
+        # Only when the file chose the generic answer page, on a handwritten
+        # assignment; absent means the printed sheet, as in the app.
+        **({'sheet': meta['sheet']} if meta.get('sheet') else {}),
         'aiFeedback': meta['aiFeedback'],
         'preamble': meta['preamble'],
         'problems': problems,
@@ -795,6 +828,8 @@ def print_summary(assignment):
     print(f"  Title:      {assignment['title']}")
     print(f"  Input:      {assignment.get('inputMode', 'electronic')}")
     print(f"  Kind:       {assignment.get('assignmentKind', 'conventional')}")
+    if assignment.get('inputMode') == 'handwritten':
+        print(f"  Sheet:      {'generic answer page' if assignment.get('sheet') == 'generic' else 'printed'}")
     print(f"  Problems:   {len(assignment['problems'])}")
     # A reader assignment is not marked: the app exports every part as 0 and
     # prints no points, so a total here would describe nothing. Mirrors

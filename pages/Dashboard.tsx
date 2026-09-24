@@ -6,10 +6,10 @@ import { Assignment } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService, isRescaleDeclined } from '../services/exportService';
 import { Layout, Card, Button } from '../components/Common';
-import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode } from 'lucide-react';
+import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode, Printer } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
 import { parseMdToAssignment } from '../services/mdParserService';
-import { adoptAssignmentKind, stripRetiredFields } from '../services/importNotices';
+import { adoptAssignmentKind, adoptSheet, stripRetiredFields } from '../services/importNotices';
 import { assignmentKindProblem } from '../services/inputModeService';
 import { pointsAreMarked } from '../services/pointsService';
 import { collectFigures, unreferencedNotice } from '../services/figureImport';
@@ -65,6 +65,11 @@ const Dashboard: React.FC = () => {
         `Downloaded ${filename}\n\n` +
         `Attach ${studentZipName} from inside it. That one file holds:\n` +
         studentNames.map(n => `  ${n}`).join('\n') +
+        (assignment.inputMode === 'handwritten' && assignment.sheet === 'generic'
+          ? `\n\nThis assignment uses the generic answer page. Post your own question PDF ` +
+            `separately, and make sure students have the generic answer page ` +
+            `("Generic answer page" on this dashboard).`
+          : '') +
         `\n\nPost nothing else: everything under instructor/ contains answers.`
       );
     } catch (error) {
@@ -72,6 +77,25 @@ const Dashboard: React.FC = () => {
       if (isRescaleDeclined(error)) return;
       console.error(error);
       alert(error instanceof Error ? error.message : 'Failed to export the assignment package.');
+    }
+  };
+
+  /**
+   * The generic answer page, on its own: one PDF, the same for every
+   * assignment and every course, so a department can print a stack without
+   * authoring anything.
+   */
+  const handleGenericAnswerPage = async () => {
+    try {
+      const page = await exportService.downloadGenericAnswerPage();
+      alert(
+        `Downloaded ${page.pdfFilename}\n\n` +
+        `The generic answer page: one page, the same for every assignment that uses it. ` +
+        `Print as many as you like, on US Letter at 100%.\n\nLayout id: ${page.layoutId}`
+      );
+    } catch (error) {
+      console.error(error);
+      alert(error instanceof Error ? error.message : 'Failed to build the generic answer page.');
     }
   };
 
@@ -123,6 +147,8 @@ const Dashboard: React.FC = () => {
           // conventional and says so — a value chosen on the author's behalf
           // is announced, where a dead field being dropped is not.
           ...adoptAssignmentKind(asRecord),
+          // `sheet: generic` on an electronic assignment is reported and dropped.
+          ...adoptSheet(asRecord),
         ];
 
         // Ensure timestamps exist
@@ -326,6 +352,11 @@ const Dashboard: React.FC = () => {
           <Button variant="secondary" onClick={handleLoadExample}>
             <Sparkles className="w-4 h-4 mr-2" />
             Load Example
+          </Button>
+          <Button variant="secondary" onClick={handleGenericAnswerPage}
+            title="The one answer page every generic-sheet assignment uses. Not tied to any assignment.">
+            <Printer className="w-4 h-4 mr-2" />
+            Generic answer page
           </Button>
           <Button variant="secondary" onClick={handleImportClick}>
             <Upload className="w-4 h-4 mr-2" />
