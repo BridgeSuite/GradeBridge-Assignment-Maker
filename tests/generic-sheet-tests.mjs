@@ -222,6 +222,21 @@ await check('THE IDENTITY WARNING and THE PRINTING RULE are on the page, legible
   assert(/\/Helvetica-Bold/.test(pdfBytes), 'no bold face on the page; the identity warning is meant to be bold');
 });
 
+// WORKORDER_AM_ONE_ANSWER_PER_PAGE_2026-09-25. Appended to the existing bold
+// line, never a new line: a new line pushes the box down, moves 5F0B10BC and
+// makes this GBGEN2. So the sentence is held literally, on ONE line at y 37.0,
+// at the same 10 pt bold, and inside the box's width.
+await check('"One answer per page." is on the bold line, one line, same place and size', () => {
+  const line = 'Write only inside the box. Anything outside it is not collected. One answer per page.';
+  assertEqual(gp.GENERIC_OUTSIDE_BOX_TEXT, line, 'the outside-box line is not the approved text');
+  assert(pdfStrings.includes(line), `the line is not printed whole on one line\n          found: ${JSON.stringify(pdfStrings)}`);
+  const b = page.ink.find(x => x.what === 'outside-box line');
+  assertEqual(b.y0, 37.0, 'the line moved');
+  assert(Math.abs((b.y1 - b.y0) / (1.2 * 25.4 / 72) - 10) < 1e-6, 'the line is not 10 pt');
+  assert(b.x1 <= gp.GENERIC_BOX_MM.x1, `the line runs to x ${b.x1.toFixed(2)}, past the box`);
+  assertEqual(page.ink.filter(x => x.what === 'outside-box line').length, 1, 'the line was drawn more than once');
+});
+
 await check('ruling 3: the pencil sentence is the work order\'s, and deliberately not today\'s', () => {
   assertEqual(gp.GENERIC_PENCIL_TEXT,
     'Write with a soft pencil (2B or B) or a pen. Hard pencils come out faint and photograph badly.',

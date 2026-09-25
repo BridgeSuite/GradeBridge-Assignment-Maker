@@ -107,7 +107,15 @@ export const GENERIC_TEXT_TOP_MM = {
 
 export const GENERIC_HEADER_TEXT = `GradeBridge   answer page   ${GENERIC_TEMPLATE_ID}`;
 export const GENERIC_FIELDS_TEXT = 'Problem __________   Part __________   Page ______ of ______';
-export const GENERIC_OUTSIDE_BOX_TEXT = 'Write only inside the box. Anything outside it is not collected.';
+/**
+ * "One answer per page." was APPENDED on 2026-09-25
+ * (WORKORDER_AM_ONE_ANSWER_PER_PAGE_2026-09-25): a student who puts two parts
+ * on one page loses one, because each page is labelled with one part. It is on
+ * this line, not a new one, because a new line pushes the box down and moves
+ * `5F0B10BC`. At 10 pt bold it ends at x ~152.6 mm, clear of the box edge.
+ */
+export const GENERIC_OUTSIDE_BOX_TEXT =
+  'Write only inside the box. Anything outside it is not collected. One answer per page.';
 /** The identity warning. This page has no instructions page in front of it, so it says it here. */
 export const GENERIC_IDENTITY_TEXT =
   'Do not write your name, student ID or email address anywhere on this page.';

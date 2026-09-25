@@ -667,13 +667,16 @@ ink checks.
 | Corner marks, QR | Identical to every page in this format (§3.1, §2.3) |
 | Header line, the only thing in the top 25 mm | `GradeBridge   answer page   GBGEN1`, at (20.0, 10.0) |
 | Three written fields, y 28 | `Problem __________   Part __________   Page ______ of ______`. The fields are for the student and anyone holding loose paper. **Nothing reads them, ever**, and they have no name, date or section label. |
-| Bold, y 37 and 42.5 | `Write only inside the box. Anything outside it is not collected.` and **`Do not write your name, student ID or email address anywhere on this page.`** |
+| Bold, y 37 and 42.5 | `Write only inside the box. Anything outside it is not collected. One answer per page.` (the last sentence appended on the same line 2026-09-25, so the box did not move) and **`Do not write your name, student ID or email address anywhere on this page.`** |
 | y 47.6 and 51.6 | `Write with a soft pencil (2B or B) or a pen. Hard pencils come out faint and photograph badly.` and `Print on US Letter at 100%, not "fit to page", single or double sided. All four black corner squares must appear.` |
 | The writing box | x 12.0 to 203.9, **y 57.0 to 257.0**, a 1 pt border |
 | Ruled lines | **25 bands of exactly 8.0 mm**, as 24 feint **solid** rules, 0.5 pt at 75% grey, at y = 57 + 8.0k (k = 1 to 24), inset 3 mm from each side |
 
-**The page as built is `specs/generic_answer_page/generic_answer_page_AS_BUILT_2026-09-24.pdf`,
-produced by this app, and it is the approved artifact from Supplement 1 onward.** The drawn mockup it
+**The page as built is `specs/generic_answer_page/generic_answer_page_AS_BUILT_2026-09-25.pdf`,
+produced by this app, and it is the approved artifact.** It differs from the 2026-09-24 as-built PDF
+(kept beside it, the approved artifact from Supplement 1 until then) only by "One answer per page."
+appended to the first bold line (WORKORDER_AM_ONE_ANSWER_PER_PAGE_2026-09-25); layout `5F0B10BC`, the
+box and the rules did not move. The drawn mockup it
 replaced is kept beside it as the record of what was approved on the day. Two things differ from that
 mockup, both by ruling, and the reasons are recorded in the work order:
 
