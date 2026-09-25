@@ -1266,8 +1266,20 @@ ${marked ? '  .sub-pts { font-size: 0.9em; color: #555; white-space: nowrap; }\n
 // asserts the built spec's field set is exactly this, so adding a field to
 // `Assignment` fails the suite until someone decides deliberately.
 
-/** Fields always written, in the order the spec serialises them. */
-const SPEC_ASSIGNMENT_REQUIRED = ['id', 'courseCode', 'title', 'preamble', 'problems', 'createdAt', 'updatedAt'] as const;
+/** Fields always written, in the order the spec serialises them.
+ *
+ *  `assignmentKind` joined on 2026-09-25
+ *  (WORKORDER_AM_ASSIGNMENT_KIND_TRAVELS_2026-09-25), reversing the decision
+ *  that it never would. The Submission app's wording and its parts menu depend
+ *  on the kind, and until then it derived the kind from whether `parts` carries
+ *  `max_points` — inference, which this project does not accept where a
+ *  declaration can be written. Always written, never conditional, so the
+ *  student app never has to decide what an absent kind means. It is the
+ *  student app's to present by; the grading side still reads the kind from
+ *  the rubric, because this file is a claim and the rubric is not. */
+const SPEC_ASSIGNMENT_REQUIRED = [
+  'id', 'courseCode', 'title', 'assignmentKind', 'preamble', 'problems', 'createdAt', 'updatedAt',
+] as const;
 /** Written only when the assignment actually carries them, so a spec from
  *  before a field existed stays byte-for-byte what it was.
  *
@@ -1448,6 +1460,12 @@ export const buildAssignmentSpec = async (
   assignment = resolveAssignmentFigures(assignment);
 
   const source = { ...(assignment as unknown as Record<string, unknown>) };
+
+  // The kind, resolved rather than copied: exactly the import's rule, where
+  // anything but `reader` is conventional. The type makes it required, but a
+  // hand-edited localStorage entry can still lack it, and the student file must
+  // never carry an absent or third value for the Submission app to interpret.
+  source.assignmentKind = assignment.assignmentKind === 'reader' ? 'reader' : 'conventional';
 
   // Both fields or neither, refused here rather than downstream: a spec naming a
   // map it does not carry, or carrying one it cannot name, is a shape no

@@ -564,14 +564,21 @@ check('referencedFigureIds finds every id an assignment refers to', () => {
       'the rubric top level is not the shape the spec documents');
   });
 
-  check('the student spec still carries neither the kind nor a rubric', async () => {
-    const spec = await exportSvc.buildAssignmentSpec(
-      makeAssignment({ assignmentKind: 'reader', inputMode: 'handwritten' }));
-    assert(!('assignmentKind' in spec), 'the kind reached the student spec');
-    assert(!('assignment_kind' in spec), 'the kind reached the student spec under its rubric name');
-    assert(!('rubrics' in spec), 'a rubric reached the student spec');
-    assert(!exportSvc.STUDENT_SPEC_FIELDS.assignment.includes('assignmentKind'),
-      'assignmentKind is on the student whitelist');
+  // Reversed 2026-09-25: the kind now travels to the student, under the
+  // student spec's own (camelCase, `Assignment`) name. Still no rubric.
+  check('the student spec carries the kind, and still no rubric', async () => {
+    for (const [extra, kind] of [
+      [{ assignmentKind: 'reader', inputMode: 'handwritten' }, 'reader'],
+      [{ assignmentKind: 'conventional', inputMode: 'handwritten' }, 'conventional'],
+      [{ assignmentKind: 'conventional', inputMode: 'electronic' }, 'conventional'],
+    ]) {
+      const spec = await exportSvc.buildAssignmentSpec(makeAssignment(extra));
+      assertEqual(spec.assignmentKind, kind, `the ${kind} kind did not reach the student spec`);
+      assert(!('assignment_kind' in spec), 'the kind reached the student spec under its rubric name as well');
+      assert(!('rubrics' in spec), 'a rubric reached the student spec');
+    }
+    assert(exportSvc.STUDENT_SPEC_FIELDS.assignment.includes('assignmentKind'),
+      'assignmentKind is not on the student whitelist');
   });
 
   // convert.py writes NO rubric — it emits `{stem}_spec.json`, the assignment

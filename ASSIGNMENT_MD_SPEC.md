@@ -36,7 +36,7 @@ Sketch the transverse E-field and justify the maximum.
 | `**Input:** handwritten` | no | Marks the whole assignment as handwritten. Any other value, or the line being absent, means **electronic**. Emitted by Export only for handwritten assignments, so older electronic files have no such line. |
 | `**Sheet:** generic` | no | **Handwritten only.** Students write on the one **generic answer page** instead of a printed sheet of this assignment's questions, and the instructor posts their own question PDF. **Absent means today's printed sheet.** Emitted by Export only when chosen, directly under `**Input:** handwritten`, so every other file stays byte-identical. **On an electronic file the line is reported on import and discarded**; no part of the generic sheet ever reaches an electronic assignment. See **The generic answer page** in §10. |
 | `**Finalized:** {date} layout {id} content {fingerprint}` | no | Present once the instructor has issued the assignment. After that an export that would change the student-facing content or the printed layout is refused until it is reopened. `**Finalized-was:**` lines, zero or more, are the history of earlier issues. See **Finalized assignments** below. |
-| `**Kind:** reader` | no | Which of the two kinds of assignment this is. `reader` or `conventional`; **absent means `conventional`**, which is what every file written before 2026-09-21 is. Emitted by Export only for reader assignments, so older files stay byte-identical. Whole-assignment: there is no per-problem kind. **`reader` REQUIRES `**Input:** handwritten`** — see below. **A reader assignment is not marked, so its sub-parts may be worth `[0 pts]`** — the rule is in §4, and what the sheet prints is in §10. **Never travels to the student** — see §13. |
+| `**Kind:** reader` | no | Which of the two kinds of assignment this is. `reader` or `conventional`; **absent means `conventional`**, which is what every file written before 2026-09-21 is. Emitted by Export only for reader assignments, so older files stay byte-identical. Whole-assignment: there is no per-problem kind. **`reader` REQUIRES `**Input:** handwritten`** — see below. **A reader assignment is not marked, so its sub-parts may be worth `[0 pts]`** — the rule is in §4, and what the sheet prints is in §10. **Travels to the student** as `assignmentKind`, always written, since 2026-09-25 — see §12. |
 | `**Template ID:** {ID}` | no | Handwritten only. Goes in the printed QR as the layout key (`[A-Z0-9]{1,12}`, unique across the course). Emitted only when the author pinned one; absent means it is derived from the course code and title. |
 | `**AI Feedback:** on` | no | Whether students may request AI feedback on any problem in this assignment. `on` or `off`; absent means **off**. Emitted by Export only when on, so older files stay byte-identical. |
 | `**Submit at:** {address}` | no | **Retired 2026-09-22.** Was the submission address, printed on page 1. Never written now; a file that still carries one imports, and the import says the value was discarded. Students are told how to hand work in when they open the assignment in the Submission app. |
@@ -132,14 +132,22 @@ rejected file leaves no `_spec.json` behind. In the editor the Reader option is 
 the assignment is electronic, and switching a reader assignment to electronic is refused rather
 than silently downgraded to conventional.
 
-**The routes that carry it, and the one that must not.** The `.md` carries it, the authoring
-backup carries it, `converter/convert.py` reads and writes it in lockstep with the app, and the
-export's `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` states it in plain text so a table of
-assignment to kind can be built by reading exports. **`assignment_spec.json` does not carry it
-and must never be given it** (§13): the student's browser has no use for it, and anything in
-that file is a claim rather than a fact, because the gb1 key ships inside the bundle. Nothing
-student-facing carries the kind at all, so there is no claim for anything downstream to
-validate. A test asserts it stays off the whitelist.
+**The routes that carry it.** The `.md` carries it, the authoring backup carries it,
+`converter/convert.py` reads and writes it in lockstep with the app, the export's
+`00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` states it in plain text so a table of assignment to kind
+can be built by reading exports, and **since 2026-09-25 the student spec carries it too**, as
+`assignmentKind`, on every export, electronic included (§12).
+
+*This reverses what stood here until 2026-09-25*, which said the student spec "must never be given
+it" because the student's browser had no use for it. That reason expired: the Submission app writes
+sentences that depend on whether a grader exists, and chooses what to show per part by whether points
+exist. Without the field it inferred the kind from whether `parts` carries `max_points` — inference,
+which this project does not accept where a declaration can be written (it is why `part_source`
+exists). **Do not re-remove it**; a test asserts it stays on the whitelist.
+
+What did not change: anything in the student file is a claim rather than a fact, because the gb1 key
+ships inside the bundle. The student's copy is for the Submission app's presentation. **The grading
+side learns the kind from `assignment_kind` in the rubric**, and must go on doing so.
 
 ---
 
@@ -1101,9 +1109,11 @@ blacklist is silent; the failure mode of a whitelist is a missing feature that s
 
 | Level | Always written | Written only when present |
 |---|---|---|
-| assignment | `id`, `courseCode`, `title`, `preamble`, `problems`, `createdAt`, `updatedAt` | `inputMode`, `aiFeedback` |
+| assignment | `id`, `courseCode`, `title`, `assignmentKind`, `preamble`, `problems`, `createdAt`, `updatedAt` | `inputMode`, `aiFeedback`, `layoutCsvName`, `layoutCsv`, `sheet`, `parts` |
 
-**Never in the student spec, and each for its own reason:** `assignmentKind` (the student's browser has no use for it, and nothing student-facing carries the kind at all, so there is no claim for anything downstream to validate); `figures` (the map is resolved away — the student receives drawings, not references); `finalized` and `finalizeHistory` (a fact about the instructor's workflow). Tests assert each stays off the whitelist.
+**`assignmentKind` is in the student spec, always, since 2026-09-25.** It is there for the Submission app: its wording and its parts menu depend on the kind, and without the field the app inferred it from whether `parts` carries `max_points`. It is resolved on the way out (anything but `reader` is written as `conventional`), so the student file never carries an absent or third value. It is a claim, not a fact, like everything in this file: the grading side reads the kind from the rubric. *Until 2026-09-25 this paragraph listed it as never in the student spec, because "the student's browser has no use for it"; that stopped being true, and the entry was corrected rather than worked around.*
+
+**Never in the student spec, and each for its own reason:** `figures` (the map is resolved away — the student receives drawings, not references); `finalized` and `finalizeHistory` (a fact about the instructor's workflow). Tests assert each stays off the whitelist.
 
 | artifact | who reads it | never contains |
 |---|---|---|

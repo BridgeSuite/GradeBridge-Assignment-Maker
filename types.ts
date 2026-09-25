@@ -144,12 +144,20 @@ export interface Assignment {
    * halves every point one export cycle after the import that lost it. See
    * `assignmentKindDefaultedNotice` in `services/importNotices.ts`.
    *
-   * **It never reaches the student.** It is not in `STUDENT_SPEC_FIELDS` and a
-   * test asserts it stays out. The student's browser has no use for it, and
-   * anything in that file is a claim rather than a fact because the gb1 key
-   * ships inside the bundle — so the pipeline is built with nothing
-   * student-facing carrying the kind at all, which leaves no claim for anything
-   * downstream to validate.
+   * **It reaches the student, since 2026-09-25**, and a test asserts it stays
+   * on `STUDENT_SPEC_FIELDS`. It was withheld until then on the reasoning that
+   * the student's browser had no use for it. That stopped being true: the
+   * Submission app writes sentences that depend on whether a grader exists and
+   * chooses what to show per part by whether points exist, and without the
+   * field it had to infer the kind from whether `parts` carries `max_points`.
+   * This project does not accept inference where a declaration can be written
+   * (it is why `part_source` exists), so the kind travels.
+   *
+   * **The student's copy is for the Submission app's own presentation, not for
+   * grading.** Anything in that file is a claim rather than a fact, because the
+   * gb1 key ships inside the bundle. The grading side learns the kind from
+   * `assignment_kind` in `{stem}_grading_rubric.json`, which stays with the
+   * instructor, and must go on doing so.
    */
   assignmentKind: AssignmentKind;
   /**

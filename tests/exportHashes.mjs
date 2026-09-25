@@ -8,6 +8,12 @@
 //      `tests/fixtures/pre_generic_sheet_goldens.json`. They were written from
 //      `d6f4af5`, the deployed build before the generic answer page existed, and
 //      are the "before" half of a before-and-after comparison.
+//
+//      REGENERATED ONCE, 2026-09-25, for WORKORDER_AM_ASSIGNMENT_KIND_TRAVELS:
+//      the student spec gained `assignmentKind`, so the two `_OPEN_IN_APP.json`
+//      hashes per fixture moved (Math 0fd3a7bd -> 3e97e11a, Handwritten
+//      67917dcf -> 46f3c573). Every other entry is still d6f4af5's, unchanged
+//      by the regeneration; the decoded specs differ by that one field only.
 //   2. `tests/generic-sheet-tests.mjs` hashes the same fixtures with the code as
 //      it stands and asserts every hash is unchanged. That is the suite's proof
 //      that an ELECTRONIC export and a PRINTED-SHEET export did not move by a

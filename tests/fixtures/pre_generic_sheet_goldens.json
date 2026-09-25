@@ -2,7 +2,7 @@
   "_katex": "0.16.40",
   "Math_Fixture.md": {
     "entries": {
-      "student/DEMO101_Math_Rendering_Fixture_OPEN_IN_APP.json": "0fd3a7bdb15e897a",
+      "student/DEMO101_Math_Rendering_Fixture_OPEN_IN_APP.json": "3e97e11a53138d3d",
       "instructor/DEMO101_Math_Rendering_Fixture_authoring_backup.json": "6820d59bb57babcb",
       "instructor/DEMO101_Math_Rendering_Fixture.md": "93a7dc6e3f35da76",
       "instructor/assignment.html": "88de70f6604f23f7",
@@ -15,12 +15,12 @@
     },
     "studentPackage": {
       "DEMO101_Math_Rendering_Fixture.pdf": "fc665787f807c3e2",
-      "DEMO101_Math_Rendering_Fixture_OPEN_IN_APP.json": "0fd3a7bdb15e897a"
+      "DEMO101_Math_Rendering_Fixture_OPEN_IN_APP.json": "3e97e11a53138d3d"
     }
   },
   "Handwritten_HW_Fixture.md": {
     "entries": {
-      "student/DEMO101_Homework_3_OPEN_IN_APP.json": "67917dcf2c56c053",
+      "student/DEMO101_Homework_3_OPEN_IN_APP.json": "46f3c5735d911701",
       "instructor/DEMO101_Homework_3_authoring_backup.json": "a3abdc1a075c52e1",
       "instructor/DEMO101_Homework_3.md": "273cd5bc3c250345",
       "instructor/assignment.html": "10a3c31d85cfce78",
@@ -33,7 +33,7 @@
     },
     "studentPackage": {
       "DEMO101_Homework_3.pdf": "348d8a8392e59b8d",
-      "DEMO101_Homework_3_OPEN_IN_APP.json": "67917dcf2c56c053"
+      "DEMO101_Homework_3_OPEN_IN_APP.json": "46f3c5735d911701"
     }
   }
 }

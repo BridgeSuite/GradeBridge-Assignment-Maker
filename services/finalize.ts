@@ -45,12 +45,16 @@ import { GENERIC_LAYOUT_ID } from './genericAnswerPage';
  */
 const FINGERPRINTED_ASSIGNMENT = [
   'courseCode', 'title', 'preamble',
-  // Both are included EXPLICITLY, even though `inputMode` is already on the
-  // student whitelist. `assignmentKind` is not on it and never will be — but
-  // changing it after issue reroutes every submission, conventional to reader
-  // or back, which is exactly the after-issue change this lock exists to stop.
-  // Naming both here means the lock does not depend on what the whitelist
-  // happens to contain.
+  // Both are included EXPLICITLY, even though both are on the student
+  // whitelist. `assignmentKind` joined it on 2026-09-25: it travels because the
+  // Submission app's wording and its parts menu depend on the kind, and
+  // deriving it from the presence of `max_points` is inference this project
+  // does not accept. (This comment said it never would; that was reversed, not
+  // worked around.) It was already fingerprinted here, so joining the whitelist
+  // moved no fingerprint. Changing it after issue reroutes every submission,
+  // conventional to reader or back, which is exactly the after-issue change
+  // this lock exists to stop. Naming both here means the lock does not depend
+  // on what the whitelist happens to contain.
   'inputMode', 'assignmentKind',
   // The answer sheet: switching between the printed sheet and the generic page
   // after issue changes what every student prints and holds, so it is locked

@@ -362,7 +362,11 @@ await check('a READER assignment works in generic mode: kind reader, points 0, n
   }
   for (const p of r.spec.parts) assert(!('max_points' in p), `${p.part_id} carries points on a reader assignment`);
   assertEqual(r.spec.layoutCsv, gp.GENERIC_LAYOUT_CSV, 'the reader spec does not embed the generic map');
-  assert(!('assignmentKind' in r.spec), 'the kind reached the student');
+  // Reversed 2026-09-25: the kind travels, so the Submission app reads it
+  // rather than inferring it from the absence of `max_points` above.
+  assertEqual(r.spec.assignmentKind, 'reader', 'the reader kind did not reach the student');
+  assertEqual(out.spec.assignmentKind, 'conventional', 'the conventional kind did not reach the student');
+  for (const p of out.spec.parts) assert('max_points' in p, `${p.part_id} lost its points on a conventional assignment`);
 });
 
 await check('the QR Template route refuses a generic assignment: it has no printed sheet', async () => {
@@ -416,7 +420,7 @@ await check('the installed KaTeX is the one the goldens were written with', () =
     'KaTeX moved. Either the lockfile was changed deliberately, and the goldens with it, or it is not being honoured');
 });
 for (const f of GOLDEN_FIXTURES) {
-  await check(`byte for byte against d6f4af5, every entry, the HTML documents compared: ${f}`, async () => {
+  await check(`byte for byte against d6f4af5 (student spec as of the 2026-09-25 kind change), every entry, the HTML documents compared: ${f}`, async () => {
     const md = readFileSync(join(REPO, 'tests', 'fixtures', f), 'utf8');
     const now = await hashExport(m, pinnedAssignment(m, md));
     const was = goldens[f];
@@ -521,7 +525,18 @@ await check('PRINTED SHEET: the spec never carries sheet or parts', async () => 
       })),
     };
     const built = await m.buildAssignmentSpec(a, m.GENERIC_EMBEDDED_LAYOUT);
-    assertEqual(built, s, 'the export and the sample the other lane builds against have drifted');
+    // The export gained `assignmentKind` on 2026-09-25
+    // (WORKORDER_AM_ASSIGNMENT_KIND_TRAVELS). The sample is deliberately NOT
+    // regenerated: the Student Submission lane holds its own fixture
+    // byte-identical to it and was mid-merge, and the work order says that lane
+    // must not be disturbed. So the sample is compared with that one field set
+    // aside, and the field is asserted on its own. Regenerate the sample, and
+    // drop this exemption, with the work order that consumes the field there.
+    const { assignmentKind, ...rest } = built;
+    assertEqual(assignmentKind, 'conventional', 'the export does not carry the kind');
+    assert(!('assignmentKind' in s),
+      'the sample now carries the kind; drop this exemption and compare the whole object');
+    assertEqual(rest, s, 'the export and the sample the other lane builds against have drifted');
   });
 }
 

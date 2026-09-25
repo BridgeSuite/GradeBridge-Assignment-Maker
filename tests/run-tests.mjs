@@ -212,14 +212,14 @@ console.log('\nAssignment Maker test suite — export contract + handwritten rou
 {
   const bare = makeAssignment();
   const bareSpec = await buildAssignmentSpec(bare);
-  // Not an identity any more, and deliberately so: `assignmentKind` is a field
-  // of every assignment that the student's copy must never carry. What is
-  // asserted is that the difference is EXACTLY that and nothing else, so a
-  // second field going missing from the student file still fails here.
-  check('the spec is the assignment minus only what the whitelist withholds', () => {
-    const { assignmentKind, ...expected } = bare;
-    assertEqual(bareSpec, expected, 'the spec dropped or added something other than the kind');
-    assert(!('assignmentKind' in bareSpec), 'the student spec carries the assignment kind');
+  // An identity again, since 2026-09-25: `assignmentKind` travels to the
+  // student (WORKORDER_AM_ASSIGNMENT_KIND_TRAVELS_2026-09-25). For two days it
+  // was the one field withheld, and this check asserted exactly that
+  // difference. Now nothing on a bare assignment is withheld, so a field going
+  // missing from the student file, or appearing in it, fails here.
+  check('the spec is the assignment, the kind included', () => {
+    assertEqual(bareSpec, bare, 'the spec dropped or added a field');
+    assertEqual(bareSpec.assignmentKind, 'conventional', 'the student spec does not carry the kind');
   });
 
   check('the spec still survives the gb1 encode/decode round trip', async () => {
@@ -3164,17 +3164,19 @@ ${r.problem_statement}`);
 }
 
 // =====================================================
-// THE ASSIGNMENT KIND SURVIVES EVERY ROUND TRIP, AND NEVER REACHES A STUDENT
+// THE ASSIGNMENT KIND SURVIVES EVERY ROUND TRIP, THE STUDENT'S INCLUDED
 // =====================================================
 // There are two kinds of assignment, conventional and reader, and exactly one
 // per assignment. It cannot be derived from anything else in the file, so every
-// route that claims to restore an assignment has to carry it — and the route
-// that goes to a student has to not.
+// route that claims to restore an assignment has to carry it — and since
+// 2026-09-25 that includes the route that goes to a student.
 //
-// Why the negative is a test rather than a convention: the whole design is that
-// NOTHING student-facing carries the kind, so there is no claim downstream for
-// anything to validate. One well-meaning addition to the whitelist would undo
-// that quietly, and the export would still look correct.
+// Until then this block held the opposite: nothing student-facing carried the
+// kind, so there was no claim downstream to validate. That reason expired when
+// the Submission app began choosing its wording and its parts menu by kind and
+// had to infer it from `max_points`. The positive is a test for the same reason
+// the negative was: one well-meaning edit to the whitelist would undo it
+// quietly, and the export would still look correct.
 {
   const conventional = makeAssignment({ inputMode: 'handwritten', targetPoints: 100, assignmentKind: 'conventional' });
   const reader = makeAssignment({ inputMode: 'handwritten', targetPoints: 100, assignmentKind: 'reader' });
@@ -3224,16 +3226,26 @@ ${r.problem_statement}`);
       'a third value survived into the assignment');
   });
 
-  // §4.3, last row — the one that must NOT carry it.
-  check('kind: it is not in STUDENT_SPEC_FIELDS', () => {
-    assert(!STUDENT_SPEC_FIELDS.assignment.includes('assignmentKind'),
-      'assignmentKind is on the student whitelist; the student file must not carry the kind');
+  // §4.3, last row — REVERSED 2026-09-25 (WORKORDER_AM_ASSIGNMENT_KIND_TRAVELS).
+  // This row used to assert the student file must NOT carry the kind. It must
+  // now: the Submission app's wording and its parts menu depend on the kind,
+  // and deriving it from whether `parts` carries `max_points` is inference.
+  // Kept as a test, flipped, so the next well-meaning REMOVAL fails here.
+  check('kind: it is in STUDENT_SPEC_FIELDS', () => {
+    assert(STUDENT_SPEC_FIELDS.assignment.includes('assignmentKind'),
+      'assignmentKind is not on the student whitelist; the student file must carry the kind');
   });
 
-  check('kind: a real exported student spec carries no kind', async () => {
-    const spec = await buildAssignmentSpec(reader);
-    assert(!('assignmentKind' in spec),
-      'the exported student spec carries the assignment kind');
+  check('kind: a real exported student package carries the kind, with the right value', async () => {
+    const electronic = makeAssignment({ inputMode: 'electronic', targetPoints: 100, assignmentKind: 'conventional' });
+    for (const [a, expected] of [[conventional, 'conventional'], [reader, 'reader'], [electronic, 'conventional']]) {
+      const entries = await exportPdfSvc.buildExportEntries(a);
+      const name = Object.keys(entries).find(n => n.startsWith('student/') && n.endsWith('_OPEN_IN_APP.json'));
+      assert(name, 'no student spec in the export');
+      const spec = await decryptJson(entries[name]);
+      assertEqual(spec.assignmentKind, expected,
+        `the exported student package for a ${a.inputMode} ${expected} assignment carries the wrong kind`);
+    }
   });
 
   // §4.2 — the migration default is applied, and announced.
