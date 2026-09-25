@@ -205,6 +205,25 @@ check('both typefaces are emitted same-origin, with their OFL notices', () => {
   }
 });
 
+// NO BROWSER DIALOG QUESTION IN THE SHIPPED CODE
+// (WORKORDER_AM_NO_BROWSER_DIALOGS_2026-09-24, item 1). Checked against the
+// BUILT bundle rather than the source, so a call cannot arrive through a path
+// the source scan misses: a dependency, a new file, or a rename the minifier
+// hides. A suppressed `confirm` answers `false` without showing anything, and
+// every question the app asks is now asked in the page.
+check('the built bundle contains no window.confirm, globalThis.confirm, self.confirm or bare confirm()', () => {
+  const found = [];
+  for (const f of files.filter(n => n.endsWith('.js'))) {
+    const js = read(f);
+    for (const re of [/\bwindow\.confirm\b/g, /\bglobalThis\.confirm\b/g, /\bself\.confirm\b/g,
+                      /(^|[^.\w$])confirm\(/g]) {
+      const n = (js.match(re) || []).length;
+      if (n) found.push(`${f}: ${n} × ${re}`);
+    }
+  }
+  assert(found.length === 0, `the bundle still asks through a browser dialog:\n          ${found.join('\n          ')}`);
+});
+
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 // Cleanup is not a check (Supplement 2 to the generic answer page work order,

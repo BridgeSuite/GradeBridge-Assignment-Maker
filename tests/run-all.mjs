@@ -39,6 +39,7 @@ const SUITES = [
   'figure-render-tests.mjs',
   'generic-sheet-tests.mjs',
   'instructor-ui-tests.mjs',
+  'no-dialog-tests.mjs',
 ];
 
 const results = [];

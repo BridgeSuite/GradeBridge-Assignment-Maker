@@ -28,6 +28,8 @@ import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPr
 import { FigureMapProvider } from '../components/FigureMapContext';
 import { FigureCard, InlineFigureCards } from '../components/FigureCard';
 import { useRescaleChoice } from '../components/RescaleChoice';
+import { useChoice } from '../components/ChoicePanel';
+import { askDelete, askModeSwitch, askReopen } from '../services/questions';
 import { HelpLink, useOpenHelp } from '../components/HelpGuide';
 import { convertToGreyscale } from '../services/figureConvert';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, PenLine, Keyboard, QrCode } from 'lucide-react';
@@ -226,6 +228,9 @@ const Editor: React.FC = () => {
   // Every download on this page asks the rescale question in the page first
   // (components/RescaleChoice.tsx). No browser dialog is on an export path.
   const { withRescaleChoice, panel: rescalePanel } = useRescaleChoice();
+  // Every other question on this page, asked in the page as well
+  // (services/questions.ts). No browser dialog is used anywhere in the app.
+  const { ask, tell, panel: choicePanel } = useChoice();
 
   const handleDownloadQrTemplate = () =>
     withRescaleChoice(assignment, rescale => runDownloadQrTemplate(rescale));
@@ -461,15 +466,20 @@ const Editor: React.FC = () => {
     }
   };
 
-  const handleReopen = () => {
-    if (!window.confirm(REOPEN_WARNING)) return;
+  const handleReopen = async () => {
+    // Constructive, so an unanswered question fails VISIBLY: it says the
+    // assignment is still finalized, rather than returning with nothing shown.
+    const { proceed, notice } = await askReopen(ask, REOPEN_WARNING);
+    if (notice) { await tell(notice); return; }
+    if (!proceed) return;
     const reopened = reopenAssignment(assignment);
     setAssignment(reopened);
     storageService.save(reopened);
   };
 
-  const handleDeleteAssignment = () => {
-    if (window.confirm(`Are you sure you want to delete the assignment "${assignment.title}"? This cannot be undone.`)) {
+  const handleDeleteAssignment = async () => {
+    // Destructive, so it fails CLOSED: only a pressed Delete deletes.
+    if (await askDelete(ask, assignment.title)) {
       storageService.delete(assignment.id);
       navigate('/');
     }
@@ -485,7 +495,7 @@ const Editor: React.FC = () => {
     setAssignment({ ...assignment, problems: [...assignment.problems, emptyProblem(inputMode)] });
   };
 
-  const changeInputMode = (mode: InputMode) => {
+  const changeInputMode = async (mode: InputMode) => {
     if (inputMode === mode) return;
 
     // A reader assignment must be handwritten, so switching one to electronic is
@@ -505,13 +515,11 @@ const Editor: React.FC = () => {
 
     if (stranded.length > 0) {
       const target = mode === 'handwritten' ? 'Handwritten' : 'Electronic text';
-      const ok = window.confirm(
-        `Switching this assignment to "${MODE_LABEL[mode]}" will convert ${stranded.length} sub-part${stranded.length === 1 ? '' : 's'} to ${target}:\n\n` +
-        `${stranded.join('\n')}\n\n` +
-        `Names, descriptions, points, rubrics and grader notes are kept. Image page counts and the previous grading mode are dropped.\n\n` +
-        `OK to convert, Cancel to stay in "${MODE_LABEL[inputMode]}".`
-      );
-      if (!ok) return;
+      // Constructive, so an unanswered question fails VISIBLY: it says the
+      // switch was not made, rather than leaving the pills unmoved in silence.
+      const { proceed, notice } = await askModeSwitch(ask, MODE_LABEL[inputMode], MODE_LABEL[mode], target, stranded);
+      if (notice) { await tell(notice); return; }
+      if (!proceed) return;
     }
 
     // The generic answer page is handwritten only, so leaving handwritten
@@ -1492,6 +1500,7 @@ const Editor: React.FC = () => {
         </div>
       </div>
       {rescalePanel}
+      {choicePanel}
     </Layout>
     </FigureMapProvider>
   );

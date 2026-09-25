@@ -7,6 +7,8 @@ import { storageService } from '../services/storageService';
 import { exportService, isRescaleDeclined } from '../services/exportService';
 import { Layout, Card, Button, HOME_SCREEN_NAME } from '../components/Common';
 import { useRescaleChoice } from '../components/RescaleChoice';
+import { useChoice } from '../components/ChoicePanel';
+import { askDelete, askImportCollision } from '../services/questions';
 import { HelpLink, useOpenHelp } from '../components/HelpGuide';
 import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode, Printer } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
@@ -43,11 +45,11 @@ const Dashboard: React.FC = () => {
     setAssignments(storageService.getAll());
   };
 
-  const handleDelete = (e: React.MouseEvent, id: string, title: string) => {
+  const handleDelete = async (e: React.MouseEvent, id: string, title: string) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    if (window.confirm(`Are you sure you want to delete "${title}"? This cannot be undone.`)) {
+    // Destructive, so it fails CLOSED: only a pressed Delete deletes.
+    if (await askDelete(ask, title)) {
       storageService.delete(id);
       loadAssignments();
     }
@@ -64,6 +66,9 @@ const Dashboard: React.FC = () => {
   // (components/RescaleChoice.tsx). No browser dialog is on this path.
   const { withRescaleChoice, panel: rescalePanel } = useRescaleChoice();
   const openHelp = useOpenHelp();
+  // Every other question on this page, asked in the page as well. No browser
+  // dialog is used anywhere in the app (services/questions.ts).
+  const { ask, tell, panel: choicePanel } = useChoice();
   const handleExport = (assignment: Assignment) =>
     withRescaleChoice(assignment, rescale => runExport(assignment, rescale));
 
@@ -171,11 +176,16 @@ const Dashboard: React.FC = () => {
 
         const existing = storageService.get(importedAssignment.id);
         if (existing) {
-          const shouldOverwrite = window.confirm(
-            `Assignment "${importedAssignment.title}" already exists.\n\nClick OK to OVERWRITE the existing assignment.\nClick Cancel to create a NEW COPY.`
-          );
-
-          if (!shouldOverwrite) {
+          // Constructive, so an unanswered question fails VISIBLY: nothing is
+          // imported, and the instructor is told so. It used to be a
+          // `window.confirm` whose suppressed `false` silently saved a copy.
+          const { choice, notice } = await askImportCollision(ask, importedAssignment.title);
+          if (notice) {
+            await tell(notice);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            return;
+          }
+          if (choice === 'copy') {
             importedAssignment.id = uuidv4();
             importedAssignment.title = `${importedAssignment.title} (Copy)`;
           }
@@ -290,14 +300,21 @@ const Dashboard: React.FC = () => {
         );
 
         if (existing) {
-          const shouldOverwrite = window.confirm(
-            `"${assignment.courseCode}: ${assignment.title}" already exists.\n\nClick OK to OVERWRITE the existing assignment.\nClick Cancel to save as a NEW COPY.`
-          );
-          if (shouldOverwrite) {
+          // Constructive, so an unanswered question fails VISIBLY: nothing is
+          // imported, and the instructor is told so. This is the question an
+          // instructor meets on every re-import of a .md they are authoring,
+          // which is exactly when a browser starts suppressing dialogs.
+          const { choice, notice } = await askImportCollision(ask, `${assignment.courseCode}: ${assignment.title}`);
+          if (notice) {
+            await tell(notice);
+            if (mdFileInputRef.current) mdFileInputRef.current.value = '';
+            return;
+          }
+          if (choice === 'overwrite') {
             assignment.id = existing.id;
             assignment.createdAt = existing.createdAt;
           }
-          // If cancel: keep new UUID → saves as new copy
+          // 'copy': keep the new UUID, which saves a separate copy.
         }
 
         storageService.save(assignment);
@@ -485,6 +502,7 @@ const Dashboard: React.FC = () => {
         </div>
       )}
       {rescalePanel}
+      {choicePanel}
     </Layout>
   );
 };

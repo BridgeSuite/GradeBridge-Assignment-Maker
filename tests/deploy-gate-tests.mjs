@@ -295,9 +295,17 @@ for (const value of ['0', 'false', 'FALSE', '']) {
 // ---------------------------------------------------------------------------
 // 6. Report
 // ---------------------------------------------------------------------------
-server.close();
-rmSync(work, { recursive: true, force: true });
-
+// RESULTS FIRST, THEN CLEANUP (WORKORDER_AM_NO_BROWSER_DIALOGS_2026-09-24,
+// item 3). The cleanup used to run bare, BEFORE anything was printed, so an
+// EBUSY from a Windows file lock would have failed the suite with no output at
+// all, which is worse than the no-FAIL-line signature fixed in two other suites.
+// Cleanup is not a check: it retries, and a failure is a note.
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
+server.close();
+try {
+  rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+} catch (err) {
+  console.log(`  note: could not remove ${work} (${err.code}); it is a temp directory and is left behind`);
+}
 process.exit(failed > 0 ? 1 : 0);
