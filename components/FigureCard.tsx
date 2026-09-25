@@ -1,6 +1,8 @@
 import React from 'react';
 import { FigureFile } from '../types';
 import { FigureRef, figureDataUri, figureSvgSource } from '../services/figureRefs';
+import { figureLabel, splitFigures } from '../services/figureBlocks';
+import { inlineFigureBlocker } from '../services/figureExtract';
 import { Input, TextArea } from './Common';
 import { Image as ImageIcon, RefreshCw } from 'lucide-react';
 import { HelpLink, useOpenHelp } from './HelpGuide';
@@ -122,7 +124,7 @@ export const FigureCard: React.FC<{
                           justify-center min-h-[6rem] max-h-40 overflow-hidden">
             {file ? (
               file.format === 'svg'
-                ? <div className="max-h-36 [&>svg]:max-h-36 [&>svg]:max-w-full [&>svg]:h-auto"
+                ? <div className="w-full max-h-36 [&>svg]:w-full [&>svg]:max-h-36 [&>svg]:max-w-full [&>svg]:h-auto"
                        dangerouslySetInnerHTML={{ __html: figureSvgSource(file) }} />
                 : <img src={figureDataUri(file)} alt={refBlock.title}
                        className="max-h-36 max-w-full object-contain" />
@@ -144,6 +146,135 @@ export const FigureCard: React.FC<{
           />
         </div>
       </div>
+    </div>
+  );
+};
+
+/**
+ * A drawing that is still part of the problem text, with its own Replace.
+ *
+ * Supplement 2, item 6. A `FigureCard` exists only for a ```figure reference
+ * block, and every drawing an instructor authors or imports arrives as an
+ * inline ```svg fence, which only **Extract figures** turns into a reference
+ * and a file. So until extraction had run there was no card and nothing to
+ * replace, and nothing in the page said so: an instructor had to know the
+ * order. This card is shown for every inline drawing instead, and choosing a
+ * file runs the extraction for this one drawing on the spot, then replaces it.
+ * There is no order to get wrong.
+ *
+ * A drawing that cannot become a file says why here, before anyone tries, and
+ * what would fix it. Extraction changes nothing students see.
+ */
+export const InlineFigureCard: React.FC<{
+  figureNumber: number;
+  problemNumber: number;
+  /** The drawing's own `<title>`, or the image's alt text. */
+  title: string;
+  /** The SVG to show as the thumbnail, or null for an image. */
+  svg: string | null;
+  /** The image source, for an image rather than a drawing. */
+  imageUrl?: string;
+  /** Why it cannot be replaced from here, or null when it can. */
+  blocker: string | null;
+  onReplace: (file: File) => void;
+}> = ({ figureNumber, problemNumber, title, svg, imageUrl, blocker, onReplace }) => {
+  const label = `Figure ${figureNumber} in Problem ${problemNumber}`;
+  const openHelp = useOpenHelp();
+
+  return (
+    <div className="rounded-lg border border-academic-200 bg-academic-50/60 p-3 sm:p-4" data-inline-figure-card>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <ImageIcon className="w-4 h-4 text-academic-500 shrink-0" />
+          <span className="text-sm font-medium text-academic-800">{label}</span>
+          <HelpLink section="figures" onOpen={openHelp} label="Help: replacing a figure" />
+          {title && <span className="text-xs text-academic-500 truncate">{title}</span>}
+        </div>
+        {!blocker && (
+          <label className="inline-flex items-center gap-1.5 shrink-0 cursor-pointer rounded-md
+                            bg-academic-700 px-3 py-2 text-xs font-semibold text-white
+                            hover:bg-academic-800 focus-within:ring-2 focus-within:ring-academic-500">
+            <RefreshCw className="w-3.5 h-3.5" />
+            Replace image
+            <input
+              type="file"
+              accept=".svg,.png,.jpg,.jpeg"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                e.target.value = '';
+                if (f) onReplace(f);
+              }}
+            />
+          </label>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-col sm:flex-row gap-4">
+        <div className="sm:w-48 shrink-0">
+          <div className="rounded border border-academic-200 bg-white p-2 flex items-center
+                          justify-center min-h-[6rem] max-h-40 overflow-hidden">
+            {svg
+              ? <div className="w-full max-h-36 [&>svg]:w-full [&>svg]:max-h-36 [&>svg]:max-w-full [&>svg]:h-auto"
+                     dangerouslySetInnerHTML={{ __html: svg }} />
+              : imageUrl
+                ? <img src={imageUrl} alt={title} className="max-h-36 max-w-full object-contain" />
+                : <span className="text-xs text-academic-400">No preview</span>}
+          </div>
+        </div>
+        <div className="flex-1 min-w-0 text-xs text-academic-600 leading-relaxed">
+          {blocker ? (
+            <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-900">
+              This figure cannot be replaced from here because {blocker}.
+              {svg && ' Add a <title> and a <desc> to the drawing in the problem text above, and the Replace button appears.'}
+            </p>
+          ) : (
+            <p>
+              This drawing is part of the problem text. <strong>Replace image</strong> turns it into
+              a file first and then swaps it, which changes nothing students see. Its title and
+              description can be edited once it has been replaced.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * One `InlineFigureCard` for every drawing still inline in a problem's text,
+ * numbered after the problem's figure files (`refCount`). A component rather
+ * than a block inside the Editor so the suite can render it with real problem
+ * text: the Editor loads its assignment after mounting, which a server render
+ * never reaches.
+ */
+export const InlineFigureCards: React.FC<{
+  problemNumber: number;
+  description: string;
+  refCount: number;
+  onReplace: (figureIndex: number, label: string, file: File) => void;
+}> = ({ problemNumber, description, refCount, onReplace }) => {
+  const inline = splitFigures(description || '')
+    .filter((s): s is Extract<ReturnType<typeof splitFigures>[number], { kind: 'figure' }> => s.kind === 'figure');
+  if (!inline.length) return null;
+  return (
+    <div className="mt-3 space-y-3">
+      {inline.map((seg, fIndex) => {
+        const figureNumber = refCount + fIndex + 1;
+        const label = `Figure ${figureNumber} in Problem ${problemNumber}`;
+        return (
+          <InlineFigureCard
+            key={`inline-${fIndex}`}
+            figureNumber={figureNumber}
+            problemNumber={problemNumber}
+            title={figureLabel(seg.figure)}
+            svg={seg.figure.form === 'svg' ? seg.figure.svg : null}
+            imageUrl={seg.figure.form === 'svg' ? undefined : seg.figure.url}
+            blocker={inlineFigureBlocker(seg)}
+            onReplace={f => onReplace(fIndex, label, f)}
+          />
+        );
+      })}
     </div>
   );
 };

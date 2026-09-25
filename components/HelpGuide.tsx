@@ -32,6 +32,7 @@ export const GUIDE_SECTIONS = {
   exports: 'What you get when you export',
   donts: 'What not to do',
   latex: 'Writing mathematics',
+  generic: 'The generic answer page',
 } as const;
 
 export type GuideSection = keyof typeof GUIDE_SECTIONS;
@@ -107,6 +108,21 @@ const renderGuide = (md: string): string => {
 const HTML = renderGuide(guideSource);
 
 /**
+ * The `scrollTop` that puts a heading at the top of the scrolling body.
+ *
+ * Measured, not assumed (Supplement 2, item 2). This used to be
+ * `target.offsetTop - 12`, but a heading's `offsetParent` is the fixed overlay
+ * rather than the scrolling body, so `offsetTop` carried the panel header and
+ * the body's padding with it and every `?` link landed 69 px below its
+ * heading: inside the right section, with its title scrolled out of sight. The
+ * difference of two bounding rectangles is exact whatever sits in between, so
+ * no offset constant is needed, and none may be added: a constant is the same
+ * defect with the number written down.
+ */
+export const scrollTopToShow = (body: { top: number; scrollTop: number }, targetTop: number): number =>
+  Math.max(0, body.scrollTop + (targetTop - body.top));
+
+/**
  * The guide as a panel over the page, optionally scrolled to a section.
  *
  * A panel rather than a route, so that opening help never costs an instructor
@@ -137,8 +153,11 @@ export const HelpGuide: React.FC<{
       if (!body) return;
       if (!id) { body.scrollTop = 0; return; }
       const target = body.querySelector(`#${CSS.escape(id)}`);
-      if (target instanceof HTMLElement) body.scrollTop = target.offsetTop - 12;
-      else body.scrollTop = 0;
+      body.scrollTop = target instanceof HTMLElement
+        ? scrollTopToShow(
+            { top: body.getBoundingClientRect().top, scrollTop: body.scrollTop },
+            target.getBoundingClientRect().top)
+        : 0;
     }, 0);
     return () => window.clearTimeout(t);
   }, [isOpen, section]);

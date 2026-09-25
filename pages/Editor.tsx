@@ -26,7 +26,8 @@ import { REOPEN_WARNING, finalizeAssignment, reopenAssignment } from '../service
 import { apportionPoints, pointsAreMarked } from '../services/pointsService';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { FigureMapProvider } from '../components/FigureMapContext';
-import { FigureCard } from '../components/FigureCard';
+import { FigureCard, InlineFigureCards } from '../components/FigureCard';
+import { useRescaleChoice } from '../components/RescaleChoice';
 import { HelpLink, useOpenHelp } from '../components/HelpGuide';
 import { convertToGreyscale } from '../services/figureConvert';
 import { Trash2, Plus, Save, ChevronDown, ChevronUp, GripVertical, Upload, FileDown, Lock, PenLine, Keyboard, QrCode } from 'lucide-react';
@@ -222,9 +223,16 @@ const Editor: React.FC = () => {
    * so a failure here is surfaced verbatim rather than swallowed — a template
    * that registers but crops the wrong rectangles is worse than no template.
    */
-  const handleDownloadQrTemplate = async () => {
+  // Every download on this page asks the rescale question in the page first
+  // (components/RescaleChoice.tsx). No browser dialog is on an export path.
+  const { withRescaleChoice, panel: rescalePanel } = useRescaleChoice();
+
+  const handleDownloadQrTemplate = () =>
+    withRescaleChoice(assignment, rescale => runDownloadQrTemplate(rescale));
+
+  const runDownloadQrTemplate = async (rescale: boolean | undefined) => {
     try {
-      const result = await exportService.downloadQrTemplate(assignment);
+      const result = await exportService.downloadQrTemplate(assignment, rescale);
       const warnings = result.selfTest.warnings;
       alert(
         `QR template ready — ${result.pageCount} page${result.pageCount === 1 ? '' : 's'}, ` +
@@ -340,13 +348,36 @@ const Editor: React.FC = () => {
     });
 
   /** Accept a file that has passed every guard. */
-  const useFigureFile = (id: string, next: FigureFile) => {
+  const useFigureFile = (id: string, next: FigureFile, label?: string) => {
     setAssignment(prev => ({ ...prev, figures: { ...(prev.figures || {}), [id]: next } }));
     setRefusal(id);
-    alert(`${figureLabelFor(id)} now uses ${next.filename}.`);
+    alert(`${label ?? figureLabelFor(id)} now uses ${next.filename}.`);
   };
 
-  const handleReplaceFigure = async (id: string, file: File) => {
+  /**
+   * Replace a drawing that is still inline in the problem text.
+   *
+   * Extracts exactly this one drawing first, then replaces it through the same
+   * path as any other figure, so an instructor never has to know that Extract
+   * figures comes first (Supplement 2, item 6). Extraction changes nothing
+   * students see. If the replacement is then refused, the figure is left
+   * extracted with its original drawing, and its card shows the refusal.
+   */
+  const handleReplaceInlineFigure = async (
+    problemIndex: number, figureIndex: number, label: string, file: File,
+  ) => {
+    const result = extractFigures(assignment, { problemIndex, figureIndex });
+    const done = result.extracted[0];
+    if (!done) {
+      const why = result.leftInline[0]?.reason ?? 'the drawing could not be found';
+      alert(`${label} was not replaced, because ${why}.`);
+      return;
+    }
+    setAssignment(result.assignment);
+    await handleReplaceFigure(done.id, file, label);
+  };
+
+  const handleReplaceFigure = async (id: string, file: File, label?: string) => {
     const parsed = parseFigureFilename(file.name);
     if (!parsed) {
       setRefusal(id, {
@@ -361,7 +392,7 @@ const Editor: React.FC = () => {
     const next: FigureFile = { format: parsed.format, base64: btoa(binary), filename: file.name };
 
     const problems = await figureFileProblems(next);
-    if (!problems.length) { useFigureFile(id, next); return; }
+    if (!problems.length) { useFigureFile(id, next, label); return; }
 
     setRefusal(id, {
       messages: problems.map(p => p.message),
@@ -727,29 +758,29 @@ const Editor: React.FC = () => {
             </Button>
           )}
           <HelpLink section="finalize" onOpen={openHelp} label="Help: finalizing an assignment" />
-          <Button variant="secondary" onClick={async () => {
+          <Button variant="secondary" onClick={() => withRescaleChoice(assignment, async rescale => {
             // Async since 2026-09-21: with figure blocks this route writes a zip
             // holding the .md and its figures/ folder, because a .md handed over
             // without the files it refers to is a document whose figures have
             // quietly gone.
             try {
-              await exportService.downloadMd(assignment);
+              await exportService.downloadMd(assignment, rescale);
             } catch (err) {
               if (isRescaleDeclined(err)) return;
               console.error(err);
               alert(err instanceof Error ? err.message : 'Failed to export the markdown.');
             }
-          }}>
+          })}>
             <FileDown className="w-4 h-4 mr-2" />
             Export .md
           </Button>
-          <Button variant="secondary" onClick={() => {
-            exportService.downloadGraderDoc(assignment).catch(err => {
+          <Button variant="secondary" onClick={() => withRescaleChoice(assignment, rescale => {
+            exportService.downloadGraderDoc(assignment, rescale).catch(err => {
               if (isRescaleDeclined(err)) return;
               console.error(err);
-              alert('Failed to build the grader document.');
+              alert(err instanceof Error ? err.message : 'Failed to build the grader document.');
             });
-          }}>
+          })}>
             <Lock className="w-4 h-4 mr-2" />
             Grader Doc
           </Button>
@@ -844,7 +875,10 @@ const Editor: React.FC = () => {
                 {inputMode === 'handwritten' && (
                   <div className="mt-3 pt-3 border-t border-academic-200">
                     <div className="flex flex-wrap items-center gap-3">
-                      <span className="text-xs font-medium text-academic-700">What students write on</span>
+                      <span className="text-xs font-medium text-academic-700 flex items-center gap-1.5">
+                        What students write on
+                        <HelpLink section="generic" onOpen={openHelp} label="Help: the generic answer page" />
+                      </span>
                       <div className="flex items-center gap-2">
                         {([
                           { value: undefined,           label: 'Printed sheet with the questions' },
@@ -1146,6 +1180,16 @@ const Editor: React.FC = () => {
                            ))}
                          </div>
                        )}
+                       {/* EVERY INLINE DRAWING GETS A CARD TOO, so a drawing can
+                           be replaced without first knowing to run Extract
+                           figures (Supplement 2, item 6). Numbered after the
+                           problem's figure files. */}
+                       <InlineFigureCards
+                         problemNumber={pIndex + 1}
+                         description={problem.description || ''}
+                         refCount={parseFigureRefs(problem.description || '').length}
+                         onReplace={(fIndex, label, f) => void handleReplaceInlineFigure(pIndex, fIndex, label, f)}
+                       />
                     </div>
                  </div>
                  <Button variant="ghost" onClick={() => removeProblem(pIndex)} className="text-red-500 hover:bg-red-50 hover:text-red-700">
@@ -1447,6 +1491,7 @@ const Editor: React.FC = () => {
           </div>
         </div>
       </div>
+      {rescalePanel}
     </Layout>
     </FigureMapProvider>
   );

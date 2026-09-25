@@ -107,9 +107,11 @@ const normalizePoints = (assignment: Assignment): Assignment => {
 //
 // A badge was not enough. It was amber on 2026-09-01 for ENG17 HW1–HW3 and the
 // export went ahead anyway, three times, twice for operators who knew about the
-// trap. So the question is asked out loud, with both numbers in it, and it is
-// asked from the service rather than from the four call sites — a fifth caller
-// added later cannot forget it, and there is deliberately no way to skip it.
+// trap. So the question is asked out loud, with both numbers in it. Since
+// 2026-09-24 it is asked IN THE PAGE (`components/RescaleChoice.tsx`), not by a
+// browser dialog, and the service enforces that it WAS asked: a needed rescale
+// with no decision stops with its reason (`RescaleDecisionNeededError`), so a
+// fifth caller added later cannot skip it or rescale by default.
 //
 // It also closes the stale-target case: the dialog states the values actually
 // about to be written, so a target typed into the box but never saved is
@@ -152,28 +154,70 @@ export class RescaleDeclinedError extends Error {
 export const isRescaleDeclined = (err: unknown): err is RescaleDeclinedError =>
   !!err && typeof err === 'object' && (err as RescaleDeclinedError).rescaleDeclined === true;
 
-/** How the question is put. Replaced only by the test suite. */
-let askToRescale: (message: string) => boolean = message =>
-  typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true;
+/**
+ * Thrown when a rescale is needed and NOBODY WAS ASKED. Nothing is written.
+ *
+ * Unlike a decline, this is not quiet: the call sites report its message. It
+ * should never reach an instructor, because every button that exports asks in
+ * the page first (`components/RescaleChoice.tsx`). It exists so that a sixth
+ * caller added later, which forgets to ask, stops visibly rather than
+ * rescaling marks nobody agreed to or stopping with nothing on screen.
+ */
+export class RescaleDecisionNeededError extends Error {
+  readonly rescaleDecisionNeeded = true;
+  constructor(readonly notice: RescaleNotice) {
+    super(`Export stopped: this assignment totals ${notice.authoredTotal} points and the export `
+      + `target is ${notice.targetPoints}, so exporting would rescale every part, and you were not `
+      + `asked. Nothing was written. Set the Target box to ${notice.authoredTotal} to export as `
+      + `authored, or export again and choose to rescale.`);
+    this.name = 'RescaleDecisionNeededError';
+  }
+}
 
-/** Test seam. There is no production caller — see the block comment above. */
-export const setRescaleConfirm = (ask: (message: string) => boolean) => { askToRescale = ask; };
+// THE QUESTION IS ASKED IN THE PAGE, NEVER BY A BROWSER DIALOG
+// (WORKORDER_AM_GENERIC_ANSWER_PAGE_2026-09-24_SUPPLEMENT_2, item 4).
+//
+// This used `globalThis.confirm`. A browser that has begun ignoring dialogs
+// still HAS `confirm`, and it returns `false` without drawing anything, so the
+// export threw RescaleDeclinedError, the call site stayed quiet as it does for
+// a real decline, and the instructor saw nothing at all. That is a
+// constructive action refused invisibly with no override named: the cell the
+// standing guard rule says must fail open. Treating `false` as proceed was
+// considered and rejected, because a suppressed dialog and a real Cancel are
+// indistinguishable at that line, and nothing here may change marks without a
+// person deciding. So the decision is made in the page, before the export
+// runs, and handed in as `approved`.
+//
+// The seam below is for the test suite only, and it has no default. With no
+// decision and no seam, a needed rescale is refused VISIBLY (above). A headless
+// run over an assignment whose total already equals its target never reaches
+// the question at all, so the byte-for-byte goldens are unaffected.
+
+/** Test seam: answers the rescale question when a caller passes no decision. */
+let askToRescale: ((message: string) => boolean) | null = null;
+
+/** Test seam. There is no production caller. `null` removes it. */
+export const setRescaleConfirm = (ask: ((message: string) => boolean) | null) => { askToRescale = ask; };
 
 /**
- * `normalizePoints`, but it asks first when the numbers disagree.
+ * `normalizePoints`, but only with a decision when the numbers disagree.
+ *
+ * `approved` is the instructor's answer from the page: `true` rescales, `false`
+ * throws `RescaleDeclinedError` (a decision, reported quietly), and `undefined`
+ * means nobody asked — the test seam is consulted if one is set, and otherwise
+ * `RescaleDecisionNeededError` stops the export with its reason.
  *
  * Every download entry point goes through this. `assignmentToMd` still
  * normalises on its own, deliberately: it is a pure serialiser the export ZIP
  * and the test suite both call on an assignment that has already been through
  * here, and apportioning an apportioned list is a no-op.
- *
- * Exported so the suite can assert on the transformation itself rather than on
- * a download, which needs a DOM.
  */
-export const normalizePointsConfirmed = (assignment: Assignment): Assignment => {
+export const normalizePointsConfirmed = (assignment: Assignment, approved?: boolean): Assignment => {
   const notice = rescaleNotice(assignment);
-  if (notice && !askToRescale(rescaleConfirmationMessage(notice))) {
-    throw new RescaleDeclinedError(notice);
+  if (notice) {
+    const decision = approved ?? (askToRescale ? askToRescale(rescaleConfirmationMessage(notice)) : undefined);
+    if (decision === undefined) throw new RescaleDecisionNeededError(notice);
+    if (!decision) throw new RescaleDeclinedError(notice);
   }
   return normalizePoints(assignment);
 };
@@ -2333,10 +2377,10 @@ export const buildOuterEntries = async (
 };
 
 export const exportService = {
-  downloadZIP: async (assignment: Assignment) => {
+  downloadZIP: async (assignment: Assignment, rescale?: boolean) => {
     // Asks before rescaling, and throws RescaleDeclinedError if told not to —
     // before the ZIP is built, so declining writes nothing.
-    assignment = normalizePointsConfirmed(assignment);
+    assignment = normalizePointsConfirmed(assignment, rescale);
     const entries = await buildExportEntries(assignment);
     // Asserted before a byte is written: if the student package would be unsafe
     // to post, or the embedded map and the instructor's copy disagree, that is a
@@ -2377,11 +2421,11 @@ export const exportService = {
   // entry inside the instructor archive, and the PDF is inside that. Nothing is
   // lost; what is gone is the opportunity to download the wrong one.
 
-  downloadMd: async (assignment: Assignment) => {
+  downloadMd: async (assignment: Assignment, rescale?: boolean) => {
     // `assignmentToMd` normalises internally, and the .md carries the scaled
     // values forward — this is the route whose damage shows up one cycle later,
     // so it asks like the rest.
-    const normalized = normalizePointsConfirmed(assignment);
+    const normalized = normalizePointsConfirmed(assignment, rescale);
     const md = assignmentToMd(normalized);
     const stem = `${assignment.courseCode}_${assignment.title.replace(/\s+/g, '_')}`;
 
@@ -2405,8 +2449,8 @@ export const exportService = {
     saveOne(await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }), `${stem}_md.zip`);
   },
 
-  downloadGraderDoc: async (assignment: Assignment) => {
-    const html = await generateGraderHTML(normalizePointsConfirmed(assignment));
+  downloadGraderDoc: async (assignment: Assignment, rescale?: boolean) => {
+    const html = await generateGraderHTML(normalizePointsConfirmed(assignment, rescale));
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2429,8 +2473,8 @@ export const exportService = {
    * Returns the self-test report so the caller can surface warnings (a shortened
    * writing area, say) that did not block emission.
    */
-  downloadQrTemplate: async (assignment: Assignment) => {
-    const template = await generateTemplate(normalizePointsConfirmed(assignment));
+  downloadQrTemplate: async (assignment: Assignment, rescale?: boolean) => {
+    const template = await generateTemplate(normalizePointsConfirmed(assignment, rescale));
 
     const zip = new JSZip();
     zip.file(template.pdfFilename, template.pdf);

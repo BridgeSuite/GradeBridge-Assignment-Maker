@@ -327,7 +327,8 @@ export const renderIt = () => renderToStaticMarkup(
   React.createElement(HelpGuide, { isOpen: true, onClose: () => {} }));
 `;
 
-  // The eight sections the supplement asks the guide to cover.
+  // The sections the guide must cover: eight from the usability supplement,
+  // and the generic answer page from Supplement 2 of its own work order.
   const SECTIONS = [
     'Getting started',
     'Two things to choose first',
@@ -337,6 +338,8 @@ export const renderIt = () => renderToStaticMarkup(
     'What you get when you export',
     'What not to do',
     'Writing mathematics',
+    // Supplement 2 to the generic answer page work order, item 1.
+    'The generic answer page',
   ];
 
   await check('ITEM 1: every section of the guide is rendered', async () => {
@@ -359,7 +362,7 @@ export const renderIt = () => renderToStaticMarkup(
     const src = readFileSync(join(REPO, 'components', 'HelpGuide.tsx'), 'utf8');
     const block = src.slice(src.indexOf('GUIDE_SECTIONS = {'), src.indexOf('} as const;'));
     const headings = [...block.matchAll(/:\s*'([^']+)'/g)].map(m => m[1]);
-    assert(headings.length === 8, `expected 8 mapped sections, found ${headings.length}`);
+    assert(headings.length === 9, `expected 9 mapped sections, found ${headings.length}`);
     const guide = readFileSync(GUIDE, 'utf8');
     for (const h of headings) {
       assert(guide.includes(`## ${h}`), `the ? links point at "${h}", which is not a heading in the guide`);

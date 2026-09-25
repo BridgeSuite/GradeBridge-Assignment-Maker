@@ -5,7 +5,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { Assignment } from '../types';
 import { storageService } from '../services/storageService';
 import { exportService, isRescaleDeclined } from '../services/exportService';
-import { Layout, Card, Button } from '../components/Common';
+import { Layout, Card, Button, HOME_SCREEN_NAME } from '../components/Common';
+import { useRescaleChoice } from '../components/RescaleChoice';
+import { HelpLink, useOpenHelp } from '../components/HelpGuide';
 import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode, Printer } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
 import { parseMdToAssignment } from '../services/mdParserService';
@@ -58,9 +60,16 @@ const Dashboard: React.FC = () => {
    * instructor's remaining job: open the archive, attach that file to Canvas,
    * keep the rest. Naming two files would be asking them to assemble something.
    */
-  const handleExport = async (assignment: Assignment) => {
+  // The rescale question is asked here, in the page, before anything runs
+  // (components/RescaleChoice.tsx). No browser dialog is on this path.
+  const { withRescaleChoice, panel: rescalePanel } = useRescaleChoice();
+  const openHelp = useOpenHelp();
+  const handleExport = (assignment: Assignment) =>
+    withRescaleChoice(assignment, rescale => runExport(assignment, rescale));
+
+  const runExport = async (assignment: Assignment, rescale: boolean | undefined) => {
     try {
-      const { filename, studentZipName, studentNames } = await exportService.downloadZIP(assignment);
+      const { filename, studentZipName, studentNames } = await exportService.downloadZIP(assignment, rescale);
       alert(
         `Downloaded ${filename}\n\n` +
         `Attach ${studentZipName} from inside it. That one file holds:\n` +
@@ -332,7 +341,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <Layout 
-      title="Assignment Dashboard" 
+      title={HOME_SCREEN_NAME}
       action={
         <div className="flex gap-2">
           <input
@@ -358,6 +367,9 @@ const Dashboard: React.FC = () => {
             <Printer className="w-4 h-4 mr-2" />
             Generic answer page
           </Button>
+          <span className="self-center">
+            <HelpLink section="generic" onOpen={openHelp} label="Help: the generic answer page" />
+          </span>
           <Button variant="secondary" onClick={handleImportClick}>
             <Upload className="w-4 h-4 mr-2" />
             Import JSON
@@ -472,6 +484,7 @@ const Dashboard: React.FC = () => {
           ))}
         </div>
       )}
+      {rescalePanel}
     </Layout>
   );
 };

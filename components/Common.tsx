@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { HelpCircle } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { HelpCircle, Home } from 'lucide-react';
 import { FormattedText } from './FormattedText';
 import { hasFigure } from '../services/figureBlocks';
 import { useOpenHelp } from './HelpGuide';
@@ -49,18 +49,31 @@ export const Card: React.FC<{ children: React.ReactNode; className?: string }> =
   </div>
 );
 
+/**
+ * What the home screen is called: its own heading, and the label of every
+ * control that goes back to it, so the control names a destination and not a
+ * direction. The home screen is where the final deliverable is exported.
+ */
+export const HOME_SCREEN_NAME = 'Assignment Dashboard';
+
 export const Layout: React.FC<{ children: React.ReactNode; title?: string; action?: React.ReactNode }> = ({ children, title, action }) => {
   // The panel and its state live at the app root (`HelpProvider`), so every
   // page gets the same one and a page's own `?` links work as well as the
   // header's. The header just asks for it to open.
   const openHelp = useOpenHelp();
+  // THE WAY HOME, LABELLED (Supplement 2, item 5). The wordmark below has
+  // always linked to `/`, but with no label and nothing saying it navigates,
+  // so an instructor who did not already know was stranded on the editor,
+  // where "Cancel" is the only other road home and does not read as "go to
+  // where I export". Shown on every screen except the home screen itself.
+  const atHome = useLocation().pathname === '/';
 
   return (
     <div className="min-h-screen bg-academic-50 flex flex-col">
       <header className="bg-white border-b border-academic-200 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <Link to="/" className="flex items-center gap-3">
+            <Link to="/" className="flex items-center gap-3" title={`Go to the ${HOME_SCREEN_NAME}`}>
               <div className="flex flex-col">
                 <h1 className="text-lg font-bold text-academic-900"><span className="text-[#00A4E4]">B</span>ridgeSuite</h1>
                 <span className="text-xs text-academic-500">Assignment Manager</span>
@@ -78,6 +91,20 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
               <HelpCircle className="w-4 h-4" />
               <span>Help</span>
             </button>
+            {!atHome && (
+              <Link
+                to="/"
+                data-home-link
+                aria-label={`Go to the ${HOME_SCREEN_NAME}`}
+                title={`Go to the ${HOME_SCREEN_NAME}, where assignments are exported`}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-academic-700 whitespace-nowrap
+                           border border-academic-300 rounded-md hover:bg-academic-50 hover:text-academic-900
+                           transition-colors"
+              >
+                <Home className="w-4 h-4" />
+                <span>{HOME_SCREEN_NAME}</span>
+              </Link>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {/* The same button on a narrow window, where the label will not fit. */}

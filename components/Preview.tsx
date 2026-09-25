@@ -4,6 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { storageService } from '../services/storageService';
 import { exportService, isRescaleDeclined } from '../services/exportService';
 import { Layout, Card, Button } from './Common';
+import { useRescaleChoice } from './RescaleChoice';
 import { Download, ArrowLeft, Edit2 } from 'lucide-react';
 import { SubmissionType } from '../types';
 import { FormattedText } from './FormattedText';
@@ -19,10 +20,17 @@ const Preview: React.FC = () => {
   // Named in the message, because knowing which single file to attach is the
   // whole of the instructor's remaining job. Saying what is inside that file is
   // also the only cheap check that the sheet and the spec travelled together.
-  const handleExport = async () => {
+  // Asked in the page first; see components/RescaleChoice.tsx.
+  const { withRescaleChoice, panel: rescalePanel } = useRescaleChoice();
+  const handleExport = () => {
+    if (!assignment) return;
+    withRescaleChoice(assignment, rescale => runExport(rescale));
+  };
+
+  const runExport = async (rescale: boolean | undefined) => {
     if (!assignment) return;
     try {
-      const { filename, studentZipName, studentNames } = await exportService.downloadZIP(assignment);
+      const { filename, studentZipName, studentNames } = await exportService.downloadZIP(assignment, rescale);
       alert(
         `Downloaded ${filename}\n\n` +
         `Attach ${studentZipName} from inside it. That one file holds:\n` +
@@ -132,6 +140,7 @@ const Preview: React.FC = () => {
             </div>
          </Card>
       </div>
+      {rescalePanel}
     </Layout>
     </FigureMapProvider>
   );

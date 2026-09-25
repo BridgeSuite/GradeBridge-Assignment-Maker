@@ -38,6 +38,7 @@ const SUITES = [
   'figure-swap-e2e-tests.mjs',
   'figure-render-tests.mjs',
   'generic-sheet-tests.mjs',
+  'instructor-ui-tests.mjs',
 ];
 
 const results = [];

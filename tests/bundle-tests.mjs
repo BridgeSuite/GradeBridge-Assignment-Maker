@@ -207,5 +207,15 @@ check('both typefaces are emitted same-origin, with their OFL notices', () => {
 
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
-rmSync(outDir, { recursive: true, force: true });
+// Cleanup is not a check (Supplement 2 to the generic answer page work order,
+// item 7). This line ran bare, AFTER the summary: an EBUSY from Windows on the
+// build directory would print "N passed, 0 failed" and then fail the suite
+// with no FAIL line, which is exactly the signature of the unexplained
+// intermittents recorded in CLAUDE.md, two of three of which were this suite.
+// Retry, then say so and move on; the exit code reports the checks.
+try {
+  rmSync(outDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+} catch (err) {
+  console.log(`  note: could not remove ${outDir} (${err.code}); it is a temp directory and is left behind`);
+}
 process.exit(failed > 0 ? 1 : 0);

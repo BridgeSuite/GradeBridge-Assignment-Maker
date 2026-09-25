@@ -11,8 +11,8 @@ There are three ways to begin, and all three end up in the same place: an
 assignment in this app, which you then export.
 
 **Start from scratch.** *New Assignment* on the dashboard. Type the course code
-and title, answer the two questions in *Getting started* below, and add your
-problems.
+and title, answer the two questions in *Two things to choose first* below, and
+add your problems.
 
 **Import a file you already have.** *Import Markdown* takes a `.md` written in
 this app's format. *Import JSON* takes a file this app exported earlier — use
@@ -42,13 +42,70 @@ Changing them later can convert or remove things.
 
 **Handwritten or electronic.**
 
-- **Handwritten**: students print the sheet, write on it, and photograph the
-  pages.
+- **Handwritten**: students write on paper and photograph the pages. The paper
+  is either a sheet this app prints with your questions on it, or the generic
+  answer page (see *The generic answer page* below).
 - **Electronic**: students type their answers and upload images.
 
-An assignment is exactly one of each, never a mixture. **A reader assignment must
-be handwritten** — there is nothing to read back unless students write on paper —
+An assignment is exactly one of each, never a mixture.
+**A reader assignment must be handwritten** — there is nothing to read back unless
+students write on paper —
 so *Reader* is unavailable until you choose *Handwritten*.
+
+---
+
+## The generic answer page
+
+**Handwritten assignments only.** An electronic assignment is not affected. If
+a file asks for the generic answer page on an electronic assignment, the setting
+is dropped when the file is imported and the app tells you so; an export of an
+electronic assignment that still carries it is refused.
+
+**What it is.** One answer page, called `GBGEN1`, the same for every assignment
+and every course. It has the four corner squares and the code the submission app
+reads, one large ruled box, and a line at the top where the student writes the
+problem, the part and the page number. It says nothing about which assignment it
+belongs to.
+
+**What changes.** Normally this app prints your questions with a box under each
+part. With the generic answer page, you post your own assignment PDF, in your
+own format, and students write every answer on the generic page. When they
+photograph a page, the submission app asks which problem and part it answers.
+
+**To use it**, set *How students answer* to *Handwritten*, then under
+*What students write on* choose *Generic answer page*. You can switch back until
+you finalize.
+
+**Where the pages come from.** *Generic answer page* on the Assignment Dashboard
+downloads the page as one PDF, not tied to any assignment. Printed copies are
+available for pickup at the ECE front desk during regular office hours, so you do
+not need to carry a pack to class. You can also give students the PDF itself:
+they print as many pages as they need, or write on it on a tablet and print
+nothing.
+
+**What the export contains.** The file you give students holds one file, the one
+they open in the submission app. It marks the assignment `sheet: "generic"`,
+lists the problems and parts so the app can offer the right choices, and carries
+the generic page's map. It carries **no question text**: students read the
+questions from your PDF, and there is no sheet for them to print. The
+`instructor` folder is the same as always, and the grading rubric keeps every
+part with its points and its grading prompt.
+
+**Reader assignments work too.** A reader assignment on the generic answer page
+is worth 0 points and nothing grades it, exactly as on the printed sheet.
+
+**Two things you must supply, for every assignment.** The app no longer
+typesets your questions, but it still collects what grading needs, and these two
+are not optional:
+
+- **The worked solution**: what a correct answer contains, and where the
+  reasoning sits.
+- **The rubric, or the grading guidance for each part**: what a grader looks
+  for, what a good answer must contain, and the mistakes worth naming.
+
+Put them in each part's grading prompt and grader note here. They may follow the
+posting of the assignment, but not by much. A grader without your rubric invents
+one, and nothing will warn you that it happened.
 
 ---
 
@@ -57,8 +114,9 @@ so *Reader* is unavailable until you choose *Handwritten*.
 **A person decides every grade. Nothing in this system awards a mark on its own.**
 
 For a written or handwritten answer, the grading side produces a transcript of
-what the student wrote, and a suggested score. **The suggested score is shown to
-the teaching assistant only if they choose to see it.** They can grade from the
+what the student wrote, and a suggested score.
+**The suggested score is shown to the teaching assistant only if they choose to see it.**
+They can grade from the
 transcript alone.
 
 For an uploaded image, nothing is produced automatically at all. A person looks
@@ -90,8 +148,8 @@ import the `.md` and the folder together.
 - **Large enough to print clearly.** A small image looks fine on screen and
   prints blurry.
 
-If you choose a colour image, the app tells you and offers **Convert to
-greyscale**. Press it and the converted picture appears on the card so you can
+If you choose a colour image, the app tells you and offers
+**Convert to greyscale**. Press it and the converted picture appears on the card so you can
 see what you got; press **Cancel** and nothing changes. The app never converts
 anything without being asked.
 
