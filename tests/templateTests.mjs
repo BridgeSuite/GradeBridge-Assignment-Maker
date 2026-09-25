@@ -2447,8 +2447,10 @@ const pdfExtractedText = (buf) => {
 // looking at what fired.
 {
   const mdParser = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParserKey.mjs');
-  // Same default and same override as the join checks above.
-  const HWK = process.env.ENG17_HWK_DIR
+  // Same default and same override as the join checks above, and the same rule:
+  // with the override set, a missing file is a failure, not a skip.
+  const HWK_SET = !!process.env.ENG17_HWK_DIR;
+  const HWK = HWK_SET
     ? resolve(process.env.ENG17_HWK_DIR)
     : resolve(REPO, '..', '..', '..', 'Knoesen', 'ENG17-Assignments', 'New HWKs');
 
@@ -2763,8 +2765,22 @@ const pdfExtractedText = (buf) => {
   // ---- The real homeworks --------------------------------------------------
   for (const n of [1, 2, 3]) {
     const name = `ENG17 HW${n}: no grading material in any student-facing artifact`;
-    const mdPath = join(HWK, `HWK${n}`, `ENG17_HW${n}_assignment.md`);
-    if (!existsSync(mdPath)) { skip(name, `not at ${mdPath}`); continue; }
+    // Same filename fix and same override rule as the layout checks above
+    // (WORKORDER_AM_HWK_CHECKS_ARE_DEAD_2026-09-25, Supplement 1, item 1). This
+    // is the only place the answer-key content guard meets real course material
+    // rather than fixtures written to pass it, and until then it had never run.
+    const mdPath = join(HWK, `HWK${n}`, `ENG17_Homework_${n}.md`);
+    if (!existsSync(mdPath)) {
+      if (HWK_SET) {
+        check(name, () => {
+          throw new Error(`ENG17_HWK_DIR is set, so HW${n} must be at ${mdPath}, and it is not. `
+            + 'A leak check that cannot find its file has tested nothing.');
+        });
+      } else {
+        skip(name, `not at ${mdPath}; set ENG17_HWK_DIR to run it`);
+      }
+      continue;
+    }
     check(name, async () => {
       const a = mdParser.parseMdToAssignment(readFileSync(mdPath, 'utf8'));
       const grading = gradingStrings(a);

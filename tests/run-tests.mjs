@@ -52,6 +52,13 @@ const check = (name, fn) => {
   } catch (err) { bad(err); }
 };
 const skip = (name, why) => { skipped++; results.push(`  SKIP  ${name} (${why})`); };
+// For a check whose setup threw. Until 2026-09-25 four such checks called
+// `skip`, so the regression they exist to catch was what silenced them
+// (WORKORDER_AM_HWK_CHECKS_ARE_DEAD_2026-09-25, Supplement 1, item 2). A setup
+// that throws is a FAILURE of every check that depended on it, named.
+const failSetup = (name, what, err) => check(name, () => {
+  throw new Error(`${what} threw, so this check could not run: ${err && err.message ? err.message : err}`);
+});
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
 const assertEqual = (actual, expected, msg) => {
   const a = JSON.stringify(actual), e = JSON.stringify(expected);
@@ -1287,10 +1294,10 @@ ${r.problem_statement}`);
   catch (err) { entryError = err; }
 
   if (!entries) {
-    skip('export contract: exported artifacts carry no grading-resource field',
-      `buildExportEntries threw: ${entryError && entryError.message}`);
-    skip('export contract: answer_modality present and agrees with is_drawing',
-      'no export entries');
+    failSetup('export contract: exported artifacts carry no grading-resource field',
+      'buildExportEntries', entryError);
+    failSetup('export contract: answer_modality present and agrees with is_drawing',
+      'buildExportEntries', entryError);
   } else {
     const csvName = Object.keys(entries).find(n => /\/layout_.*\.csv$/.test(n));
     const rubricName = Object.keys(entries).find(n => n.endsWith('_grading_rubric.json'));
@@ -1669,12 +1676,12 @@ ${r.problem_statement}`);
 // 11. The ZIP is split, and the notice inside it is generated
 // =====================================================
 {
-  let entries = null;
+  let entries = null, splitError = null;
   try { entries = await exportPdfSvc.buildExportEntries(makeAssignment({ targetPoints: 100 })); }
-  catch { /* reported below */ }
+  catch (err) { splitError = err; }
 
   if (!entries) {
-    skip('export ZIP: student/ and instructor/ split', 'buildExportEntries threw');
+    failSetup('export ZIP: student/ and instructor/ split', 'buildExportEntries', splitError);
   } else {
     const names = Object.keys(entries);
     const NOTICE = '00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt';
@@ -1760,7 +1767,7 @@ ${r.problem_statement}`);
 
   // Handwritten: the layout map is INSTRUCTOR-SIDE, and the student's copy of it
   // travels inside the file they upload.
-  let hw = null;
+  let hw = null, hwError = null;
   try {
     hw = await exportPdfSvc.buildExportEntries({
       ...makeAssignment(), inputMode: 'handwritten',
@@ -1768,10 +1775,10 @@ ${r.problem_statement}`);
         { id: 's1', name: 'A', description: 'Do it.', points: 100, submissionType: 'Handwritten', handwrittenGradingMode: 'ai' },
       ] }],
     });
-  } catch { /* reported below */ }
+  } catch (err) { hwError = err; }
 
   if (!hw) {
-    skip('export ZIP: the layout map is instructor-side and rides inside the spec', 'buildExportEntries threw');
+    failSetup('export ZIP: the layout map is instructor-side and rides inside the spec', 'buildExportEntries', hwError);
   } else {
     const hwAssignmentForNames = {
       ...makeAssignment(), inputMode: 'handwritten',

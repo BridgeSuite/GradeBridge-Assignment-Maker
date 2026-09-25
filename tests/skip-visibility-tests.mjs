@@ -54,6 +54,17 @@ for (const n of [1, 2, 3]) {
   });
 }
 
+// Supplement 1, item 1: the answer-key leak checks on the real homeworks read
+// the same directory and obey the same rule.
+const LEAK_CHECK = (n) => new RegExp(`^ {2}(PASS|FAIL|SKIP) {2}ENG17 HW${n}: no grading material in any student-facing artifact`, 'm');
+for (const n of [1, 2, 3]) {
+  check(`ENG17_HWK_DIR set, HW${n} absent: its answer-key leak check FAILS, by name, and does not skip`, () => {
+    const m = out.match(LEAK_CHECK(n));
+    assert(m, `the HW${n} leak check did not report at all`);
+    assert(m[1] === 'FAIL', `the HW${n} leak check reported ${m[1]}, not FAIL`);
+  });
+}
+
 check('the failure says why: the override is set and the file is not there', () => {
   assert(/ENG17_HWK_DIR is set, so HW1 must be at/.test(out), 'the failure does not name the override and the path');
 });
