@@ -39,6 +39,13 @@ globalThis.crypto ??= webcrypto;
 
 let passed = 0, failed = 0;
 const results = [];
+// A skipped check tested nothing, and must never read like one that passed
+// (WORKORDER_AM_HWK_CHECKS_ARE_DEAD_2026-09-25: the ENG17 HW1 to HW3 layout
+// checks looked for the wrong filename, skipped on every run since they were
+// written, and the suite reported success). Every skip is counted and named in
+// the summary at the end, not only in the scroll above it.
+const skippedNames = [];
+const skip = (name, why) => { skippedNames.push(name); results.push(`  SKIP  ${name} (${why})`); };
 // Async-aware: an `async` check that rejects must be reported as a FAIL, not
 // escape as an unhandled rejection and take the whole run down with it.
 const check = (name, fn) => {
@@ -2093,7 +2100,7 @@ check('the question text box always sits between the prompt row and the answer b
     const python = ['python', 'python3', 'py'].find(exe =>
       spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
     const pyCheck = 'converter/convert.py agrees with mdParserService.ts on that fixture';
-    if (!python) results.push(`  SKIP  ${pyCheck} (no Python interpreter on PATH)`);
+    if (!python) skip(pyCheck, 'no Python interpreter on PATH');
     else check(pyCheck, () => {
       const work = mkdtempSync(join(tmpdir(), 'gb-convert-'));
       const md = join(work, 'AnswerSpace_Fixture.md');
@@ -2333,12 +2340,22 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
   });
 
   // ---- The real ENG17 homeworks -------------------------------------------
-  // Outside this repo (course material under the ENG17 side's control), so this
-  // reports SKIP rather than failing when they are absent. The committed checks
-  // above hold the property; these hold the counts the work order names, and the
-  // layout_id, because a rubric-only change may move no geometry.
+  // Outside this repo (course material under the ENG17 side's control). These
+  // are THE guard against a change moving where answers sit on paper students
+  // have already printed, so how they behave when the files are absent matters:
+  //
+  //   - ENG17_HWK_DIR unset, files absent: SKIP, counted and named in the
+  //     summary. A developer without the course material is not failed.
+  //   - ENG17_HWK_DIR SET, a file absent: FAIL. The operator has said the files
+  //     are there, so not finding one is a finding, not a reason to test nothing.
+  //
+  // Until 2026-09-25 they looked for `ENG17_HW{n}_assignment.md`; the files are
+  // `ENG17_Homework_{n}.md`, so all three skipped on every run and the suite
+  // reported success. On their first real run they passed, unedited: 17, 10 and
+  // 14 regions, 95438EDF, 8505F1E5, B549DC53.
   // Override with:  ENG17_HWK_DIR=/path/to/"New HWKs" npm test
-  const HWK = process.env.ENG17_HWK_DIR
+  const HWK_SET = !!process.env.ENG17_HWK_DIR;
+  const HWK = HWK_SET
     ? resolve(process.env.ENG17_HWK_DIR)
     : resolve(REPO, '..', '..', '..', 'Knoesen', 'ENG17-Assignments', 'New HWKs');
   for (const { n, regions, layoutId } of [
@@ -2347,8 +2364,18 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
     { n: 3, regions: 14, layoutId: 'B549DC53' },
   ]) {
     const name = `ENG17 HW${n}: ${regions} regions join the rubric one-to-one, layout_id ${layoutId}`;
-    const mdPath = join(HWK, `HWK${n}`, `ENG17_HW${n}_assignment.md`);
-    if (!existsSync(mdPath)) { results.push(`  SKIP  ${name} (not at ${mdPath})`); continue; }
+    const mdPath = join(HWK, `HWK${n}`, `ENG17_Homework_${n}.md`);
+    if (!existsSync(mdPath)) {
+      if (HWK_SET) {
+        check(name, () => {
+          throw new Error(`ENG17_HWK_DIR is set, so HW${n} must be at ${mdPath}, and it is not. `
+            + 'A layout check that cannot find its file has tested nothing.');
+        });
+      } else {
+        skip(name, `not at ${mdPath}; set ENG17_HWK_DIR to run it`);
+      }
+      continue;
+    }
     const report = await joinReport(mdParserJoin.parseMdToAssignment(readFileSync(mdPath, 'utf8')));
     check(name, () => {
       assertJoinsOneToOne(report, `HW${n}`);
@@ -2737,7 +2764,7 @@ const pdfExtractedText = (buf) => {
   for (const n of [1, 2, 3]) {
     const name = `ENG17 HW${n}: no grading material in any student-facing artifact`;
     const mdPath = join(HWK, `HWK${n}`, `ENG17_HW${n}_assignment.md`);
-    if (!existsSync(mdPath)) { results.push(`  SKIP  ${name} (not at ${mdPath})`); continue; }
+    if (!existsSync(mdPath)) { skip(name, `not at ${mdPath}`); continue; }
     check(name, async () => {
       const a = mdParser.parseMdToAssignment(readFileSync(mdPath, 'utf8'));
       const grading = gradingStrings(a);
@@ -2860,6 +2887,8 @@ const pdfExtractedText = (buf) => {
 // 2026-09-02 wearing a different hat.
 await Promise.all(pending);
 console.log(results.join('\n'));
-console.log(`\n${passed} passed, ${failed} failed\n`);
+console.log(`\n${passed} passed, ${failed} failed, ${skippedNames.length} skipped`);
+if (skippedNames.length) console.log(`skipped:\n${skippedNames.map(n => `  - ${n}`).join('\n')}`);
+console.log('');
 try { rmSync(outDir, { recursive: true, force: true }); } catch { /* Windows keeps handles */ }
 process.exit(failed > 0 ? 1 : 0);

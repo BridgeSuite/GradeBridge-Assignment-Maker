@@ -40,15 +40,29 @@ const SUITES = [
   'generic-sheet-tests.mjs',
   'instructor-ui-tests.mjs',
   'no-dialog-tests.mjs',
+  'skip-visibility-tests.mjs',
 ];
 
 const results = [];
+// Every skipped check in every suite, gathered for the summary below. A skip
+// tested nothing, and the ENG17 layout checks skipped on every run for weeks
+// behind a green summary (WORKORDER_AM_HWK_CHECKS_ARE_DEAD_2026-09-25). So
+// the last thing this prints names each one, with a count. Suites mark a skip
+// as a line `  SKIP  <name> (<why>)`, and that is what is collected.
+const skips = [];
 
 for (const suite of SUITES) {
+  // stdout is captured, then echoed, so its SKIP lines can be collected;
+  // stderr still goes straight through.
   const run = spawnSync(process.execPath, [join(HERE, suite)], {
-    stdio: 'inherit',
+    stdio: ['inherit', 'pipe', 'inherit'],
     cwd: join(HERE, '..'),
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
   });
+  const out = run.stdout || '';
+  process.stdout.write(out);
+  for (const m of out.matchAll(/^ {2}SKIP {2}(.+)$/gm)) skips.push({ suite, line: m[1] });
   // A suite killed by a signal has no exit code; treat that as a failure rather
   // than as a pass, which `status === 0` alone would not.
   const failed = run.status !== 0 || run.signal !== null;
@@ -69,5 +83,10 @@ console.log(
   `\n${results.length - failedSuites.length} of ${results.length} suites passed` +
   (failedSuites.length ? `; failed: ${failedSuites.map(r => r.suite).join(', ')}` : '') + '\n'
 );
+
+console.log(`${skips.length} check${skips.length === 1 ? '' : 's'} skipped, and so tested nothing` +
+  (skips.length ? ':' : '.'));
+for (const k of skips) console.log(`  SKIP  ${k.suite}: ${k.line}`);
+console.log('');
 
 process.exit(failedSuites.length > 0 ? 1 : 0);
