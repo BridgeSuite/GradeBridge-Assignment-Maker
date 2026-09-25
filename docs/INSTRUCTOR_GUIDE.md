@@ -77,7 +77,9 @@ photograph a page, the submission app asks which problem and part it answers.
 you finalize.
 
 **Where the pages come from.** *Generic answer page* on the Assignment Dashboard
-downloads the page as one PDF, not tied to any assignment. Printed copies are
+downloads the page as one PDF of two identical pages, not tied to any assignment.
+Two, so it can be printed double sided: each side of the sheet is a usable
+answer page, and the student can use either side. Printed copies are
 available for pickup at the ECE front desk during regular office hours, so you do
 not need to carry a pack to class. You can also give students the PDF itself:
 they print as many pages as they need, or write on it on a tablet and print

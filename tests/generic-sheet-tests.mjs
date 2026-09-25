@@ -5,7 +5,8 @@
 //
 // Three things are held here, and the third is the one most easily lost:
 //
-//   1. THE PAGE. One page, one PDF, every string Andre approved on it, the box
+//   1. THE PAGE. One PDF of two identical pages (2026-09-25, so it can be
+//      printed double sided), every string Andre approved on it, the box
 //      closing at 257.0 (ruling 1), the QR in today's grammar (ruling 2), the
 //      map row GBGEN1 / gen / generic / 1 / 0 / 0 (ruling 4), and the layout id
 //      `5F0B10BC`, which both apps and the spec hold as a constant.
@@ -82,6 +83,7 @@ const fmt = await load(join(REPO, 'services', 'pageFormat.ts'), 'pageFormat.mjs'
 const qrp = await load(join(REPO, 'services', 'qrPayload.ts'), 'qrPayload.mjs');
 const enc = await load(join(REPO, 'services', 'qrEncoder.ts'), 'qrEncoder.mjs');
 const gen = await load(join(REPO, 'services', 'templateGenerator.ts'), 'templateGenerator.mjs');
+const selfTestMod = await load(join(REPO, 'services', 'templateSelfTest.ts'), 'templateSelfTest.mjs');
 const fin = await load(join(REPO, 'services', 'finalize.ts'), 'finalize.mjs');
 const notices = await load(join(REPO, 'services', 'importNotices.ts'), 'importNotices.mjs');
 const modes = await load(join(REPO, 'services', 'inputModeService.ts'), 'inputMode.mjs');
@@ -172,7 +174,9 @@ await check('ruling 1: 25 writing bands of exactly 8.0 mm, 24 feint rules, none 
     .filter(x => Math.abs(Number(x[1]) - xs) < 0.05)
     .map(x => Math.round((H - Number(x[2]) / k) * 100) / 100);
   const want = Array.from({ length: 24 }, (_, i) => Math.round((57 + 8 * (i + 1)) * 100) / 100);
-  assertEqual(rules, want, 'the rules are not at y = 57 + 8.0k for k = 1 to 24');
+  // Twice since 2026-09-25: the PDF carries two identical pages
+  // (WORKORDER_AM_PAGE_TWO_SIDES), so the 24 rules appear once per page.
+  assertEqual(rules, [...want, ...want], 'the rules are not at y = 57 + 8.0k for k = 1 to 24, on each page');
 });
 
 await check('Supplement 1, item 1: the 24 rules are drawn with NO dash pattern active, 0.5 pt, 75% grey', () => {
@@ -193,7 +197,8 @@ await check('Supplement 1, item 1: the 24 rules are drawn with NO dash pattern a
       seen.push({ y: Math.round((H - Number(o[9]) / k) * 100) / 100, dash, width, grey });
     }
   }
-  assertEqual(seen.length, 24, 'did not find the 24 rules');
+  // 48: the 24 rules on each of the two identical pages (2026-09-25).
+  assertEqual(seen.length, 48, 'did not find the 24 rules on each page');
   const bad = seen.filter(r => r.dash !== '');
   assertEqual(bad.map(r => `${r.y}: [${r.dash}]`), [], 'a rule is drawn with a dash pattern active');
   for (const r of seen) {
@@ -226,8 +231,10 @@ await check('THE IDENTITY WARNING and THE PRINTING RULE are on the page, legible
 // replaced this morning's "One answer per page."). Nothing is ever added as a
 // new line: a new line pushes the box down, moves 5F0B10BC and makes this
 // GBGEN2. So every string is held literally, at its position and size.
+// Page 1 is the reference. The PDF carries a second, identical page since
+// 2026-09-25, and the two-pages check below holds page 2 equal to it.
 const inkOf = (what) => {
-  const all = page.ink.filter(x => x.what === what);
+  const all = page.ink.filter(x => x.what === what && x.pageK === 1);
   assertEqual(all.length, 1, `${what} was not drawn exactly once`);
   return all[0];
 };
@@ -284,14 +291,55 @@ await check('the fields line invites no identity: no name, date, section or ID l
 });
 
 await check('nothing but the header line is in the top 25 mm identity band', () => {
-  const inBand = page.ink.filter(b => b.y0 < fmt.IDENTITY_BAND_MM).map(b => b.what);
-  assertEqual(inBand, ['header line'], 'something else is printed in the identity band');
+  // Per page: each of the two identical pages has its own header line.
+  for (const k of [1, 2]) {
+    const inBand = page.ink.filter(b => b.pageK === k && b.y0 < fmt.IDENTITY_BAND_MM).map(b => b.what);
+    assertEqual(inBand, ['header line'], `something else is printed in page ${k}'s identity band`);
+  }
   assert(pdfStrings.includes('GradeBridge   answer page   GBGEN1'), 'the header line is not the approved text');
 });
 
-await check('one page, one PDF', () => {
-  assertEqual((pdfBytes.match(/\/Type \/Page\b/g) || []).length, 1, 'the PDF is not one page');
+// WORKORDER_AM_PAGE_TWO_SIDES_2026-09-25. This check read "one page, one PDF"
+// until then. A one-page PDF cannot be printed double sided, yet the page says
+// "single or double sided": duplex gave an answer page and a blank back. Two
+// identical pages print duplex as one usable sheet. Each side carries its own
+// marks and QR and registers on its own, and the QR names the format, not the
+// sheet, so the two sides MUST be indistinguishable: no page number, no mark.
+const pageStreams = (() => {
+  const objs = new Map([...pdfBytes.matchAll(/(\d+) 0 obj\s*([\s\S]*?)endobj/g)].map(x => [x[1], x[2]]));
+  return [...pdfBytes.matchAll(/\/Type \/Page\b[\s\S]*?\/Contents (\d+) 0 R/g)].map(x => {
+    const body = objs.get(x[1]);
+    return body.slice(body.indexOf('stream') + 6, body.lastIndexOf('endstream'));
+  });
+})();
+
+await check('TWO SIDES: one PDF of exactly two pages, same filename', () => {
+  assertEqual((pdfBytes.match(/\/Type \/Page\b/g) || []).length, 2, 'the PDF is not two pages');
+  assertEqual(pageStreams.length, 2, 'could not read a content stream for each page');
   assertEqual(page.pdfFilename, 'GradeBridge_answer_page_GBGEN1.pdf', 'the filename changed');
+});
+
+await check('TWO SIDES: the two pages are byte-identical in content', () => {
+  assert(pageStreams[0].length > 1000, 'page 1 has no real content, so the comparison proves nothing');
+  assert(pageStreams[0] === pageStreams[1], 'page 2 differs from page 1 — a student must be able to use either side');
+  // And therefore the same strings, rules and QR modules, in the same places:
+  const strings = (st) => [...st.matchAll(/\(((?:\\.|[^\\()])*)\)\s*Tj/g)].map(x => unescapePdf(x[1]));
+  assertEqual(strings(pageStreams[1]), strings(pageStreams[0]), 'the pages print different strings');
+  assertEqual(strings(pageStreams[0]).length, gp.GENERIC_PRINTED_STRINGS.length, 'page 1 does not print every string once');
+  assert(!/\b2 of 2\b|\bpage 2\b/i.test(pageStreams[1]), 'page 2 carries a page number');
+});
+
+await check('TWO SIDES: both pages are ink-checked, and page 2 draws exactly what page 1 does', () => {
+  const strip = ({ pageK, ...b }) => b;
+  const p1 = page.ink.filter(b => b.pageK === 1), p2 = page.ink.filter(b => b.pageK === 2);
+  assert(p1.length > 10, 'page 1 recorded almost no ink');
+  assertEqual(p2.map(strip), p1.map(strip), 'page 2 does not draw what page 1 draws');
+  assertEqual(page.ink.length, p1.length + p2.length, 'ink recorded on a page other than 1 or 2');
+  // The checks really look at page 2: the same ink with one page-2 block moved
+  // into the QR keep-out must fail, so a pass is not the checks ignoring page 2.
+  const moved = page.ink.map(b => b.pageK === 2 && b.what === 'fields line' ? { ...b, x1: 180 } : b);
+  const r = selfTestMod.runInkChecks(moved, { passed: true, checks: [], failures: [], warnings: [] });
+  assert(!r.passed && r.failures.some(f => /page 2 fields line/.test(f)), 'the ink checks do not see page 2');
 });
 
 // =====================================================

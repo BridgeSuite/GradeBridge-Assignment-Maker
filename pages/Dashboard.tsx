@@ -105,6 +105,7 @@ const Dashboard: React.FC = () => {
       alert(
         `Downloaded ${page.pdfFilename}\n\n` +
         `The generic answer page: one page, the same for every assignment that uses it. ` +
+        `The PDF holds it twice, so it prints single or double sided; both sides are the same page. ` +
         `Print as many as you like, on US Letter at 100%.\n\nLayout id: ${page.layoutId}`
       );
     } catch (error) {

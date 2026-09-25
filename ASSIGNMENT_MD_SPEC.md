@@ -656,8 +656,8 @@ own question PDF**, in their own format, and **every student writes on one gener
 page is the same for every assignment in every course. The consequence: **the page does not say which
 part an answer belongs to. The student says so in the Submission app.**
 
-**The page.** One page, one PDF, course-independent, generated once and versioned as `GBGEN1`. It is
-exported on its own, from **Generic answer page** on the dashboard (`GradeBridge_answer_page_GBGEN1.pdf`),
+**The page.** One page, course-independent, generated once and versioned as `GBGEN1`. **The download
+is a PDF of two identical pages** (since 2026-09-25, WORKORDER_AM_PAGE_TWO_SIDES). It is exported on its own, from **Generic answer page** on the dashboard (`GradeBridge_answer_page_GBGEN1.pdf`),
 and never inside an assignment export, so a department can print a stack of pages without authoring
 anything. It is built like every other page in this format and passes the same spec 8.7 self-test and
 ink checks.
@@ -672,12 +672,26 @@ ink checks.
 | The writing box | x 12.0 to 203.9, **y 57.0 to 257.0**, a 1 pt border |
 | Ruled lines | **25 bands of exactly 8.0 mm**, as 24 feint **solid** rules, 0.5 pt at 75% grey, at y = 57 + 8.0k (k = 1 to 24), inset 3 mm from each side |
 
-**The page is FINAL as of 2026-09-25, and the final page is
-`specs/generic_answer_page/generic_answer_page_FINAL_2026-09-25.pdf`, produced by this app.** It is
-printed in bulk and posted to students, so **a change after this puts two versions of the page in
-circulation**, which is the failure this design exists to avoid. Change it only by a new work order
-with a reason that outweighs that. The one change already foreseen is the printing line, if the
-double-sided test on real paper fails.
+**Why two identical pages.** The page tells students they may print "single or double sided", and
+a one-page PDF cannot be printed double sided: duplex gives an answer page with a blank back. With
+two identical pages, duplex gives one sheet with a usable answer page on each side, and six pages are
+three copies. The two pages are **byte-identical in content**: no page number and no distinguishing
+mark, so a student can use either side without knowing which it is. This is the case the format was
+designed for. Each side carries its own corner marks and its own QR, is registered on its own, and
+the QR names the page format, not a sheet. So both sides say `GB1-GBGEN1-HWMSTR-1-1-5F0B10BC`, the map
+stays one row on `page_k` 1, and the layout id stays `5F0B10BC`. The self-test and the ink checks run
+on both sides.
+
+**The page is FINAL as of 2026-09-25, and the final PDF is
+`specs/generic_answer_page/generic_answer_page_FINAL_TWO_SIDES_2026-09-25.pdf`, produced by this
+app.** It is printed in bulk and posted to students, so **a change after this puts two versions of
+the page in circulation**, which is the failure this design exists to avoid. Change it only by a new
+work order with a reason that outweighs that. The one change already foreseen is the printing line,
+if the double-sided test on real paper fails.
+
+*Do not distribute `…_FINAL_2026-09-25.pdf`.* It is the same page as a **one-page** PDF, and it was
+superseded the same morning by the two-page file above. It is kept only as history, like the
+`AS_BUILT` files beside it.
 
 The two wording changes that made it final (WORKORDER_AM_PAGE_FINAL_WORDING_2026-09-25):
 

@@ -270,7 +270,7 @@ export const GENERIC_PRINTED_STRINGS: readonly string[] = [
   GENERIC_IDENTITY_TEXT, GENERIC_PENCIL_TEXT, GENERIC_PRINTING_TEXT,
 ];
 
-const drawBox = (doc: jsPDF, ink: InkBox[]) => {
+const drawBox = (doc: jsPDF, ink: InkBox[], pageK: number) => {
   const b = GENERIC_BOX_MM;
   // Solid, black, 1 pt, square corners, stroke inset half a width so the ink
   // lands exactly between the outer edge and the declared interior — the same
@@ -281,7 +281,7 @@ const drawBox = (doc: jsPDF, ink: InkBox[]) => {
   doc.rect(b.x0 + BORDER_MM / 2, b.y0 + BORDER_MM / 2,
     (b.x1 - b.x0) - BORDER_MM, (b.y1 - b.y0) - BORDER_MM, 'S');
   const edge = (what: string, x0: number, y0: number, x1: number, y1: number) =>
-    ink.push({ pageK: 1, what: `box ${what} ${GENERIC_PART_ID}`, x0, y0, x1, y1 });
+    ink.push({ pageK, what: `box ${what} ${GENERIC_PART_ID}`, x0, y0, x1, y1 });
   edge('top', b.x0, b.y0, b.x1, round4(b.y0 + BORDER_MM));
   edge('bottom', b.x0, round4(b.y1 - BORDER_MM), b.x1, b.y1);
   edge('left', b.x0, b.y0, round4(b.x0 + BORDER_MM), b.y1);
@@ -313,10 +313,50 @@ const drawBox = (doc: jsPDF, ink: InkBox[]) => {
   }
   doc.setDrawColor(0);
   ink.push({
-    pageK: 1, what: `writing lines ${GENERIC_PART_ID}`,
+    pageK, what: `writing lines ${GENERIC_PART_ID}`,
     x0, y0: round4(b.y0 + GENERIC_BAND_MM - 0.2),
     x1, y1: round4(b.y0 + (GENERIC_BANDS - 1) * GENERIC_BAND_MM + 0.2),
   });
+};
+
+/**
+ * The download is TWO identical pages (WORKORDER_AM_PAGE_TWO_SIDES_2026-09-25).
+ *
+ * The page tells students they may print "single or double sided", and a
+ * one-page PDF cannot be printed double sided: duplex gave an answer page with
+ * a blank back. Two identical pages print duplex as one sheet with a usable
+ * answer page on each side, and six pages are three copies. Nothing distinguishes
+ * the two, no page number and no mark, so a student can use either side without
+ * knowing which it is. Each side carries its own corner marks and QR and is
+ * registered on its own, which is the case the format was designed for.
+ */
+export const GENERIC_PDF_PAGES = 2;
+
+/** One side of the page, drawn onto the PDF's current page. */
+const drawGenericSide = (doc: jsPDF, ink: InkBox[], pageK: number) => {
+  drawMarks(doc);
+  drawQr(doc, GENERIC_QR_PAYLOAD);
+  // The one line allowed in the identity band (spec 4.5).
+  drawPlain(doc, GENERIC_HEADER_TEXT, HEADER_TEXT_ANCHOR_MM.x, HEADER_TEXT_ANCHOR_MM.y,
+    { fontPt: 9 }, ink, pageK, 'header line');
+
+  const x = GENERIC_BOX_MM.x0;
+  const T = GENERIC_TEXT_TOP_MM;
+  drawPlain(doc, GENERIC_FIELDS_TEXT, x, T.fields, { fontPt: 12 }, ink, pageK, 'fields line');
+  // The two bold lines are legible at arm's length on purpose: this page has no
+  // instructions page in front of it.
+  const boldPt = 10;
+  const boldW = drawPlain(doc, GENERIC_OUTSIDE_BOX_TEXT, x, T.outsideBox, { fontPt: boldPt, bold: true }, ink, pageK, 'outside-box line');
+  // The note shares the bold line's row. Both are drawn top-anchored, so the
+  // smaller one is lowered so the two share a baseline.
+  const notePt = GENERIC_MORE_PAGES_NOTE_PT;
+  drawPlain(doc, GENERIC_MORE_PAGES_NOTE, x + boldW + GENERIC_MORE_PAGES_NOTE_GAP_MM,
+    round4(T.outsideBox + (boldPt - notePt) * PT_TO_MM * TOP_TO_BASELINE_EM),
+    { fontPt: notePt, grey: GENERIC_MORE_PAGES_NOTE_GREY }, ink, pageK, 'more-pages note');
+  drawPlain(doc, GENERIC_IDENTITY_TEXT, x, T.identity, { fontPt: 10, bold: true }, ink, pageK, 'identity line');
+  drawPlain(doc, GENERIC_PENCIL_TEXT, x, T.pencil, { fontPt: 9 }, ink, pageK, 'pencil line');
+  drawPlain(doc, GENERIC_PRINTING_TEXT, x, T.printing, { fontPt: 9 }, ink, pageK, 'printing line');
+  drawBox(doc, ink, pageK);
 };
 
 export interface GeneratedGenericPage {
@@ -331,7 +371,8 @@ export interface GeneratedGenericPage {
 }
 
 /**
- * Build the page. Runs the self-test first and the ink checks after drawing,
+ * Build the page, as a PDF of `GENERIC_PDF_PAGES` identical sides. Runs the
+ * self-test first and the ink checks, on every side, after drawing,
  * and **throws** rather than returning a page that fails either — the same
  * rule as every other template this app emits.
  */
@@ -348,33 +389,32 @@ export const generateGenericAnswerPage = async (): Promise<GeneratedGenericPage>
 
   const ink: InkBox[] = [];
   const doc = new jsPDF({ unit: 'mm', format: [PAGE_W_MM, PAGE_H_MM], orientation: 'portrait' });
-  drawMarks(doc);
-  drawQr(doc, GENERIC_QR_PAYLOAD);
-  // The one line allowed in the identity band (spec 4.5).
-  drawPlain(doc, GENERIC_HEADER_TEXT, HEADER_TEXT_ANCHOR_MM.x, HEADER_TEXT_ANCHOR_MM.y,
-    { fontPt: 9 }, ink, 1, 'header line');
+  // The sides must be byte-identical, and jsPDF writes the CURRENT line width
+  // and stroke colour into the top of each new page's content stream. The
+  // document's own first page gets jsPDF's defaults; a page added after drawing
+  // gets whatever the drawing left behind. So every side is an added page,
+  // added from the same reset state, and the constructor's blank first page is
+  // dropped. (Nothing strokes before setting its own width and colour, so this
+  // changes no rendering; it is what makes the sides identical byte for byte.)
+  // The reset is written into the page that is current when it runs, so it runs
+  // at the END of every side too, not only before the next one: otherwise the
+  // last side would lack the trailing reset the others carry.
+  const resetState = () => { doc.setLineWidth(BORDER_MM); doc.setDrawColor(0); };
+  resetState();
+  for (let side = 1; side <= GENERIC_PDF_PAGES; side++) {
+    doc.addPage([PAGE_W_MM, PAGE_H_MM], 'portrait');
+    drawGenericSide(doc, ink, side);
+    resetState();
+  }
+  doc.deletePage(1);
 
-  const x = GENERIC_BOX_MM.x0;
-  const T = GENERIC_TEXT_TOP_MM;
-  drawPlain(doc, GENERIC_FIELDS_TEXT, x, T.fields, { fontPt: 12 }, ink, 1, 'fields line');
-  // The two bold lines are legible at arm's length on purpose: this page has no
-  // instructions page in front of it.
-  const boldPt = 10;
-  const boldW = drawPlain(doc, GENERIC_OUTSIDE_BOX_TEXT, x, T.outsideBox, { fontPt: boldPt, bold: true }, ink, 1, 'outside-box line');
-  // The note shares the bold line's row. Both are drawn top-anchored, so the
-  // smaller one is lowered so the two share a baseline.
-  const notePt = GENERIC_MORE_PAGES_NOTE_PT;
-  drawPlain(doc, GENERIC_MORE_PAGES_NOTE, x + boldW + GENERIC_MORE_PAGES_NOTE_GAP_MM,
-    round4(T.outsideBox + (boldPt - notePt) * PT_TO_MM * TOP_TO_BASELINE_EM),
-    { fontPt: notePt, grey: GENERIC_MORE_PAGES_NOTE_GREY }, ink, 1, 'more-pages note');
-  drawPlain(doc, GENERIC_IDENTITY_TEXT, x, T.identity, { fontPt: 10, bold: true }, ink, 1, 'identity line');
-  drawPlain(doc, GENERIC_PENCIL_TEXT, x, T.pencil, { fontPt: 9 }, ink, 1, 'pencil line');
-  drawPlain(doc, GENERIC_PRINTING_TEXT, x, T.printing, { fontPt: 9 }, ink, 1, 'printing line');
-  drawBox(doc, ink);
-
-  const report = runInkChecks(ink, base, [{
-    pageK: 1, regionId: GENERIC_REGION_ID, partId: GENERIC_PART_ID, rect: GENERIC_DECLARED_MM,
-  }]);
+  // Every side is ink-checked, each against its own declared box. `pageK` here
+  // is the side of the PDF, for the checks only: the map and the QR still say
+  // page 1 of 1 on both, because the QR names the format, not the sheet.
+  const report = runInkChecks(ink, base,
+    Array.from({ length: GENERIC_PDF_PAGES }, (_, i) => ({
+      pageK: i + 1, regionId: GENERIC_REGION_ID, partId: GENERIC_PART_ID, rect: GENERIC_DECLARED_MM,
+    })));
   if (!report.passed) fail(report);
 
   return {
