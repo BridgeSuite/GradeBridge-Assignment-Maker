@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   GOLDEN_FIXTURES, hashExport, katexVersion, loadExportPath, pinnedAssignment,
 } from './exportHashes.mjs';
+import { suiteExit } from './suiteExit.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -648,4 +649,5 @@ try {
 } catch (err) {
   console.log(`  note: could not remove ${outDir} (${err.code}); it is a temp directory and is left behind`);
 }
-process.exit(failed ? 1 : 0);
+// A suite that ran no checks has not passed (tests/suiteExit.mjs).
+suiteExit(passed, failed);

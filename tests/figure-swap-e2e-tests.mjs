@@ -14,7 +14,20 @@
 // assignment comes from the ENG17 source, the ZIP is the one `Export ZIP`
 // builds, and the spec is decrypted the way a student's browser decrypts it.
 //
-// Needs the ENG17 sources: GB_ENG17_DIR=/path/to/New\ HWKs npm test
+// Runs TWICE since 2026-09-25 (WORKORDER_AM_HWK_CHECKS_ARE_DEAD, Supplement 2):
+//
+//   1. On HW1, the real-data claim above. The ENG17 sources are found by
+//      `tests/eng17Sources.mjs`: a relative default beside this checkout, or
+//      GB_ENG17_DIR / ENG17_HWK_DIR; with either set, a missing file FAILS.
+//      Until then it had no default and looked for a stale filename, so it
+//      skipped on every run, and this suite printed `0 passed, 0 failed`
+//      and exited 0.
+//   2. On an in-repo assignment with two titled and described figures, the same
+//      pipeline with no frozen layout id. (`Figure_Fixture.md` will not do: its
+//      figures have no <desc>, so extraction rightly leaves them inline.) It does NOT stand in for the real-data claim; it exists so the
+//      pipeline is exercised wherever the course material is absent (CI), and
+//      so this suite always runs something. A suite that runs nothing now
+//      fails (`tests/suiteExit.mjs`).
 
 import { build } from 'esbuild';
 import { webcrypto } from 'node:crypto';
@@ -24,6 +37,8 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { eng17Plan } from './eng17Sources.mjs';
+import { suiteExit } from './suiteExit.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -35,7 +50,8 @@ const check = async (name, fn) => {
   try { await fn(); passed++; results.push(`  PASS  ${name}`); }
   catch (err) { failed++; results.push(`  FAIL  ${name}\n          ${err.message}`); }
 };
-const skip = (name, why) => results.push(`  SKIP  ${name} (${why})`);
+let skipped = 0;
+const skip = (name, why) => { skipped++; results.push(`  SKIP  ${name} (${why})`); };
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
 const assertEqual = (a, b, msg) => {
   const x = JSON.stringify(a), y = JSON.stringify(b);
@@ -116,18 +132,11 @@ const PNG = Buffer.concat([
   chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
 ]);
 
-const ENG17 = process.env.GB_ENG17_DIR;
-const SOURCE = ENG17 ? join(ENG17, 'HWK1', 'ENG17_HW1_assignment.md') : null;
-const NAME = 'CRITERION 6: extract HW1, swap a figure for a PNG, export, decode the spec';
-
-if (!SOURCE || !existsSync(SOURCE)) {
-  skip(NAME, 'set GB_ENG17_DIR to the folder holding the ENG17 sources');
-} else {
-  await check(NAME, async () => {
-    // 1. Import HW1 and extract its inline SVGs into files.
-    const imported = mdParser.parseMdToAssignment(readFileSync(SOURCE, 'utf8'));
+// The whole pipeline, for one assignment. `frozenLayoutId` is asserted when given.
+const swapEndToEnd = async (imported, label, frozenLayoutId) => {
+    // 1. Extract the assignment's inline SVGs into files.
     const { assignment: extracted, extracted: list } = extract.extractFigures(imported);
-    assert(list.length > 0, 'HW1 produced no figure files to swap');
+    assert(list.length > 0, `${label} produced no figure files to swap`);
     const beforeTemplate = await gen.generateTemplate(extracted);
 
     // 2. Replace one figure with the PNG, keeping its id, title and desc.
@@ -175,7 +184,9 @@ if (!SOURCE || !existsSync(SOURCE)) {
     const afterTemplate = await gen.generateTemplate(swapped);
     assertEqual(afterTemplate.layoutId, beforeTemplate.layoutId,
       `layout_id moved when the figure was swapped: ${beforeTemplate.layoutId} -> ${afterTemplate.layoutId}`);
-    assertEqual(afterTemplate.layoutId, '95438EDF', 'HW1 is not at its frozen layout_id');
+    if (frozenLayoutId) {
+      assertEqual(afterTemplate.layoutId, frozenLayoutId, `${label} is not at its frozen layout_id`);
+    }
     assertEqual(afterTemplate.pageCount, beforeTemplate.pageCount, 'the page count moved');
 
     // --- the instructor's .md travelled with its figures --------------------
@@ -191,13 +202,42 @@ if (!SOURCE || !existsSync(SOURCE)) {
       const v = e[Object.keys(e).find(n => /_OPEN_IN_APP\.json$/.test(n))];
       return typeof v === 'string' ? v.length : (await v.arrayBuffer()).byteLength;
     };
-    results.push(`        student spec: ${await sizeOf(plain)} bytes with the SVG, `
+    results.push(`        ${label} student spec: ${await sizeOf(plain)} bytes with the SVG, `
       + `${await sizeOf(entries)} bytes with the PNG (${PNG.length} byte source)`);
-  });
+};
+
+// 1. The real-data claim, on HW1.
+{
+  const NAME = 'CRITERION 6: extract HW1, swap a figure for a PNG, export, decode the spec';
+  const plan = eng17Plan(1);
+  if (plan.action === 'fail') await check(NAME, async () => { throw new Error(plan.why); });
+  else if (plan.action === 'skip') skip(NAME, plan.why);
+  else await check(NAME, () =>
+    swapEndToEnd(mdParser.parseMdToAssignment(readFileSync(plan.path, 'utf8')), 'HW1', '95438EDF'));
+}
+
+// 2. The same pipeline on an in-repo assignment, which runs everywhere.
+{
+  const svgWith = (title, desc) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><title>${title}</title>`
+    + `<desc>${desc}</desc><path d="M0 0 L10 10" stroke="#000"/></svg>`;
+  const fixture = {
+    id: 'a1', courseCode: 'DEMO101', title: 'Swap Fixture', assignmentKind: 'conventional',
+    inputMode: 'handwritten', preamble: 'Do it.', targetPoints: 100, createdAt: 1, updatedAt: 1,
+    problems: [['Divider', 'Two resistors in series.'], ['Bridge', 'Four resistors in a diamond.']]
+      .map(([t, d], i) => ({
+        id: `p${i + 1}`, name: `Problem ${i + 1}`,
+        description: `Given the network.\n\n\`\`\`svg\n${svgWith(t, d)}\n\`\`\`\n\nFind Vout.`,
+        subsections: [{ id: `s${i + 1}`, name: 'a', description: 'Work it out.', points: 50,
+          submissionType: 'Handwritten', handwrittenGradingMode: 'human' }],
+      })),
+  };
+  await check('the swap pipeline, on an in-repo assignment (runs everywhere; not a stand-in for HW1)', () =>
+    swapEndToEnd(fixture, 'the in-repo assignment', null));
 }
 
 // ---------- report ----------
 console.log(results.join('\n'));
-console.log(`\n${passed} passed, ${failed} failed\n`);
+console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped\n`);
 try { rmSync(outDir, { recursive: true, force: true }); } catch { /* windows handles */ }
-process.exit(failed > 0 ? 1 : 0);
+suiteExit(passed, failed);

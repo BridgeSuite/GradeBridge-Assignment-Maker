@@ -30,6 +30,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { suiteExit } from './suiteExit.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -308,4 +309,5 @@ try {
 } catch (err) {
   console.log(`  note: could not remove ${work} (${err.code}); it is a temp directory and is left behind`);
 }
-process.exit(failed > 0 ? 1 : 0);
+// A suite that ran no checks has not passed (tests/suiteExit.mjs).
+suiteExit(passed, failed);

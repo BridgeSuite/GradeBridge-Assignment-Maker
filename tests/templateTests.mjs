@@ -32,6 +32,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inflateSync } from 'node:zlib';
+import { eng17Plan } from './eng17Sources.mjs';
+import { suiteExit } from './suiteExit.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -2344,38 +2346,29 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
   // are THE guard against a change moving where answers sit on paper students
   // have already printed, so how they behave when the files are absent matters:
   //
-  //   - ENG17_HWK_DIR unset, files absent: SKIP, counted and named in the
-  //     summary. A developer without the course material is not failed.
-  //   - ENG17_HWK_DIR SET, a file absent: FAIL. The operator has said the files
-  //     are there, so not finding one is a finding, not a reason to test nothing.
+  //   - no folder named, files absent: SKIP, counted and named in the summary.
+  //     A developer without the course material is not failed.
+  //   - ENG17_HWK_DIR (or GB_ENG17_DIR) SET, a file absent: FAIL. The operator
+  //     has said the files are there, so not finding one is a finding.
+  //
+  // Where the files are, and the rule, live in `tests/eng17Sources.mjs`, shared
+  // with the figure suites (Supplement 2), so the three cannot disagree again.
   //
   // Until 2026-09-25 they looked for `ENG17_HW{n}_assignment.md`; the files are
   // `ENG17_Homework_{n}.md`, so all three skipped on every run and the suite
   // reported success. On their first real run they passed, unedited: 17, 10 and
   // 14 regions, 95438EDF, 8505F1E5, B549DC53.
   // Override with:  ENG17_HWK_DIR=/path/to/"New HWKs" npm test
-  const HWK_SET = !!process.env.ENG17_HWK_DIR;
-  const HWK = HWK_SET
-    ? resolve(process.env.ENG17_HWK_DIR)
-    : resolve(REPO, '..', '..', '..', 'Knoesen', 'ENG17-Assignments', 'New HWKs');
   for (const { n, regions, layoutId } of [
     { n: 1, regions: 17, layoutId: '95438EDF' },
     { n: 2, regions: 10, layoutId: '8505F1E5' },
     { n: 3, regions: 14, layoutId: 'B549DC53' },
   ]) {
     const name = `ENG17 HW${n}: ${regions} regions join the rubric one-to-one, layout_id ${layoutId}`;
-    const mdPath = join(HWK, `HWK${n}`, `ENG17_Homework_${n}.md`);
-    if (!existsSync(mdPath)) {
-      if (HWK_SET) {
-        check(name, () => {
-          throw new Error(`ENG17_HWK_DIR is set, so HW${n} must be at ${mdPath}, and it is not. `
-            + 'A layout check that cannot find its file has tested nothing.');
-        });
-      } else {
-        skip(name, `not at ${mdPath}; set ENG17_HWK_DIR to run it`);
-      }
-      continue;
-    }
+    const plan = eng17Plan(n);
+    if (plan.action === 'fail') { check(name, () => { throw new Error(plan.why); }); continue; }
+    if (plan.action === 'skip') { skip(name, plan.why); continue; }
+    const mdPath = plan.path;
     const report = await joinReport(mdParserJoin.parseMdToAssignment(readFileSync(mdPath, 'utf8')));
     check(name, () => {
       assertJoinsOneToOne(report, `HW${n}`);
@@ -2447,12 +2440,8 @@ const pdfExtractedText = (buf) => {
 // looking at what fired.
 {
   const mdParser = await loadModule(join(REPO, 'services', 'mdParserService.ts'), 'mdParserKey.mjs');
-  // Same default and same override as the join checks above, and the same rule:
-  // with the override set, a missing file is a failure, not a skip.
-  const HWK_SET = !!process.env.ENG17_HWK_DIR;
-  const HWK = HWK_SET
-    ? resolve(process.env.ENG17_HWK_DIR)
-    : resolve(REPO, '..', '..', '..', 'Knoesen', 'ENG17-Assignments', 'New HWKs');
+  // Same sources and the same rule as the join checks above (eng17Sources.mjs):
+  // with a folder named, a missing file is a failure, not a skip.
 
   const MAX_OVERLAP_WORDS = 16;
 
@@ -2765,22 +2754,13 @@ const pdfExtractedText = (buf) => {
   // ---- The real homeworks --------------------------------------------------
   for (const n of [1, 2, 3]) {
     const name = `ENG17 HW${n}: no grading material in any student-facing artifact`;
-    // Same filename fix and same override rule as the layout checks above
-    // (WORKORDER_AM_HWK_CHECKS_ARE_DEAD_2026-09-25, Supplement 1, item 1). This
-    // is the only place the answer-key content guard meets real course material
-    // rather than fixtures written to pass it, and until then it had never run.
-    const mdPath = join(HWK, `HWK${n}`, `ENG17_Homework_${n}.md`);
-    if (!existsSync(mdPath)) {
-      if (HWK_SET) {
-        check(name, () => {
-          throw new Error(`ENG17_HWK_DIR is set, so HW${n} must be at ${mdPath}, and it is not. `
-            + 'A leak check that cannot find its file has tested nothing.');
-        });
-      } else {
-        skip(name, `not at ${mdPath}; set ENG17_HWK_DIR to run it`);
-      }
-      continue;
-    }
+    // Same override rule as the layout checks above (Supplement 1, item 1).
+    // This is the only place the answer-key content guard meets real course
+    // material rather than fixtures written to pass it.
+    const plan = eng17Plan(n);
+    if (plan.action === 'fail') { check(name, () => { throw new Error(plan.why); }); continue; }
+    if (plan.action === 'skip') { skip(name, plan.why); continue; }
+    const mdPath = plan.path;
     check(name, async () => {
       const a = mdParser.parseMdToAssignment(readFileSync(mdPath, 'utf8'));
       const grading = gradingStrings(a);
@@ -2907,4 +2887,5 @@ console.log(`\n${passed} passed, ${failed} failed, ${skippedNames.length} skippe
 if (skippedNames.length) console.log(`skipped:\n${skippedNames.map(n => `  - ${n}`).join('\n')}`);
 console.log('');
 try { rmSync(outDir, { recursive: true, force: true }); } catch { /* Windows keeps handles */ }
-process.exit(failed > 0 ? 1 : 0);
+// A suite that ran no checks has not passed (tests/suiteExit.mjs).
+suiteExit(passed, failed);

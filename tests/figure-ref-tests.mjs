@@ -20,6 +20,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { suiteExit } from './suiteExit.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -727,4 +728,5 @@ await Promise.all(pending);
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 try { rmSync(outDir, { recursive: true, force: true }); } catch { /* windows handles */ }
-process.exit(failed > 0 ? 1 : 0);
+// A suite that ran no checks has not passed (tests/suiteExit.mjs).
+suiteExit(passed, failed);

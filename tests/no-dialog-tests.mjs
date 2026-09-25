@@ -13,6 +13,7 @@
 // Item 2: the privacy notice is rendered through the real component and every
 // file it names is held to what the export actually writes, on each path.
 
+import { suiteExit } from './suiteExit.mjs';
 import { build } from 'esbuild';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -289,4 +290,5 @@ try {
 } catch (err) {
   console.log(`  note: could not remove ${outDir} (${err.code}); it is a temp directory and is left behind`);
 }
-process.exit(failed > 0 ? 1 : 0);
+// A suite that ran no checks has not passed (tests/suiteExit.mjs).
+suiteExit(passed, failed);

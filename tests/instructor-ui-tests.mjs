@@ -8,6 +8,7 @@
 // the item is about what appears on screen, as `figure-render-tests.mjs` does,
 // so what is asserted is what an instructor sees.
 
+import { suiteExit } from './suiteExit.mjs';
 import { build } from 'esbuild';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -428,4 +429,5 @@ try {
 } catch (err) {
   console.log(`  note: could not remove ${outDir} (${err.code}); it is a temp directory and is left behind`);
 }
-process.exit(failed > 0 ? 1 : 0);
+// A suite that ran no checks has not passed (tests/suiteExit.mjs).
+suiteExit(passed, failed);

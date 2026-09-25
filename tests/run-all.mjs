@@ -19,8 +19,9 @@
 // failed. A failure is still a failure; it just no longer conceals the others.
 
 import { spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { outputRanNothing } from './suiteExit.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +44,13 @@ const SUITES = [
   'skip-visibility-tests.mjs',
 ];
 
+// For the test of this runner only (`skip-visibility-tests.mjs`): a
+// comma-separated list of suite files to run INSTEAD of the list above, so the
+// "ran nothing" backstop can be shown failing a real child process. Never set
+// in CI or by `npm test`.
+const ONLY = process.env.GB_RUN_ALL_SUITES;
+if (ONLY) SUITES.splice(0, SUITES.length, ...ONLY.split(',').filter(Boolean));
+
 const results = [];
 // Every skipped check in every suite, gathered for the summary below. A skip
 // tested nothing, and the ENG17 layout checks skipped on every run for weeks
@@ -51,10 +59,22 @@ const results = [];
 // as a line `  SKIP  <name> (<why>)`, and that is what is collected.
 const skips = [];
 
+// THE BACKSTOP for "a suite that ran nothing has not passed" (Supplement 2,
+// item 2). Every counter-based suite ends through `suiteExit` and fails itself;
+// this catches one that forgets, from the outside. A suite exiting 0 is judged
+// a FAILURE here if its `N passed, M failed` line shows no check run, or if it
+// prints no such line at all, because then nothing says it ran anything.
+//
+// Two suites report in their own format and are exempt from the second test,
+// by name and for a stated reason: each is a disclosure guard whose scans fail
+// on an empty set by design and whose self-checks run on in-memory fixtures on
+// every run, so neither can run nothing and exit 0.
+const OWN_FORMAT = new Set(['no-personal-names.mjs', 'no-process-records.mjs']);
+
 for (const suite of SUITES) {
   // stdout is captured, then echoed, so its SKIP lines can be collected;
   // stderr still goes straight through.
-  const run = spawnSync(process.execPath, [join(HERE, suite)], {
+  const run = spawnSync(process.execPath, [isAbsolute(suite) ? suite : join(HERE, suite)], {
     stdio: ['inherit', 'pipe', 'inherit'],
     cwd: join(HERE, '..'),
     encoding: 'utf8',
@@ -65,8 +85,13 @@ for (const suite of SUITES) {
   for (const m of out.matchAll(/^ {2}SKIP {2}(.+)$/gm)) skips.push({ suite, line: m[1] });
   // A suite killed by a signal has no exit code; treat that as a failure rather
   // than as a pass, which `status === 0` alone would not.
-  const failed = run.status !== 0 || run.signal !== null;
-  results.push({ suite, failed, status: run.status, signal: run.signal });
+  let failed = run.status !== 0 || run.signal !== null;
+  let why = null;
+  if (!failed && outputRanNothing(out)) { failed = true; why = 'ran no checks'; }
+  if (!failed && !OWN_FORMAT.has(suite) && !/^\d+ passed, \d+ failed/m.test(out)) {
+    failed = true; why = 'printed no "N passed, M failed" line, so nothing says it ran anything';
+  }
+  results.push({ suite, failed, status: run.status, signal: run.signal, why });
 }
 
 const width = Math.max(...SUITES.map(s => s.length));
@@ -74,7 +99,7 @@ console.log('\n' + '='.repeat(width + 20));
 console.log('SUITE SUMMARY');
 console.log('='.repeat(width + 20));
 for (const r of results) {
-  const how = r.signal ? `killed by ${r.signal}` : r.failed ? `exit ${r.status}` : 'ok';
+  const how = r.signal ? `killed by ${r.signal}` : r.why ? r.why : r.failed ? `exit ${r.status}` : 'ok';
   console.log(`  ${r.failed ? 'FAIL' : 'pass'}  ${r.suite.padEnd(width)}  ${how}`);
 }
 

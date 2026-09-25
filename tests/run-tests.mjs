@@ -26,6 +26,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { suiteExit } from './suiteExit.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -64,6 +65,20 @@ const assertEqual = (actual, expected, msg) => {
   const a = JSON.stringify(actual), e = JSON.stringify(expected);
   if (a !== e) throw new Error(`${msg}\n          expected: ${e}\n          actual:   ${a}`);
 };
+
+// If the run dies part way, report what it knew before it died. A top-level
+// `await` that rejects (there are several; the first found was the export at
+// `hwEntries`) ends the process, and every result gathered so far used to go
+// with it, which is the information most wanted at that moment
+// (WORKORDER_AM_HWK_CHECKS_ARE_DEAD_2026-09-25, Supplement 2, item 3). The run
+// still fails: this only makes it fail with its results on screen.
+process.on('uncaughtException', (err) => {
+  console.log(results.join('\n'));
+  console.log(`  FAIL  THE RUN STOPPED EARLY, and every check after this point did not run\n`
+    + `          ${(err && err.stack) || err}`);
+  console.log(`\n${passed} passed, ${failed + 1} failed, ${skipped} skipped (the run did not finish)`);
+  process.exit(1);
+});
 
 // ---------- load the modules under test ----------
 const outDir = mkdtempSync(join(tmpdir(), 'gb-maker-test-'));
@@ -3705,4 +3720,5 @@ console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped\n`);
 // Windows keeps a handle on the imported bundles; a temp file left behind is
 // not a test failure.
 try { rmSync(outDir, { recursive: true, force: true }); } catch { /* ignore */ }
-process.exit(failed > 0 ? 1 : 0);
+// A suite that ran no checks has not passed (tests/suiteExit.mjs).
+suiteExit(passed, failed);

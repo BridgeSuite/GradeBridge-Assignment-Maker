@@ -20,6 +20,8 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { eng17Plan } from './eng17Sources.mjs';
+import { suiteExit } from './suiteExit.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
@@ -31,7 +33,8 @@ const check = async (name, fn) => {
   try { await fn(); passed++; results.push(`  PASS  ${name}`); }
   catch (err) { failed++; results.push(`  FAIL  ${name}\n          ${err.message}`); }
 };
-const skip = (name, why) => results.push(`  SKIP  ${name} (${why})`);
+let skipped = 0;
+const skip = (name, why) => { skipped++; results.push(`  SKIP  ${name} (${why})`); };
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
 const assertEqual = (a, b, msg) => {
   const x = JSON.stringify(a), y = JSON.stringify(b);
@@ -198,21 +201,22 @@ await check('the report names every file written and every figure left behind', 
 // ---------------------------------------------------------------------------
 // Against the real sources, not a fixture: this project's rule is never to
 // validate against data you generated yourself.
-// The directory holding the real ENG17 `.md` sources, supplied by the operator:
+// Where the real ENG17 sources are, and what happens when they are absent, is
+// decided in `tests/eng17Sources.mjs` (Supplement 2, item 1): a RELATIVE default
+// beside this checkout, so no home directory is written into the repository;
+// `GB_ENG17_DIR` or `ENG17_HWK_DIR` to name the folder; and with either set, a
+// missing file FAILS. Until 2026-09-25 this suite had no default and looked for
+// `ENG17_HW{n}_assignment.md`, so it skipped even with the variable set.
 //
 //   GB_ENG17_DIR=/path/to/New\ HWKs npm test
-//
-// NOT a path in this file. The sources live outside the repository, this
-// repository is going public, and a real path would carry a person's home
-// directory into it -- which `no-personal-names.mjs` catches, and did.
-const ENG17 = process.env.GB_ENG17_DIR;
 const FROZEN = { 1: '95438EDF', 2: '8505F1E5', 3: 'B549DC53' };
 
 for (const n of [1, 2, 3]) {
   const name = `CRITERION 2 (ENG17 HW${n}): spec byte-identical, and layout_id unmoved, after extraction`;
-  if (!ENG17) { skip(name, 'set GB_ENG17_DIR to the folder holding the ENG17 sources'); continue; }
-  const path = join(ENG17, `HWK${n}`, `ENG17_HW${n}_assignment.md`);
-  if (!existsSync(path)) { skip(name, `no ENG17 HW${n} source under GB_ENG17_DIR`); continue; }
+  const plan = eng17Plan(n);
+  if (plan.action === 'fail') { await check(name, async () => { throw new Error(plan.why); }); continue; }
+  if (plan.action === 'skip') { skip(name, plan.why); continue; }
+  const path = plan.path;
 
   await check(name, async () => {
     const before = mdParser.parseMdToAssignment(readFileSync(path, 'utf8'));
@@ -241,6 +245,6 @@ for (const n of [1, 2, 3]) {
 
 // ---------- report ----------
 console.log(results.join('\n'));
-console.log(`\n${passed} passed, ${failed} failed\n`);
+console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped\n`);
 try { rmSync(outDir, { recursive: true, force: true }); } catch { /* windows handles */ }
-process.exit(failed > 0 ? 1 : 0);
+suiteExit(passed, failed);

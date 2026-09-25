@@ -16,6 +16,7 @@
 // A test that called `resolveFigureRefsInText` directly would have passed on
 // the broken build, because that function was never the thing that was wrong.
 
+import { suiteExit } from './suiteExit.mjs';
 import { build } from 'esbuild';
 import { deflateSync } from 'node:zlib';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -456,4 +457,5 @@ for (const f of scratch) { try { rmSync(f, { force: true }); } catch { /* ignore
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed\n`);
 try { rmSync(outDir, { recursive: true, force: true }); } catch { /* windows handles */ }
-process.exit(failed > 0 ? 1 : 0);
+// A suite that ran no checks has not passed (tests/suiteExit.mjs).
+suiteExit(passed, failed);
