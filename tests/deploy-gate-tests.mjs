@@ -26,9 +26,9 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { suiteExit } from './suiteExit.mjs';
 
@@ -53,7 +53,8 @@ const check = async (name, fn) => {
   try { await fn(); passed++; results.push(`  PASS  ${name}`); }
   catch (err) { failed++; results.push(`  FAIL  ${name}\n          ${err.message}`); }
 };
-const skip = (name, why) => results.push(`  SKIP  ${name} (${why})`);
+let skipped = 0;
+const skip = (name, why) => { skipped++; results.push(`  SKIP  ${name} (${why})`); };
 const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
 
 console.log('\nDeploy gate — every refusal branch\n');
@@ -95,9 +96,16 @@ await check('the gate hardcodes the real API host', () => {
 // ---------------------------------------------------------------------------
 let reply = { status: 200, body: JSON.stringify({ total_count: 0, workflow_runs: [] }) };
 let lastUrl = null;
+// What the gate sent, for the token checks: the Authorization header of the
+// last request (or null), and how many requests arrived, so "never retried
+// without the token" is a count and not an inference.
+let lastAuth = null;
+let requestCount = 0;
 
 const server = createServer((req, res) => {
   lastUrl = req.url;
+  lastAuth = req.headers.authorization ?? null;
+  requestCount++;
   if (reply.hangup) { req.socket.destroy(); return; }
   res.writeHead(reply.status, { 'Content-Type': reply.contentType || 'application/json' });
   res.end(reply.body);
@@ -133,9 +141,41 @@ await check('the copy under test differs from the shipped gate by exactly one li
     `the differing line is not the API constant: ${a[differing[0]]}`);
 });
 
+// ---------------------------------------------------------------------------
+// THE TOKEN IS CONTROLLED, NOT INHERITED (2026-09-25)
+// ---------------------------------------------------------------------------
+// The gate now uses a token when it can find one: GITHUB_TOKEN, GH_TOKEN, then
+// `gh auth token`. So every scenario runs with BOTH variables removed and with
+// `gh` OFF the PATH (git kept), unless the scenario says otherwise. Otherwise a
+// developer's own login would quietly turn every check below into an
+// authenticated one, and "unauthenticated behaves exactly as before" would be
+// asserted by accident rather than on purpose.
+const PATH_KEY = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
+const pathDirs = (process.env[PATH_KEY] ?? '').split(delimiter).filter(Boolean);
+const has = (dir, exe) => existsSync(join(dir, exe)) || existsSync(join(dir, `${exe}.exe`));
+const GH_DIR = pathDirs.find((d) => has(d, 'gh')) ?? null;
+const NO_GH_PATH = (() => {
+  const dirs = pathDirs.filter((d) => !has(d, 'gh'));
+  if (dirs.some((d) => has(d, 'git'))) return dirs.join(delimiter);
+  // git and gh share a directory (/usr/bin on the CI runner): expose git alone.
+  const gitDir = pathDirs.find((d) => has(d, 'git'));
+  const only = mkdtempSync(join(tmpdir(), 'gb-gate-git-'));
+  symlinkSync(join(gitDir, 'git'), join(only, 'git'));
+  return [only, ...dirs].join(delimiter);
+})();
+const baseEnv = () => {
+  const env = { ...process.env, GB_ALLOW_RED_CI: '' };
+  delete env.GITHUB_TOKEN;
+  delete env.GH_TOKEN;
+  env[PATH_KEY] = NO_GH_PATH;
+  return env;
+};
+
 const run = (env = {}, script = gateCopy) => new Promise((done, fail) => {
+  requestCount = 0;
+  lastAuth = null;
   const child = spawn(process.execPath, [script], {
-    cwd: REPO, env: { ...process.env, GB_ALLOW_RED_CI: '', ...env },
+    cwd: REPO, env: { ...baseEnv(), ...env },
   });
   let out = '';
   child.stdout.on('data', (c) => { out += c; });
@@ -265,6 +305,141 @@ await refuses('a dropped connection is refused',
 }
 
 // ---------------------------------------------------------------------------
+// 4b. The token (WORKORDER_AM_DEPLOY_GATE_USES_A_TOKEN_2026-09-25)
+// ---------------------------------------------------------------------------
+// A fake value, so a failure message can never leak a real one. Distinctive,
+// so "it appears in the output" is a real search.
+const FAKE = 'ghp_FAKEtoken0000deploygate0000test';
+const green = () => ({ status: 200, body: runsBody([aRun()]) });
+
+await check('no token and no gh: no Authorization header, and the output is what it always was', async () => {
+  reply = green();
+  const { status, out } = await run();
+  assert(status === 0, `exit ${status}:\n${out}`);
+  assert(lastAuth === null, 'an Authorization header was sent with no token available');
+  assert(!/authenticated/.test(out), `the unauthenticated output changed; it now mentions authentication:\n${out}`);
+  assert(out.split('\n')[0].startsWith('[deploy gate] CI is green for'),
+    `the first line is not what the gate always printed:\n${out}`);
+});
+
+await check('GITHUB_TOKEN: sent as a Bearer token, the source named, the value never printed', async () => {
+  reply = green();
+  const { status, out } = await run({ GITHUB_TOKEN: FAKE });
+  assert(status === 0, `exit ${status}:\n${out}`);
+  assert(lastAuth === `Bearer ${FAKE}`, 'the token was not sent as `Bearer <token>`');
+  assert(/querying CI authenticated via GITHUB_TOKEN/.test(out), `the source is not named:\n${out}`);
+  assert(!out.includes(FAKE), 'THE TOKEN VALUE WAS PRINTED');
+});
+
+await check('GH_TOKEN: used when GITHUB_TOKEN is absent, and named', async () => {
+  reply = green();
+  const { out } = await run({ GH_TOKEN: FAKE });
+  assert(lastAuth === `Bearer ${FAKE}`, 'GH_TOKEN was not sent');
+  assert(/authenticated via GH_TOKEN/.test(out), `wrong source named:\n${out}`);
+  assert(!out.includes(FAKE), 'THE TOKEN VALUE WAS PRINTED');
+});
+
+await check('both set: GITHUB_TOKEN wins, as the order says', async () => {
+  reply = green();
+  const { out } = await run({ GITHUB_TOKEN: FAKE, GH_TOKEN: 'ghp_other_value_1234567890' });
+  assert(lastAuth === `Bearer ${FAKE}`, 'GH_TOKEN was preferred over GITHUB_TOKEN');
+  assert(/authenticated via GITHUB_TOKEN/.test(out), `wrong source named:\n${out}`);
+});
+
+await check('an empty or blank variable is no token', async () => {
+  reply = green();
+  const { out } = await run({ GITHUB_TOKEN: '', GH_TOKEN: '   ' });
+  assert(lastAuth === null, 'a blank variable was sent as a token');
+  assert(!/authenticated/.test(out), `a blank variable was reported as authentication:\n${out}`);
+});
+
+await check('a REJECTED token (401) refuses, names the token, and is NOT retried without it', async () => {
+  reply = { status: 401, body: JSON.stringify({ message: 'Bad credentials' }) };
+  const { status, out } = await run({ GITHUB_TOKEN: FAKE });
+  assert(status === 1, `a rejected token did not refuse (exit ${status}):\n${out}`);
+  assert(/REJECTED the token \(HTTP 401\), found via GITHUB_TOKEN/.test(out), `the token is not named as the cause:\n${out}`);
+  assert(/fix or unset GITHUB_TOKEN/.test(out), `it does not say how to clear it:\n${out}`);
+  assert(requestCount === 1, `${requestCount} requests: it retried, silently falling back to unauthenticated`);
+  assert(!out.includes(FAKE), 'THE TOKEN VALUE WAS PRINTED');
+});
+
+await check('a 401 with NO token is refused as it always was, not blamed on a token', async () => {
+  reply = { status: 401, body: '{}' };
+  const { status, out } = await run();
+  assert(status === 1, `exit ${status}`);
+  assert(/returned HTTP 401/.test(out) && !/REJECTED the token/.test(out), `wrong reason:\n${out}`);
+});
+
+await check('a rate-limit refusal says the request was UNAUTHENTICATED, and what to do', async () => {
+  reply = { status: 403, body: '{}' };
+  const { status, out } = await run();
+  assert(status === 1, `exit ${status}`);
+  assert(/the request was unauthenticated/.test(out), `the mode is not stated:\n${out}`);
+  assert(/gh auth login/.test(out), `it does not say how to authenticate:\n${out}`);
+});
+
+await check('a rate-limit refusal says the request was AUTHENTICATED, and by what', async () => {
+  reply = { status: 429, body: '{}' };
+  const { status, out } = await run({ GH_TOKEN: FAKE });
+  assert(status === 1, `exit ${status}`);
+  assert(/the request was authenticated via GH_TOKEN/.test(out), `the mode is not stated:\n${out}`);
+  assert(!out.includes(FAKE), 'THE TOKEN VALUE WAS PRINTED');
+});
+
+// The real `gh`, with its configuration redirected to a temporary directory so
+// the machine's own login is never read or touched. Skipped, counted, where gh
+// is not installed.
+{
+  const cfg = (hosts) => {
+    const dir = mkdtempSync(join(tmpdir(), 'gb-gate-gh-'));
+    if (hosts) writeFileSync(join(dir, 'hosts.yml'), hosts, 'utf8');
+    return dir;
+  };
+  const withGh = (extra) => ({ [PATH_KEY]: `${GH_DIR}${delimiter}${NO_GH_PATH}`, ...extra });
+  const NAME_OUT = 'gh installed but NOT logged in: unauthenticated, exactly as before';
+  const NAME_IN = 'gh installed and logged in: authenticated via gh auth token, the value never printed';
+  if (!GH_DIR) {
+    skip(NAME_OUT, 'gh is not on the PATH');
+    skip(NAME_IN, 'gh is not on the PATH');
+  } else {
+    await check(NAME_OUT, async () => {
+      // An empty GH_CONFIG_DIR is NOT enough to log gh out: on a machine where
+      // gh is logged in, it falls back to the system keyring and returns the
+      // real token (found on 2026-09-25, when this check first sent the real
+      // token to the local stub). Pointing it at a host it holds no login for
+      // is the one reliable way to have the real gh answer "no token", which
+      // is exactly what logged-out gh answers: exit 1, nothing on stdout.
+      const dir = cfg(null);
+      reply = green();
+      const { status, out } = await run(withGh({ GH_CONFIG_DIR: dir, GH_HOST: 'deploy-gate-test.invalid' }));
+      assert(status === 0, `exit ${status}:\n${out}`);
+      assert(lastAuth === null, 'a logged-out gh produced a token');
+      assert(!/authenticated/.test(out), `the output changed:\n${out}`);
+      rmSync(dir, { recursive: true, force: true });
+    });
+    await check(NAME_IN, async () => {
+      // A config file carrying the fake token, which is how gh stores one when
+      // no keyring is in use. The real gh reads it and prints it.
+      const dir = cfg(`github.com:\n    oauth_token: ${FAKE}\n    user: deploy-gate-test\n    git_protocol: https\n`);
+      reply = green();
+      const { status, out } = await run(withGh({ GH_CONFIG_DIR: dir }));
+      assert(status === 0, `exit ${status}:\n${out}`);
+      assert(lastAuth === `Bearer ${FAKE}`, 'the token from gh auth token was not sent');
+      assert(/authenticated via gh auth token/.test(out), `the source is not named:\n${out}`);
+      assert(!out.includes(FAKE), 'THE TOKEN VALUE WAS PRINTED');
+      rmSync(dir, { recursive: true, force: true });
+    });
+  }
+}
+
+await check('the gate never writes the token anywhere: the value appears only in the header', () => {
+  const uses = gateSource.split('\n').filter((l) => /token\.value/.test(l));
+  assert(uses.length === 1 && /Authorization = `Bearer \$\{token\.value\}`/.test(uses[0]),
+    `token.value is used outside the Authorization header:\n${uses.join('\n')}`);
+  assert(!/writeFile|appendFile|createWriteStream/.test(gateSource), 'the gate writes a file');
+});
+
+// ---------------------------------------------------------------------------
 // 5. The override, which must work and must never be quiet
 // ---------------------------------------------------------------------------
 await check('GB_ALLOW_RED_CI publishes anyway, and says loudly what it skipped', async () => {
@@ -302,7 +477,7 @@ for (const value of ['0', 'false', 'FALSE', '']) {
 // all, which is worse than the no-FAIL-line signature fixed in two other suites.
 // Cleanup is not a check: it retries, and a failure is a note.
 console.log(results.join('\n'));
-console.log(`\n${passed} passed, ${failed} failed\n`);
+console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped\n`);
 server.close();
 try {
   rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
