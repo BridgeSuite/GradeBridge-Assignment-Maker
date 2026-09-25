@@ -114,4 +114,17 @@ console.log(`${skips.length} check${skips.length === 1 ? '' : 's'} skipped, and 
 for (const k of skips) console.log(`  SKIP  ${k.suite}: ${k.line}`);
 console.log('');
 
+// In GitHub Actions, the same list as an ANNOTATION on the run. The run's log
+// needs authentication to read and annotations do not, so this is how anyone,
+// including a later session, confirms from CI which checks CI skipped
+// (Supplement 2, item 5). Written with a count EVEN WHEN IT IS ZERO: an absent
+// annotation would otherwise be read as "nothing skipped" when it could as
+// easily mean "this step never ran" -- the same absence-read-as-a-fact that
+// this order exists to remove.
+if (process.env.GITHUB_ACTIONS === 'true') {
+  const esc = (t) => String(t).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+  const body = skips.length ? skips.map(k => `${k.suite}: ${k.line}`).join('\n') : 'none';
+  console.log(`::notice title=${skips.length} check${skips.length === 1 ? '' : 's'} skipped in CI::${esc(body)}`);
+}
+
 process.exit(failedSuites.length > 0 ? 1 : 0);
