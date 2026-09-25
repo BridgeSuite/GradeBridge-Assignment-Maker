@@ -108,14 +108,36 @@ export const GENERIC_TEXT_TOP_MM = {
 export const GENERIC_HEADER_TEXT = `GradeBridge   answer page   ${GENERIC_TEMPLATE_ID}`;
 export const GENERIC_FIELDS_TEXT = 'Problem __________   Part __________   Page ______ of ______';
 /**
- * "One answer per page." was APPENDED on 2026-09-25
- * (WORKORDER_AM_ONE_ANSWER_PER_PAGE_2026-09-25): a student who puts two parts
- * on one page loses one, because each page is labelled with one part. It is on
- * this line, not a new one, because a new line pushes the box down and moves
- * `5F0B10BC`. At 10 pt bold it ends at x ~152.6 mm, clear of the box edge.
+ * FINAL WORDING, 2026-09-25 (WORKORDER_AM_PAGE_FINAL_WORDING_2026-09-25). The
+ * page is frozen from this line on: it is printed in bulk and posted to
+ * students, and a later change puts two versions in circulation.
+ *
+ * "One part per page." replaced the morning's "One answer per page.", which did
+ * not say whether parts (a) and (b) are one answer or two. "Part" is the word
+ * the fields line, the Submission app and the instructor handouts all use.
+ * Appended to this line, never a new one: a new line pushes the box down and
+ * moves `5F0B10BC`. At 10 pt bold it ends at x ~147.1 mm.
  */
 export const GENERIC_OUTSIDE_BOX_TEXT =
-  'Write only inside the box. Anything outside it is not collected. One answer per page.';
+  'Write only inside the box. Anything outside it is not collected. One part per page.';
+/**
+ * The note that "one part per page" is not "one page per part". The work order
+ * asked for it on the fields line, beside `Page ___ of ___`; it does not fit
+ * there (the line ends at x ~136 mm and the QR keep-out starts at 166, while
+ * the note needs ~48 mm even at 8 pt), so it follows the bold line, the order's
+ * named fallback. Smaller and lighter than that line, so it reads as a note:
+ * 8 pt at grey 90, baseline-aligned, ending at x ~197 mm inside the box width.
+ */
+export const GENERIC_MORE_PAGES_NOTE = '(a long answer can run to more pages)';
+export const GENERIC_MORE_PAGES_NOTE_PT = 8;
+export const GENERIC_MORE_PAGES_NOTE_GREY = 90;
+const PT_TO_MM = 25.4 / 72;
+/** How far below a `baseline: 'top'` anchor jsPDF puts the baseline, as a
+ *  fraction of the font size. Measured from the PDF: 10 pt drawn at y 37.0 has
+ *  its baseline at 40.0. Used to put two sizes on one baseline. */
+const TOP_TO_BASELINE_EM = 0.85;
+/** The space between the bold line and the note, mm. */
+export const GENERIC_MORE_PAGES_NOTE_GAP_MM = 2.0;
 /** The identity warning. This page has no instructions page in front of it, so it says it here. */
 export const GENERIC_IDENTITY_TEXT =
   'Do not write your name, student ID or email address anywhere on this page.';
@@ -244,7 +266,7 @@ export const runGenericSelfTest = async (): Promise<SelfTestReport> => {
 
 /** Every string the page prints, in order, for the test that asserts them. */
 export const GENERIC_PRINTED_STRINGS: readonly string[] = [
-  GENERIC_HEADER_TEXT, GENERIC_FIELDS_TEXT, GENERIC_OUTSIDE_BOX_TEXT,
+  GENERIC_HEADER_TEXT, GENERIC_FIELDS_TEXT, GENERIC_OUTSIDE_BOX_TEXT, GENERIC_MORE_PAGES_NOTE,
   GENERIC_IDENTITY_TEXT, GENERIC_PENCIL_TEXT, GENERIC_PRINTING_TEXT,
 ];
 
@@ -337,7 +359,14 @@ export const generateGenericAnswerPage = async (): Promise<GeneratedGenericPage>
   drawPlain(doc, GENERIC_FIELDS_TEXT, x, T.fields, { fontPt: 12 }, ink, 1, 'fields line');
   // The two bold lines are legible at arm's length on purpose: this page has no
   // instructions page in front of it.
-  drawPlain(doc, GENERIC_OUTSIDE_BOX_TEXT, x, T.outsideBox, { fontPt: 10, bold: true }, ink, 1, 'outside-box line');
+  const boldPt = 10;
+  const boldW = drawPlain(doc, GENERIC_OUTSIDE_BOX_TEXT, x, T.outsideBox, { fontPt: boldPt, bold: true }, ink, 1, 'outside-box line');
+  // The note shares the bold line's row. Both are drawn top-anchored, so the
+  // smaller one is lowered so the two share a baseline.
+  const notePt = GENERIC_MORE_PAGES_NOTE_PT;
+  drawPlain(doc, GENERIC_MORE_PAGES_NOTE, x + boldW + GENERIC_MORE_PAGES_NOTE_GAP_MM,
+    round4(T.outsideBox + (boldPt - notePt) * PT_TO_MM * TOP_TO_BASELINE_EM),
+    { fontPt: notePt, grey: GENERIC_MORE_PAGES_NOTE_GREY }, ink, 1, 'more-pages note');
   drawPlain(doc, GENERIC_IDENTITY_TEXT, x, T.identity, { fontPt: 10, bold: true }, ink, 1, 'identity line');
   drawPlain(doc, GENERIC_PENCIL_TEXT, x, T.pencil, { fontPt: 9 }, ink, 1, 'pencil line');
   drawPlain(doc, GENERIC_PRINTING_TEXT, x, T.printing, { fontPt: 9 }, ink, 1, 'printing line');

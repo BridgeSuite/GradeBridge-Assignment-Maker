@@ -222,19 +222,52 @@ await check('THE IDENTITY WARNING and THE PRINTING RULE are on the page, legible
   assert(/\/Helvetica-Bold/.test(pdfBytes), 'no bold face on the page; the identity warning is meant to be bold');
 });
 
-// WORKORDER_AM_ONE_ANSWER_PER_PAGE_2026-09-25. Appended to the existing bold
-// line, never a new line: a new line pushes the box down, moves 5F0B10BC and
-// makes this GBGEN2. So the sentence is held literally, on ONE line at y 37.0,
-// at the same 10 pt bold, and inside the box's width.
-await check('"One answer per page." is on the bold line, one line, same place and size', () => {
-  const line = 'Write only inside the box. Anything outside it is not collected. One answer per page.';
+// The page's final wording (WORKORDER_AM_PAGE_FINAL_WORDING_2026-09-25, which
+// replaced this morning's "One answer per page."). Nothing is ever added as a
+// new line: a new line pushes the box down, moves 5F0B10BC and makes this
+// GBGEN2. So every string is held literally, at its position and size.
+const inkOf = (what) => {
+  const all = page.ink.filter(x => x.what === what);
+  assertEqual(all.length, 1, `${what} was not drawn exactly once`);
+  return all[0];
+};
+const ptOf = (b) => (b.y1 - b.y0) / (1.2 * 25.4 / 72);
+
+await check('FINAL: the bold line says "One part per page.", one line, at y 37.0, 10 pt bold', () => {
+  const line = 'Write only inside the box. Anything outside it is not collected. One part per page.';
   assertEqual(gp.GENERIC_OUTSIDE_BOX_TEXT, line, 'the outside-box line is not the approved text');
   assert(pdfStrings.includes(line), `the line is not printed whole on one line\n          found: ${JSON.stringify(pdfStrings)}`);
-  const b = page.ink.find(x => x.what === 'outside-box line');
-  assertEqual(b.y0, 37.0, 'the line moved');
-  assert(Math.abs((b.y1 - b.y0) / (1.2 * 25.4 / 72) - 10) < 1e-6, 'the line is not 10 pt');
-  assert(b.x1 <= gp.GENERIC_BOX_MM.x1, `the line runs to x ${b.x1.toFixed(2)}, past the box`);
-  assertEqual(page.ink.filter(x => x.what === 'outside-box line').length, 1, 'the line was drawn more than once');
+  assert(!pdfStrings.some(t => /One answer per page/.test(t)), 'the superseded wording is still printed');
+  const b = inkOf('outside-box line');
+  assertEqual([b.x0, b.y0], [12.0, 37.0], 'the line moved');
+  assert(Math.abs(ptOf(b) - 10) < 1e-6, 'the line is not 10 pt');
+});
+
+// The note could not go on the fields line: that line ends at x ~136 mm and the
+// QR keep-out starts at 166, leaving ~30 mm for a note that needs ~48 even at
+// 8 pt. The work order's fallback is the bold line, which "One part per page."
+// shortened. It is a note, so it is smaller and lighter than the line it follows.
+await check('FINAL: "(a long answer can run to more pages)" sits on the bold line, 8 pt, lighter, inside the box width', () => {
+  const note = '(a long answer can run to more pages)';
+  assertEqual(gp.GENERIC_MORE_PAGES_NOTE, note, 'the note is not the approved text');
+  assert(pdfStrings.includes(note), `the note is not printed whole\n          found: ${JSON.stringify(pdfStrings)}`);
+  const n = inkOf('more-pages note'), bold = inkOf('outside-box line');
+  assert(Math.abs(ptOf(n) - 8) < 1e-6, `the note is ${ptOf(n).toFixed(1)} pt, not 8`);
+  assert(n.x0 > bold.x1, 'the note does not follow the bold line');
+  assert(n.y0 >= bold.y0 && n.y1 <= bold.y1, 'the note is not on the bold line\'s row');
+  assert(n.x1 <= gp.GENERIC_BOX_MM.x1, `the note runs to x ${n.x1.toFixed(2)}, past the box`);
+  assert(/0\.35\d* g/.test(pdfBytes), 'the note is not drawn in the lighter grey');
+});
+
+await check('FINAL: the fields line is unchanged and carries no note; nothing below the bold line moved', () => {
+  assertEqual(gp.GENERIC_FIELDS_TEXT, 'Problem __________   Part __________   Page ______ of ______', 'the fields line changed');
+  const f = inkOf('fields line');
+  assertEqual([f.x0, f.y0], [12.0, 28.0], 'the fields line moved');
+  assert(Math.abs(ptOf(f) - 12) < 1e-6, 'the fields line is not 12 pt');
+  const at = (what) => { const b = inkOf(what); return [b.x0, b.y0, Math.round(ptOf(b) * 1000) / 1000]; };
+  assertEqual([at('identity line'), at('pencil line'), at('printing line')],
+    [[12.0, 42.5, 10], [12.0, 47.6, 9], [12.0, 51.6, 9]], 'a line below the bold line moved or changed size');
+  assertEqual(gp.GENERIC_PRINTED_STRINGS.length, 7, 'the page prints a string it did not before, or lost one');
 });
 
 await check('ruling 3: the pencil sentence is the work order\'s, and deliberately not today\'s', () => {
