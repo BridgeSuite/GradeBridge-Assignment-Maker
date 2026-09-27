@@ -10,17 +10,31 @@ import { useRescaleChoice } from '../components/RescaleChoice';
 import { useChoice } from '../components/ChoicePanel';
 import { askDelete, askImportCollision } from '../services/questions';
 import { HelpLink, useOpenHelp } from '../components/HelpGuide';
-import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode, Printer } from 'lucide-react';
+import { Plus, FileText, Download, Trash2, Edit2, Eye, Upload, Copy, Sparkles, FileCode, Printer, FolderOpen } from 'lucide-react';
 import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssignment';
 import { parseMdToAssignment } from '../services/mdParserService';
 import { adoptAssignmentKind, adoptSheet, stripRetiredFields } from '../services/importNotices';
 import { assignmentKindProblem } from '../services/inputModeService';
 import { pointsAreMarked, pointsGridProblems } from '../services/pointsService';
-import { collectFigures, unreferencedNotice } from '../services/figureImport';
+import { altTextNotice, collectFigures, resolveImagePaths, unreferencedNotice } from '../services/figureImport';
+import { ChosenFile, ImportRefusal, chosenFromDrop, chosenFromFile, gatherImport } from '../services/mdImport';
 import { hasFigureRef, referencedFigureIds } from '../services/figureRefs';
-import JSZip from 'jszip';
 import { degradeRetiredTypes } from '../services/retiredTypes';
 import { isEncoded, decryptJson } from '../services/cryptoService';
+
+// What an instructor reads on the import controls. The folder is the primary
+// route: it is what an author has, and it is the one thing the Open dialog
+// could not otherwise hand over in one action
+// (WORKORDER_AM_FIGURES_AND_FOLDER_IMPORT_2026-09-27 §4).
+export const IMPORT_FOLDER_TITLE =
+  'Choose the folder that holds your assignment .md and its images. Everything in it comes in together.';
+export const IMPORT_FILES_TITLE =
+  'Choose a .md together with its images, or a zip holding both.';
+export const IMPORT_HINT =
+  'Write figures as ordinary markdown, ![what the drawing shows](figs/drawing.png), then import the '
+  + 'folder that holds the .md and its images, or drag the folder onto this page.';
+export const DROP_HEADLINE = 'Drop to import';
+export const DROP_DETAIL = 'The folder that holds your assignment .md and its images, a .md with its images, or a zip.';
 
 const Dashboard: React.FC = () => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -28,6 +42,7 @@ const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mdFileInputRef = useRef<HTMLInputElement>(null);
+  const mdFolderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadAssignments();
@@ -223,71 +238,106 @@ const Dashboard: React.FC = () => {
     mdFileInputRef.current?.click();
   };
 
-  /**
-   * Import a `.md`, and the `figures/` it refers to when it refers to any.
-   *
-   * THREE WAYS IN, ONE PATH THROUGH. The input takes a single `.md`, a zip
-   * holding the `.md` and `figures/`, or a multi-selection of both. Whichever
-   * arrives, it is reduced to one markdown text plus a list of candidate files
-   * before anything is parsed, so there is one import to reason about rather
-   * than three.
-   *
-   * A `.md` with no figure blocks needs nothing else and imports alone, exactly
-   * as it always has.
-   */
+  const handleMdFolderClick = () => {
+    mdFolderInputRef.current?.click();
+  };
+
+  const resetImportInputs = () => {
+    if (mdFileInputRef.current) mdFileInputRef.current.value = '';
+    if (mdFolderInputRef.current) mdFolderInputRef.current.value = '';
+  };
+
   const handleMdFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const chosen = Array.from(event.target.files || []);
-    if (!chosen.length) return;
+    const chosen = Array.from(event.target.files || []).map(f => chosenFromFile(f));
+    if (chosen.length) void importChosen(chosen);
+  };
+
+  // WORKORDER_AM_FIGURES_AND_FOLDER_IMPORT_2026-09-27 \u00a74: dragging the folder
+  // onto the page is the other gesture an author reaches for unprompted.
+  const [dragging, setDragging] = useState(false);
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    if (!dragging) setDragging(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setDragging(false);
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    if (!Array.from(e.dataTransfer.types).includes('Files')) return;
+    e.preventDefault();
+    setDragging(false);
+    const items = e.dataTransfer.items;
     void (async () => {
       try {
-        const candidates: Array<{ path: string; bytes: Uint8Array }> = [];
-        let content: string | null = null;
+        const chosen = await chosenFromDrop(items);
+        if (chosen.length) await importChosen(chosen);
+      } catch (error) {
+        console.error(error);
+        alert(`Failed to import: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    })();
+  };
 
-        for (const f of chosen) {
-          const name = ((f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name);
-          if (/\.zip$/i.test(name)) {
-            const zip = await JSZip.loadAsync(await f.arrayBuffer());
-            for (const entry of Object.values(zip.files)) {
-              if (entry.dir) continue;
-              if (/\.md$/i.test(entry.name)) {
-                if (content !== null) throw new Error(
-                  'That zip holds more than one .md file. It should hold exactly one assignment.');
-                content = await entry.async('string');
-              } else {
-                candidates.push({ path: entry.name, bytes: await entry.async('uint8array') });
-              }
-            }
-          } else if (/\.md$/i.test(name)) {
-            if (content !== null) throw new Error('Choose one .md file at a time.');
-            content = await f.text();
-          } else {
-            candidates.push({ path: name, bytes: new Uint8Array(await f.arrayBuffer()) });
-          }
-        }
-
-        if (content === null) throw new Error('No .md file was selected.');
+  /**
+   * Import a `.md`, and the figures it refers to when it refers to any.
+   *
+   * FOUR WAYS IN, ONE PATH THROUGH. A chosen folder, a dropped folder, several
+   * files chosen by hand, or a zip. Whichever arrives, `gatherImport` reduces it
+   * to one markdown text, its path, and the files that came with it before
+   * anything is parsed, so there is one import to reason about.
+   *
+   * A `.md` with no figures needs nothing else and imports alone, exactly as it
+   * always has.
+   */
+  const importChosen = async (chosen: ChosenFile[]) => {
+    {
+      try {
+        const { content, mdPath, candidates, setAside } = await gatherImport(chosen);
         // Retired type tags degrade to Text rather than failing the import; the
         // warning names the sub-part so the instructor can re-pick its type.
         const warnings: string[] = [];
-        const assignment = parseMdToAssignment(content, warnings);
+        let assignment = parseMdToAssignment(content, warnings);
 
-        // The figures the file refers to, matched to the files that came with
-        // it. Refused rather than guessed: a block with no file, two files for
-        // one id, or a file that fails a guard all stop the import, and every
-        // problem is listed at once so the folder is fixed in one pass.
+        // The figures the file refers to, in either form, matched to the files
+        // that came with it. Refused rather than guessed: a figure with no file,
+        // a name that fits two files, or a file that fails a guard all stop the
+        // import, and every problem is listed at once so the folder is fixed in
+        // one pass. Nothing is stored, and nothing is ever drawn as a
+        // placeholder in place of a missing drawing.
+        const figureProblems: string[] = [];
+        let figureCount = 0;
+        let usedByBlocks: string[] = [];
         if (hasFigureRef(assignment.problems.map(p => p.description || '').join('\n'))) {
           const { figures, problems, unreferenced } = await collectFigures(assignment, candidates);
-          if (problems.length) {
-            alert(['This file was not imported.', '',
-              `It refers to ${referencedFigureIds(assignment).length} figure(s), and:`, '',
-              ...problems.map(p => `  \u2022 ${p}`), '',
-              'Choose the .md together with its figures/ folder, or a zip holding both.',
-            ].join('\n'));
-            if (mdFileInputRef.current) mdFileInputRef.current.value = '';
-            return;
-          }
+          figureCount += referencedFigureIds(assignment).length;
+          figureProblems.push(...problems);
           assignment.figures = figures;
-          if (unreferenced.length) warnings.push(unreferencedNotice(unreferenced));
+          usedByBlocks = unreferenced;
+        }
+        const images = await resolveImagePaths(assignment, candidates, mdPath);
+        figureCount += images.resolved;
+        figureProblems.push(...images.problems);
+        if (figureProblems.length) {
+          alert(['This was not imported.', '',
+            `It refers to ${figureCount} figure${figureCount === 1 ? '' : 's'}, and:`, '',
+            ...figureProblems.map(p => `  \u2022 ${p}`), '',
+            'Choose the folder that holds the .md and its images, or drag it onto this page.',
+          ].join('\n'));
+          resetImportInputs();
+          return;
+        }
+        assignment = images.assignment;
+        // A file an image line used is not "unreferenced" merely because no
+        // figure block named it.
+        const unreferenced = usedByBlocks.filter(u => !images.usedPaths.some(p => u.includes(p)));
+        if (unreferenced.length) warnings.push(unreferencedNotice(unreferenced));
+        if (images.usedPaths.length) warnings.push(altTextNotice(images.resolved));
+        if (setAside.length) {
+          warnings.push(`Imported ${mdPath}. ${setAside.length === 1 ? 'This .md was' : 'These .md files were'} `
+            + `set aside, because ${setAside.length === 1 ? 'it is' : 'they are'} not an assignment: `
+            + `${setAside.join(', ')}.`);
         }
 
         // A reader assignment must be handwritten. Refused rather than
@@ -299,7 +349,7 @@ const Dashboard: React.FC = () => {
           alert(`This file was not imported.\n\n${kindProblem}\n\n`
             + 'In the file: **Kind:** reader needs **Input:** handwritten above it. '
             + 'An assignment with no **Input:** line is electronic.');
-          if (mdFileInputRef.current) mdFileInputRef.current.value = '';
+          resetImportInputs();
           return;
         }
 
@@ -316,7 +366,7 @@ const Dashboard: React.FC = () => {
           const { choice, notice } = await askImportCollision(ask, `${assignment.courseCode}: ${assignment.title}`);
           if (notice) {
             await tell(notice);
-            if (mdFileInputRef.current) mdFileInputRef.current.value = '';
+            resetImportInputs();
             return;
           }
           if (choice === 'overwrite') {
@@ -331,12 +381,13 @@ const Dashboard: React.FC = () => {
         navigate(`/edit/${assignment.id}`);
       } catch (error) {
         console.error(error);
-        alert(error instanceof Error && error.message
+        alert(error instanceof ImportRefusal ? error.message
+          : error instanceof Error && error.message
           ? `Failed to import: ${error.message}`
           : 'Failed to parse markdown file. Please check the file format matches the GradeBridge assignment spec.');
       }
-      if (mdFileInputRef.current) mdFileInputRef.current.value = '';
-    })();
+      resetImportInputs();
+    }
   };
 
   const handleDuplicate = (e: React.MouseEvent, assignment: Assignment) => {
@@ -366,6 +417,15 @@ const Dashboard: React.FC = () => {
   };
 
   return (
+    <div onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+    {dragging && (
+      <div className="fixed inset-0 z-50 bg-academic-900/60 flex items-center justify-center pointer-events-none">
+        <div className="bg-white rounded-lg shadow-xl px-8 py-6 text-center max-w-md">
+          <p className="text-lg font-medium text-academic-900">{DROP_HEADLINE}</p>
+          <p className="mt-2 text-sm text-academic-600">{DROP_DETAIL}</p>
+        </div>
+      </div>
+    )}
     <Layout 
       title={HOME_SCREEN_NAME}
       action={
@@ -381,6 +441,13 @@ const Dashboard: React.FC = () => {
             type="file"
             accept=".md,.zip,.svg,.png,.jpg,.jpeg" multiple
             ref={mdFileInputRef}
+            className="hidden"
+            onChange={handleMdFileUpload}
+          />
+          <input
+            type="file"
+            {...{ webkitdirectory: '', directory: '' }}
+            ref={mdFolderInputRef}
             className="hidden"
             onChange={handleMdFileUpload}
           />
@@ -400,7 +467,11 @@ const Dashboard: React.FC = () => {
             <Upload className="w-4 h-4 mr-2" />
             Import JSON
           </Button>
-          <Button variant="secondary" onClick={handleMdImportClick}>
+          <Button variant="secondary" onClick={handleMdFolderClick} title={IMPORT_FOLDER_TITLE}>
+            <FolderOpen className="w-4 h-4 mr-2" />
+            Import folder
+          </Button>
+          <Button variant="secondary" onClick={handleMdImportClick} title={IMPORT_FILES_TITLE}>
             <FileCode className="w-4 h-4 mr-2" />
             Import Markdown
           </Button>
@@ -426,12 +497,17 @@ const Dashboard: React.FC = () => {
             <Link to="/create">
               <Button>Create Assignment</Button>
             </Link>
-            <Button variant="secondary" onClick={handleMdImportClick}>
+            <Button variant="secondary" onClick={handleMdFolderClick} title={IMPORT_FOLDER_TITLE}>
+              <FolderOpen className="w-4 h-4 mr-2" />
+              Import folder
+            </Button>
+            <Button variant="secondary" onClick={handleMdImportClick} title={IMPORT_FILES_TITLE}>
               <FileCode className="w-4 h-4 mr-2" />
               Import Markdown
             </Button>
             <Button variant="secondary" onClick={handleImportClick}>Import JSON</Button>
           </div>
+          <p className="mt-4 text-sm text-academic-500 max-w-md mx-auto">{IMPORT_HINT}</p>
 
           {/* Example Assignment CTA */}
           <div className="mt-8 pt-8 border-t border-academic-100">
@@ -513,6 +589,7 @@ const Dashboard: React.FC = () => {
       {rescalePanel}
       {choicePanel}
     </Layout>
+    </div>
   );
 };
 

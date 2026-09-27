@@ -484,12 +484,23 @@ check('referencedFigureIds finds every id an assignment refers to', () => {
       `the message does not say it refuses to choose: ${r.problems[0]}`);
   });
 
-  check('a file that fails a guard is refused, with the guard\'s own message', async () => {
+  check('a file that fails a guard is refused, named, with the guard\'s own message', async () => {
+    // Since 2026-09-27 the guards are format, opens and size (figureGuards.ts):
+    // a file that says it is an SVG and is not one is the case here.
+    const broken = bytesOf('this is not a drawing');
+    const r = await figImport.collectFigures(withOneBlock,
+      [{ path: 'figures/p1-divider.svg', bytes: broken }]);
+    assertEqual(Object.keys(r.figures), [], 'an unreadable figure was collected');
+    assert(/could not be opened/.test(r.problems.join(' ')), `the guard message is missing: ${r.problems}`);
+    assert(r.problems.join(' ').includes('figures/p1-divider.svg'), `the file is not named: ${r.problems}`);
+  });
+
+  check('a colour figure is ACCEPTED: dpi and greyscale do not apply to an assignment figure', async () => {
     const colour = bytesOf('<svg xmlns="http://www.w3.org/2000/svg"><path stroke="#cc2222"/></svg>');
     const r = await figImport.collectFigures(withOneBlock,
       [{ path: 'figures/p1-divider.svg', bytes: colour }]);
-    assertEqual(Object.keys(r.figures), [], 'a colour figure was collected');
-    assert(/colour in it/.test(r.problems.join(' ')), `the guard message is missing: ${r.problems}`);
+    assertEqual(r.problems, [], 'a colour drawing was refused');
+    assertEqual(Object.keys(r.figures), ['p1-divider'], 'the colour drawing was not collected');
   });
 
   check('a file nobody refers to is REPORTED and not stored', async () => {

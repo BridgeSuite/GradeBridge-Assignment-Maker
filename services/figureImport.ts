@@ -24,8 +24,9 @@
 // bytes in the authoring backup that nothing uses.
 
 import { Assignment, FigureFile, FigureMap } from '../types';
-import { FIGURE_FORMATS, FigureFormat, referencedFigureIds } from './figureRefs';
+import { FIGURE_FORMATS, FigureFormat, figureDataUri, referencedFigureIds } from './figureRefs';
 import { figureFileProblems } from './figureGuards';
+import { splitFigures } from './figureBlocks';
 
 /** One candidate file, as it arrived. */
 export interface IncomingFile {
@@ -114,14 +115,197 @@ export const collectFigures = async (
         + 'choose between them, because the wrong choice would be printed onto paper.');
       continue;
     }
-    const [{ file }] = list;
+    const [{ file, path }] = list;
     const bad = await figureFileProblems(file);
-    if (bad.length) { problems.push(...bad.map(p => p.message)); continue; }
+    // Named, so an instructor with three bad files knows which three.
+    if (bad.length) { problems.push(...bad.map(p => `${path}: ${p.message}`)); continue; }
     figures[id] = file;
   }
 
   return { figures, problems, unreferenced };
 };
+
+// =====================================================
+// `![alt](path)`: THE FORM AUTHORS WRITE UNPROMPTED
+// =====================================================
+// WORKORDER_AM_FIGURES_AND_FOLDER_IMPORT_2026-09-27 §5 and §6.
+//
+// An author writes `![Transmission line circuit](figs/Fig-4.png)` because that
+// is what markdown means everywhere else. The app used to store it and draw
+// `[figure: ...]`, since `safeImageUrl` rightly refuses a relative path: at
+// render time it would resolve against the app's own site, not the author's
+// folder. So the path is resolved HERE, once, at import, and the line is
+// rewritten to a `data:` URI. Every surface downstream sees exactly what an
+// author who typed the data URI by hand would have produced, and needs no change.
+//
+// Matching is the same principle as `collectFigures` above: **never pick one.**
+//   1. the path as written, relative to the folder the `.md` is in;
+//   2. the path as written, wherever it sits under what was chosen, when
+//      exactly one file ends with it;
+//   3. the file name alone, when exactly one file has it.
+// Two or more at any step is a refusal naming them all. None at all is a
+// refusal naming the path. There is no placeholder: a drawing that is missing
+// must stop the import, not reach a student as a hole in the question.
+
+/** A url that already stands on its own, and is left exactly as written. */
+const SELF_CONTAINED_URL_RE = /^(data:|https?:\/\/)/i;
+
+/** `a\b/./c/../d.png` -> `a/b/d.png`. Segments only, no leading slash. */
+export const normalizeImportPath = (path: string): string => {
+  const out: string[] = [];
+  for (const seg of path.replace(/\\/g, '/').split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') { out.pop(); continue; }
+    out.push(seg);
+  }
+  return out.join('/');
+};
+
+const baseName = (path: string): string => normalizeImportPath(path).split('/').pop() || '';
+
+const decodeUrlPath = (url: string): string => {
+  try { return decodeURIComponent(url); } catch { return url; }
+};
+
+/** Every `![alt](url)` in the assignment's text that points at a file, with where it is. */
+export const imagePathRefs = (assignment: Pick<Assignment, 'problems'>):
+  Array<{ where: string; alt: string; url: string }> => {
+  const refs: Array<{ where: string; alt: string; url: string }> = [];
+  const scan = (text: string | undefined, where: string) => {
+    for (const seg of splitFigures(text || '')) {
+      if (seg.kind === 'figure' && seg.figure.form === 'image'
+        && !SELF_CONTAINED_URL_RE.test(seg.figure.url)) {
+        refs.push({ where, alt: seg.figure.alt, url: seg.figure.url });
+      }
+    }
+  };
+  assignment.problems.forEach((p, i) => {
+    scan(p.description, `Problem ${i + 1}`);
+    p.subsections.forEach((s, j) => scan(s.description, `Problem ${i + 1}(${String.fromCharCode(97 + j)})`));
+  });
+  return refs;
+};
+
+export type ImageMatch =
+  | { kind: 'found'; path: string }
+  | { kind: 'missing' }
+  | { kind: 'ambiguous'; paths: string[] };
+
+/** Find the one file a reference means, or say why there is not exactly one. */
+export const matchImagePath = (url: string, mdPath: string, candidates: string[]): ImageMatch => {
+  const ref = normalizeImportPath(decodeUrlPath(url));
+  const mdDir = normalizeImportPath(mdPath).split('/').slice(0, -1).join('/');
+  const norm = candidates.map(c => ({ path: c, n: normalizeImportPath(c) }));
+  const decide = (hits: typeof norm): ImageMatch | null =>
+    hits.length === 1 ? { kind: 'found', path: hits[0].path }
+      : hits.length > 1 ? { kind: 'ambiguous', paths: hits.map(h => h.path) }
+      : null;
+
+  const target = normalizeImportPath(mdDir ? `${mdDir}/${ref}` : ref);
+  return decide(norm.filter(c => c.n === target))
+    ?? decide(norm.filter(c => c.n === ref || c.n.endsWith(`/${ref}`)))
+    ?? decide(norm.filter(c => baseName(c.n).toLowerCase() === baseName(ref).toLowerCase()))
+    ?? { kind: 'missing' };
+};
+
+const formatFromName = (path: string): string => {
+  const base = baseName(path);
+  const dot = base.lastIndexOf('.');
+  const ext = dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
+  return ext === 'jpeg' ? 'jpg' : ext;
+};
+
+export interface ImagePathResult {
+  /** The assignment with every file reference rewritten to a data: URI. Use only when `problems` is empty. */
+  assignment: Assignment;
+  problems: string[];
+  /** How many references pointed at a file. */
+  resolved: number;
+  /** The files that were used, as they arrived. */
+  usedPaths: string[];
+}
+
+/**
+ * Resolve every `![alt](path)` against the files that arrived with the `.md`.
+ * Every problem is collected before anything is returned, as `collectFigures` does.
+ */
+export const resolveImagePaths = async (
+  assignment: Assignment,
+  incoming: IncomingFile[],
+  mdPath: string,
+): Promise<ImagePathResult> => {
+  const refs = imagePathRefs(assignment);
+  const problems: string[] = [];
+  const uris = new Map<string, string>();
+  const reported = new Set<string>();
+  const usedPaths = new Set<string>();
+  const byPath = new Map(incoming.map(f => [f.path, f]));
+  const paths = incoming.map(f => f.path);
+
+  for (const ref of refs) {
+    if (uris.has(ref.url) || reported.has(ref.url)) continue;
+    reported.add(ref.url);
+    const m = matchImagePath(ref.url, mdPath, paths);
+    if (m.kind === 'missing') {
+      problems.push(`${ref.where}: the image ${ref.url} is not among the files chosen.`);
+      continue;
+    }
+    if (m.kind === 'ambiguous') {
+      problems.push(`${ref.where}: the image ${ref.url} could be any of ${m.paths.join(', ')}. `
+        + 'Keep one, or write its path in full. The app will not choose between them.');
+      continue;
+    }
+    const item = byPath.get(m.path)!;
+    const file: FigureFile = {
+      format: formatFromName(m.path) as FigureFile['format'],
+      base64: toBase64(item.bytes),
+      filename: baseName(m.path),
+    };
+    const bad = await figureFileProblems(file);
+    if (bad.length) { problems.push(...bad.map(p => `${m.path}: ${p.message}`)); continue; }
+    uris.set(ref.url, figureDataUri(file));
+    usedPaths.add(m.path);
+  }
+
+  const rewrite = (text: string): string => {
+    if (!text) return text;
+    return splitFigures(text).map(seg => {
+      if (seg.kind === 'text') return seg.value;
+      if (seg.figure.form !== 'image') return seg.source;
+      const uri = uris.get(seg.figure.url);
+      return uri ? seg.source.replace(`(${seg.figure.url})`, `(${uri})`) : seg.source;
+    }).join('');
+  };
+
+  return {
+    assignment: {
+      ...assignment,
+      problems: assignment.problems.map(p => ({
+        ...p,
+        description: rewrite(p.description),
+        subsections: p.subsections.map(s => ({ ...s, description: rewrite(s.description) })),
+      })),
+    },
+    problems,
+    resolved: refs.length,
+    usedPaths: [...usedPaths],
+  };
+};
+
+/**
+ * Whether a file that arrived with the `.md` is worth reading: anything that
+ * could be a figure, and anything the text names. A chosen folder may hold a
+ * PDF, a LaTeX source and a zip beside the assignment, and there is no reason
+ * to read those.
+ */
+export const mightBeNeeded = (path: string, mdText: string): boolean =>
+  /\.(svg|png|jpe?g)$/i.test(path) || mdText.includes(baseName(path));
+
+/** What the instructor is told once images were matched: the alt text is the grader's only view of them. */
+export const altTextNotice = (count: number): string =>
+  `${count} image${count === 1 ? ' was' : 's were'} matched to the files you chose and stored in the `
+  + 'assignment. A grader never sees a PNG or JPG, only its alt text (the words in the square '
+  + 'brackets), so write that as a description of what the drawing shows, not as a label.';
 
 /** What the instructor is told about files nobody referred to. */
 export const unreferencedNotice = (unreferenced: string[]): string =>

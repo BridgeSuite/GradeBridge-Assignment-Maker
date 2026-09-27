@@ -131,9 +131,9 @@ const smallPng = makePng(200, 50, greyPixel);
 const truegreyPng = makePng(BIG.w, BIG.h, greyPixel, 0);
 
 const problemsOf = async (file, mod = guards) =>
-  (await mod.figureFileProblems(file)).map(p => `${p.guard}: ${p.message}`);
+  (await mod.figurePrintProblems(file)).map(p => `${p.guard}: ${p.message}`);
 const guardsHit = async (file, mod = guards) =>
-  (await mod.figureFileProblems(file)).map(p => p.guard);
+  (await mod.figurePrintProblems(file)).map(p => p.guard);
 
 // ---------------------------------------------------------------------------
 // The thresholds are named and computed, not hardcoded pixels
@@ -167,7 +167,7 @@ await check('a greyscale-typed PNG passes without needing its pixels read', asyn
 });
 
 await check('GREYSCALE: a colour PNG is refused, and the refusal is convertible', async () => {
-  const found = await guards.figureFileProblems(asFile(colourPng, 'png', 'colour.png'));
+  const found = await guards.figurePrintProblems(asFile(colourPng, 'png', 'colour.png'));
   const grey = found.find(p => p.guard === 'greyscale');
   assert(grey, `a colour PNG passed: ${found.map(p => p.guard).join(', ') || '(no problems)'}`);
   assert(grey.convertible === true, 'the refusal does not offer conversion');
@@ -198,7 +198,7 @@ await check('GREYSCALE: just outside the tolerance is refused', async () => {
 });
 
 await check('RESOLUTION: a PNG below 300 dpi at printed size is refused', async () => {
-  const found = await guards.figureFileProblems(asFile(smallPng, 'png', 'small.png'));
+  const found = await guards.figurePrintProblems(asFile(smallPng, 'png', 'small.png'));
   const res = found.find(p => p.guard === 'resolution');
   assert(res, `a 200x50 figure passed the resolution guard`);
   // The two numbers an instructor can act on: what it is, and what is needed.
@@ -214,7 +214,7 @@ await check('SIZE: a figure over the cap is refused', async () => {
 
 await check('SIZE: the refusal gives the size, the limit, and what to do', async () => {
   const big = { format: 'png', base64: Buffer.alloc(guards.FIGURE_MAX_BYTES + 1).toString('base64'), filename: 'huge.png' };
-  const found = await guards.figureFileProblems(big);
+  const found = await guards.figurePrintProblems(big);
   const size = found.find(p => p.guard === 'size');
   assert(/MB/.test(size.message), `the message does not give a size: ${size.message}`);
   assert(/limit/.test(size.message), `the message does not name the limit: ${size.message}`);
@@ -222,14 +222,14 @@ await check('SIZE: the refusal gives the size, the limit, and what to do', async
 });
 
 await check('FORMAT: anything but SVG, PNG or JPG is refused, and the message lists them', async () => {
-  const found = await guards.figureFileProblems({ format: 'gif', base64: 'AA==', filename: 'x.gif' });
+  const found = await guards.figurePrintProblems({ format: 'gif', base64: 'AA==', filename: 'x.gif' });
   assert(found.length === 1 && found[0].guard === 'format', 'a GIF was not refused on format');
   assert(/SVG, PNG or JPG/.test(found[0].message), `the message does not list the formats: ${found[0].message}`);
 });
 
 await check('COLOUR: an SVG that paints in colour is refused', async () => {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0" stroke="#cc2222"/></svg>';
-  const found = await guards.figureFileProblems(asFile(Buffer.from(svg), 'svg', 'c.svg'));
+  const found = await guards.figurePrintProblems(asFile(Buffer.from(svg), 'svg', 'c.svg'));
   const colour = found.find(p => p.guard === 'colour');
   assert(colour, 'a colour SVG passed');
   assert(/colour in it/.test(colour.message), `the message does not say what is wrong: ${colour.message}`);
@@ -258,7 +258,7 @@ await check('JPEG: a three-channel JPEG is refused as colour', async () => {
     0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x02, 0x58, 0x09, 0x60, 0x03,
     0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
   ]);
-  const found = await guards.figureFileProblems(asFile(jpg, 'jpg', 'c.jpg'));
+  const found = await guards.figurePrintProblems(asFile(jpg, 'jpg', 'c.jpg'));
   const grey = found.find(p => p.guard === 'greyscale');
   assert(grey, `a 3-channel JPEG passed: ${found.map(p => p.guard).join(', ') || '(none)'}`);
   assert(grey.convertible === true, 'the JPEG refusal does not offer conversion');
@@ -274,17 +274,60 @@ await check('JPEG: a single-channel JPEG passes', async () => {
 });
 
 await check('UNREADABLE: a file that is not the format it claims is refused, not assumed grey', async () => {
-  const found = await guards.figureFileProblems(asFile(Buffer.from('not a png at all, really not'), 'png', 'x.png'));
+  const found = await guards.figurePrintProblems(asFile(Buffer.from('not a png at all, really not'), 'png', 'x.png'));
   assert(found.some(p => p.guard === 'unreadable'), 'a non-PNG claiming to be a PNG was accepted');
 });
 
 await check('UNREADABLE: an interlaced PNG is refused rather than passed unchecked', async () => {
   const png = Buffer.from(makePng(BIG.w, BIG.h, colourPixel));
   png[8 + 8 + 12] = 1; // IHDR interlace byte
-  const found = await guards.figureFileProblems(asFile(png, 'png', 'i.png'));
+  const found = await guards.figurePrintProblems(asFile(png, 'png', 'i.png'));
   assert(found.some(p => p.guard === 'unreadable'),
     'an interlaced PNG was judged without its pixels being read');
 });
+
+// ---------------------------------------------------------------------------
+// THE ASSIGNMENT-FIGURE GUARDS: format, opens, size. Nothing else.
+// ---------------------------------------------------------------------------
+// WORKORDER_AM_FIGURES_AND_FOLDER_IMPORT_2026-09-27 §7. The student's copy of
+// an assignment is the instructor's own document now; in this app a figure is
+// for the author to see. The print rules above stay, in `figurePrintProblems`,
+// and nothing calls them.
+{
+  const display = async (file) => (await guards.figureFileProblems(file)).map(p => p.guard);
+
+  await check('DISPLAY: a colour, low-resolution PNG is accepted', async () => {
+    assertEqual(await display(asFile(makePng(200, 50, colourPixel), 'png', 'c.png')), [],
+      'dpi or greyscale is still applied to an assignment figure');
+  });
+
+  await check('DISPLAY: a colour three-channel JPEG and a colour SVG are accepted', async () => {
+    const jpg = Buffer.from([
+      0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x32, 0x00, 0xc8, 0x03,
+      0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+    ]);
+    assertEqual(await display(asFile(jpg, 'jpg', 'c.jpg')), [], 'a colour JPEG was refused');
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><path stroke="#cc2222"/></svg>';
+    assertEqual(await display(asFile(Buffer.from(svg), 'svg', 'c.svg')), [], 'a colour SVG was refused');
+  });
+
+  await check('DISPLAY: format, unreadable and size still refuse', async () => {
+    assertEqual(await display({ format: 'gif', base64: 'AA==', filename: 'x.gif' }), ['format'], 'a GIF passed');
+    assertEqual(await display(asFile(Buffer.from('not a png at all, really not'), 'png', 'x.png')),
+      ['unreadable'], 'a non-PNG passed');
+    assertEqual(await display(asFile(Buffer.from('not a drawing'), 'svg', 'x.svg')),
+      ['unreadable'], 'a non-SVG passed');
+    const big = { format: 'png', base64: Buffer.alloc(guards.FIGURE_MAX_BYTES + 1).toString('base64'), filename: 'h.png' };
+    assert((await display(big)).includes('size'), 'an oversized figure passed');
+  });
+
+  await check('DISPLAY: nothing in the app calls the print guards', () => {
+    for (const rel of ['services/figureImport.ts', 'services/figureConvert.ts', 'pages/Editor.tsx', 'pages/Dashboard.tsx']) {
+      assert(!readFileSync(join(REPO, rel), 'utf8').includes('figurePrintProblems'),
+        `${rel} applies the print guards to an assignment figure`);
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // The messages are written for an instructor
@@ -309,7 +352,7 @@ await check('no refusal message explains the pipeline to the instructor', async 
     asFile(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><path stroke="#cc2222"/></svg>'), 'svg', 'c.svg'),
     asFile(Buffer.from('not a png at all, really not'), 'png', 'x.png'),
   ]) {
-    for (const p of await guards.figureFileProblems(file)) messages.push(p.message);
+    for (const p of await guards.figurePrintProblems(file)) messages.push(p.message);
   }
   assert(messages.length >= 6, `only ${messages.length} messages were collected`);
   for (const m of messages) {

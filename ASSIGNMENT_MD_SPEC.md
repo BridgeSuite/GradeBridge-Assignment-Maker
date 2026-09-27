@@ -181,11 +181,19 @@ that changes meaning in a path is allowed.
 both together, as a zip. Import refuses a block whose file is missing, refuses two files with the
 same id, and reports — without refusing — a file no block refers to.
 
-**Raster figures must be greyscale and at least 300 dpi at printed size**, and no figure may exceed
-1 MB. Colour is refused for the same reason colour SVG is: the scans are greyscale, and that is
-what proves the marking stage never altered a student's work. The dpi floor is computed from the
-space the page format actually reserves for a figure, not from a fixed pixel count. Nothing is ever
-converted silently — a colour image is refused and an explicit convert-to-greyscale is offered.
+**The guards on a figure file are: it is SVG, PNG or JPG; it opens; and it is no more than 1 MB.**
+The same three apply to a figure block and to an `![alt](path)` image, on every path
+(`figureFileProblems` in `services/figureGuards.ts`). A refusal names the file.
+
+*Changed 2026-09-27 (`WORKORDER_AM_FIGURES_AND_FOLDER_IMPORT_2026-09-27` §7). This paragraph used
+to require raster figures to be greyscale and at least 300 dpi at printed size.* Those rules were
+written when this app printed the page a student wrote on and that page was scanned back, where
+colour is what proves the marking stage did not alter a student's work. The student's copy of an
+assignment is now the instructor's own document, and in this app a figure exists so the author can
+see it: the editor preview, `assignment.html`, the grader document. **Dpi and greyscale do not apply
+to an assignment figure.** They are kept unchanged in `figurePrintProblems`, which nothing calls,
+because whether the printed-sheet figure path keeps them is an open question, not a decision taken
+here. EEC130A Homework 1's three figures, colour and between 173 and 251 dpi, import as they are.
 
 **The two inline forms, the ` ```svg ` fence and the `data:` image line, remain valid and are
 unchanged.** **Extract figures** converts inline SVG into blocks plus files and changes nothing a
@@ -1024,15 +1032,18 @@ Find $V_{out}/V_{in}$ for the circuit shown.
 - Give it a **`<title>`** — it names the drawing for a screen reader, and it is what the plain-text placeholder says where a drawing cannot be drawn: `[figure: divider circuit for Problem 1]`. Without one the placeholder is a bare `[figure]`.
 - The drawing is inlined into the page, so `<script>`, `on*` handlers and `javascript:` URLs are stripped on the way in.
 
-**A raw image**, as the fallback for anything that is neither a circuit nor a plot: a Markdown image **alone on its own line**.
+**An image**, written as ordinary markdown: a Markdown image **alone on its own line**, pointing at a file beside the `.md`.
 
 ```markdown
-![measured magnitude response](data:image/png;base64,iVBORw0KGgo...)
+![Transmission line circuit with source, line of characteristic impedance Z0, and load ZL](figs/Fig-4.png)
 ```
 
-- The URL should be a **`data:` URI**, so the `.md` stays one self-contained file and `assignment.html` still opens with no network. An absolute `http(s)` URL renders on screen but breaks that guarantee, and it cannot be drawn into `assignment.pdf` at all.
-- There are **no asset paths**: the Assignment Maker is a browser app that imports a single `.md` and has nothing to resolve a relative path against.
+- **Import the folder that holds the `.md` and its images** (Dashboard → **Import folder**, or drag the folder onto the page). Choosing the `.md` and its images together, or a zip holding both, also works. The path is resolved **once, at import**, and the line is rewritten to a `data:` URI, so the stored assignment, `Export .md`, `assignment.html` and the student's file are all self-contained. *Changed 2026-09-27: this bullet used to say there are no asset paths.*
+- **Matching never picks one.** The path is matched as written, relative to the `.md`; failing that, by its path under what was chosen; failing that, by file name alone. Each step is used only when **exactly one** file fits. A name that fits two files is refused, naming both. A reference with no file is refused, naming the path. Every problem is listed together and nothing is imported, so one pass fixes the folder. **No placeholder is ever stored in place of a missing drawing.**
+- **The alt text is the grader's only view of the image.** The rubric reduces every figure to words and never carries the drawing. An SVG has `<title>` and `<desc>`; a PNG or JPG has neither, so the words in the square brackets are all a grader, or an AI reader, ever sees of it. **Write them as a description of what the drawing shows, not as a label.** Use a ` ```figure ` block (§ Figure blocks) when the title and description should differ from the alt text.
+- A `data:` URI, or an absolute `http(s)` URL, is left exactly as written. An `http(s)` URL renders on screen but breaks self-containment, and it cannot be drawn into `assignment.pdf` at all.
 - `![alt](url)` *inside* a sentence is prose, not a figure. It must be the whole line.
+- **One assignment per import.** A folder may also hold a README and notes: a `.md` is the assignment when its first line is `# CODE: Title` and it has at least one `## Problem N:` heading. Any other `.md` is set aside and named. Two assignments in one folder are refused, naming both.
 
 ### The parser must lift the figure out first — this is a hard requirement
 

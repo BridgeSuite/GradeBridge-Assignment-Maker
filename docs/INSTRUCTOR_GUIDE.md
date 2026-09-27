@@ -14,9 +14,19 @@ assignment in this app, which you then export.
 and title, answer the two questions in *Two things to choose first* below, and
 add your problems.
 
-**Import a file you already have.** *Import Markdown* takes a `.md` written in
-this app's format. *Import JSON* takes a file this app exported earlier — use
-the one whose name ends `_authoring_backup.json`, which is the complete copy.
+**Import a file you already have.** *Import folder* takes the folder that holds
+your `.md` and its images, and everything inside comes in together. You can also
+drag the folder onto the dashboard. *Import Markdown* takes a `.md` with its
+images chosen alongside it, or a zip holding both. *Import JSON* takes a file this
+app exported earlier — use the one whose name ends `_authoring_backup.json`,
+which is the complete copy.
+
+**Figures in your `.md` are ordinary markdown**:
+`![what the drawing shows](figs/drawing.png)` on a line of its own. The image is
+stored in the assignment when you import. If a file is missing, or a name could
+be two different files, nothing is imported and you are told every problem at
+once. Write the words in the square brackets as a description of the drawing:
+for a PNG or JPG they are the only thing a grader ever reads of it.
 
 **Have Claude Code write the file.** Give it your lab manual or problem sheet and
 ask for an assignment `.md`; then import that. This is usually the quickest way
@@ -144,16 +154,9 @@ changes. If you exported the assignment as a `.md`, the drawings are in a
 `figures` folder beside it — replacing a file there works too, and you then
 import the `.md` and the folder together.
 
-**Two rules for an image:**
-
-- **Black, white and grey only.** No colour.
-- **Large enough to print clearly.** A small image looks fine on screen and
-  prints blurry.
-
-If you choose a colour image, the app tells you and offers
-**Convert to greyscale**. Press it and the converted picture appears on the card so you can
-see what you got; press **Cancel** and nothing changes. The app never converts
-anything without being asked.
+**An image must be an SVG, PNG or JPG, open cleanly, and be no more than 1 MB.**
+Colour and resolution are up to you: your students get the question from your
+own document, and in this app a figure is there for you and your graders to see.
 
 **Title and description.** Every figure has both, on its card. The description is
 used when the drawing cannot be shown — write what a student would see if they

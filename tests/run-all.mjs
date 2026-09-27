@@ -34,6 +34,7 @@ const SUITES = [
   'deploy-gate-tests.mjs',
   'figure-ref-tests.mjs',
   'figure-guard-tests.mjs',
+  'figure-path-import-tests.mjs',
   'finalize-tests.mjs',
   'figure-extract-tests.mjs',
   'figure-swap-e2e-tests.mjs',

@@ -303,10 +303,19 @@ export const svgColourProblems = (svg: string): string[] => {
 };
 
 /**
- * Everything wrong with a figure file, or an empty list.
+ * Everything wrong with an assignment figure, or an empty list. **These are the
+ * guards, on every path and for both figure forms** (a ```figure block and an
+ * `![alt](path)` image): it is SVG, PNG or JPG, it opens, and its size is sane.
  *
- * Async because judging a PNG's pixels means inflating it, and neither the
- * browser nor Node offers that synchronously.
+ * WHY NOT DPI AND GREYSCALE (WORKORDER_AM_FIGURES_AND_FOLDER_IMPORT_2026-09-27 §7)
+ *
+ * The student's copy of an assignment is now the instructor's own document. In
+ * this app a figure exists so the author can SEE it: the editor preview,
+ * `assignment.html`, the grader document. Resolution and colour were written for
+ * a page this app printed and a student's work scanned back, and they belong
+ * where that happens. They are kept, unchanged, in `figurePrintProblems` below,
+ * which nothing calls: whether the printed-sheet figure path keeps them is an
+ * open question, not a decision taken here.
  */
 export const figureFileProblems = async (file: FigureFile): Promise<FigureProblem[]> => {
   const problems: FigureProblem[] = [];
@@ -330,6 +339,46 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
   }
 
   if (file.format === 'svg') {
+    const text = typeof atob === 'function'
+      ? new TextDecoder().decode(bytes)
+      : Buffer.from(bytes).toString('utf8');
+    if (!/<svg[\s>]/i.test(text)) {
+      problems.push({
+        guard: 'unreadable',
+        message: 'This file could not be opened as an SVG drawing. It may be damaged, or saved '
+          + 'in a different format from the one its name says.',
+      });
+    }
+    return problems;
+  }
+
+  const hdr = file.format === 'png' ? readPngHeader(bytes) : readJpegHeader(bytes);
+  if (!hdr || !(hdr.width > 0) || !(hdr.height > 0)) {
+    problems.push({
+      guard: 'unreadable',
+      message: `This file could not be opened as a ${file.format.toUpperCase()}. It may be `
+        + 'damaged, or saved in a different format from the one its name says.',
+    });
+  }
+  return problems;
+};
+
+/**
+ * The PRINT guards: everything `figureFileProblems` checks, then resolution at
+ * printed size and greyscale. **Not called by anything in this app** since
+ * 2026-09-27 (see above). Kept whole so the printed-sheet question can be
+ * decided on what was actually there, and still tested so it does not rot.
+ *
+ * Async because judging a PNG's pixels means inflating it, and neither the
+ * browser nor Node offers that synchronously.
+ */
+export const figurePrintProblems = async (file: FigureFile): Promise<FigureProblem[]> => {
+  const problems: FigureProblem[] = await figureFileProblems(file);
+  if (problems.some(p => p.guard === 'format' || p.guard === 'unreadable')) return problems;
+
+  const bytes = b64ToBytes(file.base64);
+
+  if (file.format === 'svg') {
     const svg = typeof atob === 'function'
       ? new TextDecoder().decode(bytes)
       : Buffer.from(bytes).toString('utf8');
@@ -345,15 +394,8 @@ export const figureFileProblems = async (file: FigureFile): Promise<FigureProble
   }
 
   // --- raster: dimensions, then colour -------------------------------------
-  const hdr = file.format === 'png' ? readPngHeader(bytes) : readJpegHeader(bytes);
-  if (!hdr || !(hdr.width > 0) || !(hdr.height > 0)) {
-    problems.push({
-      guard: 'unreadable',
-      message: `This file could not be opened as a ${file.format.toUpperCase()}. It may be `
-        + 'damaged, or saved in a different format from the one its name says.',
-    });
-    return problems;
-  }
+  // Readable: `figureFileProblems` above has already refused a header it cannot read.
+  const hdr = (file.format === 'png' ? readPngHeader(bytes) : readJpegHeader(bytes))!;
 
   const dpi = effectiveDpi(hdr.width, hdr.height);
   if (dpi < FIGURE_MIN_DPI) {
