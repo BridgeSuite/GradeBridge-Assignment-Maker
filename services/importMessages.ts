@@ -51,6 +51,6 @@ export const unusedImagesNotice = (paths: string[]): string => [
 /** Other .md files that were chosen and are not the assignment. */
 export const setAsideNotice = (mdPath: string, setAside: string[]): string => [
   `Imported ${mdPath}. ${setAside.length === 1 ? 'This .md was' : `These ${setAside.length} .md files were`} `
-    + `set aside, because ${setAside.length === 1 ? 'it is' : 'they are'} not an assignment:`,
+    + `set aside, because ${setAside.length === 1 ? 'it is not an assignment' : 'they are not assignments'}:`,
   ...bullets(setAside),
 ].join('\n');
