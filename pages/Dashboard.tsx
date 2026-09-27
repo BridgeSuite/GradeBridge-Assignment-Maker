@@ -34,10 +34,22 @@ export const IMPORT_FILES_TITLE =
 export const IMPORT_HINT =
   'Write figures as ordinary markdown, ![what the drawing shows](figs/drawing.png), then import the '
   + 'folder that holds the .md and its images, or drag the folder onto this page.';
+// The main way in (WORKORDER_AM_ONE_ROUTE_IN_2026-09-27). Lead with the task:
+// a colleague arriving with an assignment they wrote needs one thing to press,
+// and needs to be told, before trying, that dragging the folder works.
+export const BRING_IN_LABEL = 'Bring in an assignment';
+export const ROUTE_IN_LINE =
+  'Written an assignment already? Press Bring in an assignment, or drag its folder anywhere onto this page.';
+export const DROP_ZONE_HEADLINE = "Drop your assignment's folder here";
+export const FOLDER_LINE = "The folder should hold the assignment's .md file and the images it uses.";
+export const CHOOSE_FOLDER_LABEL = 'Choose the folder';
+export const OTHER_WAYS_LABEL = 'Other ways in:';
+export const QUARTER_HEADING = 'For the whole quarter';
+export const QUARTER_LINE = 'The one printable answer page that every generic-sheet assignment uses.';
 export const DROP_HEADLINE = 'Drop to import';
 export const DROP_DETAIL = 'The folder that holds your assignment .md and its images, a .md with its images, or a zip.';
 
-const Dashboard: React.FC = () => {
+const Dashboard: React.FC<{ view?: 'list' | 'import' }> = ({ view = 'list' }) => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [statusMessage, setStatusMessage] = useState('');
   const navigate = useNavigate();
@@ -415,67 +427,105 @@ const Dashboard: React.FC = () => {
     navigate(`/edit/${duplicated.id}`);
   };
 
+  // The three hidden inputs every import route opens. Rendered on both views,
+  // so each button opens exactly the picker it always did.
+  const hiddenInputs = (
+    <>
+      <input type="file" accept=".json" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+      <input type="file" accept=".md,.zip,.svg,.png,.jpg,.jpeg" multiple ref={mdFileInputRef}
+        className="hidden" onChange={handleMdFileUpload} />
+      <input type="file" {...{ webkitdirectory: '', directory: '' }} ref={mdFolderInputRef}
+        className="hidden" onChange={handleMdFileUpload} />
+    </>
+  );
+
+  const dropOverlay = dragging && (
+    <div className="fixed inset-0 z-50 bg-academic-900/60 flex items-center justify-center pointer-events-none px-4">
+      <div className="bg-white rounded-lg shadow-xl px-8 py-6 text-center max-w-md">
+        <p className="text-lg font-medium text-academic-900">{DROP_HEADLINE}</p>
+        <p className="mt-2 text-sm text-academic-600">{DROP_DETAIL}</p>
+      </div>
+    </div>
+  );
+
+  // The routes that are not the main way in. Kept, each doing exactly what it
+  // did, and demoted so they stop competing with the two actions that lead.
+  // On the import page only the variant that is itself a way to bring an
+  // assignment in is offered; a JSON restore and the example belong to the
+  // dashboard, whose list shows what they did.
+  const otherWaysIn = (onImportPage: boolean) => (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" data-other-ways-in>
+      <span className="text-academic-500">{OTHER_WAYS_LABEL}</span>
+      <button type="button" onClick={handleMdImportClick} title={IMPORT_FILES_TITLE}
+        className="group inline text-left text-academic-700 hover:text-academic-900">
+        <FileCode className="inline w-4 h-4 mr-1.5 align-text-bottom" /><span className="underline underline-offset-2">Import Markdown</span>
+        {' '}<span className="text-academic-500">(a .md with its images, or a zip)</span>
+      </button>
+      {!onImportPage && <>
+      <button type="button" onClick={handleImportClick}
+        className="group inline text-left text-academic-700 hover:text-academic-900">
+        <Upload className="inline w-4 h-4 mr-1.5 align-text-bottom" /><span className="underline underline-offset-2">Import JSON</span>
+        {' '}<span className="text-academic-500">(a backup this app exported)</span>
+      </button>
+      <button type="button" onClick={handleLoadExample}
+        className="group inline text-left text-academic-700 hover:text-academic-900">
+        <Sparkles className="inline w-4 h-4 mr-1.5 align-text-bottom" /><span className="underline underline-offset-2">Load Example</span>
+      </button>
+      </>}
+    </div>
+  );
+
+  // ---- THE PAGE FOR ONE THING: bringing an assignment in -------------------
+  if (view === 'import') {
+    return (
+      <div onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+        {dropOverlay}
+        {hiddenInputs}
+        <Layout title={BRING_IN_LABEL}>
+          <Card className="p-0">
+            <div data-drop-zone
+              className="m-4 sm:m-6 rounded-xl border-2 border-dashed border-academic-300 bg-academic-50/60
+                         px-4 py-12 sm:py-16 text-center">
+              <FolderOpen className="mx-auto w-12 h-12 text-academic-500" />
+              <h2 className="mt-4 text-xl font-semibold text-academic-900">{DROP_ZONE_HEADLINE}</h2>
+              <p className="mt-2 text-academic-600 max-w-md mx-auto">{FOLDER_LINE}</p>
+              <div className="mt-6">
+                <Button onClick={handleMdFolderClick} title={IMPORT_FOLDER_TITLE}>
+                  <FolderOpen className="w-4 h-4 mr-2" />
+                  {CHOOSE_FOLDER_LABEL}
+                </Button>
+              </div>
+              <p className="mt-6 text-xs text-academic-500 max-w-md mx-auto">{IMPORT_HINT}</p>
+            </div>
+          </Card>
+          <div className="mt-6">{otherWaysIn(true)}</div>
+          {rescalePanel}
+          {choicePanel}
+        </Layout>
+      </div>
+    );
+  }
+
+  // ---- THE DASHBOARD ------------------------------------------------------
+  // Two actions lead: bring in an assignment you have, or start one you have
+  // not written. Everything else is a variant, an export, or belongs to the
+  // whole quarter (WORKORDER_AM_ONE_ROUTE_IN_2026-09-27).
   return (
     <div onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
-    {dragging && (
-      <div className="fixed inset-0 z-50 bg-academic-900/60 flex items-center justify-center pointer-events-none">
-        <div className="bg-white rounded-lg shadow-xl px-8 py-6 text-center max-w-md">
-          <p className="text-lg font-medium text-academic-900">{DROP_HEADLINE}</p>
-          <p className="mt-2 text-sm text-academic-600">{DROP_DETAIL}</p>
-        </div>
-      </div>
-    )}
-    <Layout 
+    {dropOverlay}
+    {hiddenInputs}
+    <Layout
       title={HOME_SCREEN_NAME}
       action={
-        <div className="flex gap-2">
-          <input
-            type="file"
-            accept=".json"
-            ref={fileInputRef}
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-          <input
-            type="file"
-            accept=".md,.zip,.svg,.png,.jpg,.jpeg" multiple
-            ref={mdFileInputRef}
-            className="hidden"
-            onChange={handleMdFileUpload}
-          />
-          <input
-            type="file"
-            {...{ webkitdirectory: '', directory: '' }}
-            ref={mdFolderInputRef}
-            className="hidden"
-            onChange={handleMdFileUpload}
-          />
-          <Button variant="secondary" onClick={handleLoadExample}>
-            <Sparkles className="w-4 h-4 mr-2" />
-            Load Example
-          </Button>
-          <Button variant="secondary" onClick={handleGenericAnswerPage}
-            title="The one answer page every generic-sheet assignment uses. Not tied to any assignment.">
-            <Printer className="w-4 h-4 mr-2" />
-            Generic answer page
-          </Button>
-          <span className="self-center">
-            <HelpLink section="generic" onOpen={openHelp} label="Help: the generic answer page" />
-          </span>
-          <Button variant="secondary" onClick={handleImportClick}>
-            <Upload className="w-4 h-4 mr-2" />
-            Import JSON
-          </Button>
-          <Button variant="secondary" onClick={handleMdFolderClick} title={IMPORT_FOLDER_TITLE}>
-            <FolderOpen className="w-4 h-4 mr-2" />
-            Import folder
-          </Button>
-          <Button variant="secondary" onClick={handleMdImportClick} title={IMPORT_FILES_TITLE}>
-            <FileCode className="w-4 h-4 mr-2" />
-            Import Markdown
-          </Button>
-          <Link to="/create">
+        <div className="flex flex-wrap gap-2">
+          <Link to="/import" data-bring-in>
             <Button>
+              <FolderOpen className="w-4 h-4 mr-2" />
+              {BRING_IN_LABEL}
+            </Button>
+          </Link>
+          <Link to="/create">
+            <Button variant="secondary">
               <Plus className="w-4 h-4 mr-2" />
               New Assignment
             </Button>
@@ -483,6 +533,10 @@ const Dashboard: React.FC = () => {
         </div>
       }
     >
+      <div className="mb-6 space-y-3">
+        <p className="text-academic-700" data-route-in-line>{ROUTE_IN_LINE}</p>
+        {otherWaysIn(false)}
+      </div>
       {assignments.length === 0 ? (
         <Card className="text-center py-16">
           <div className="mx-auto w-16 h-16 bg-academic-100 rounded-full flex items-center justify-center mb-4 text-academic-600">
@@ -490,37 +544,21 @@ const Dashboard: React.FC = () => {
           </div>
           <h3 className="text-lg font-medium text-academic-900">No assignments yet</h3>
           <p className="mt-2 text-academic-500 max-w-sm mx-auto">
-            Create your first assignment to get started, or try our example to explore the features.
+            Bring in one you have written, or start a new one here.
           </p>
           <div className="mt-6 flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Link to="/create">
-              <Button>Create Assignment</Button>
+            <Link to="/import">
+              <Button>
+                <FolderOpen className="w-4 h-4 mr-2" />
+                {BRING_IN_LABEL}
+              </Button>
             </Link>
-            <Button variant="secondary" onClick={handleMdFolderClick} title={IMPORT_FOLDER_TITLE}>
-              <FolderOpen className="w-4 h-4 mr-2" />
-              Import folder
-            </Button>
-            <Button variant="secondary" onClick={handleMdImportClick} title={IMPORT_FILES_TITLE}>
-              <FileCode className="w-4 h-4 mr-2" />
-              Import Markdown
-            </Button>
-            <Button variant="secondary" onClick={handleImportClick}>Import JSON</Button>
-          </div>
-          <p className="mt-4 text-sm text-academic-500 max-w-md mx-auto">{IMPORT_HINT}</p>
-
-          {/* Example Assignment CTA */}
-          <div className="mt-8 pt-8 border-t border-academic-100">
-            <p className="text-sm text-academic-500 mb-3">New here? Try an example first:</p>
-            <button
-              onClick={handleLoadExample}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-lg shadow-lg transition-all font-medium"
-            >
-              <Sparkles className="w-5 h-5" />
-              Load Example Assignment
-            </button>
-            <p className="text-xs text-academic-400 mt-2 max-w-xs mx-auto">
-              Explore a real lab report assignment with multiple question types
-            </p>
+            <Link to="/create">
+              <Button variant="secondary">
+                <Plus className="w-4 h-4 mr-2" />
+                New Assignment
+              </Button>
+            </Link>
           </div>
         </Card>
       ) : (
@@ -585,6 +623,21 @@ const Dashboard: React.FC = () => {
           ))}
         </div>
       )}
+
+      {/* NOT AN IMPORT. The generic answer page belongs to the whole quarter,
+          not to any one assignment, so it sits apart from the ways in. */}
+      <section className="mt-10 pt-6 border-t border-academic-200" data-quarter>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-academic-500">{QUARTER_HEADING}</h2>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Button variant="secondary" onClick={handleGenericAnswerPage}
+            title="The one answer page every generic-sheet assignment uses. Not tied to any assignment.">
+            <Printer className="w-4 h-4 mr-2" />
+            Generic answer page
+          </Button>
+          <HelpLink section="generic" onOpen={openHelp} label="Help: the generic answer page" />
+          <span className="text-sm text-academic-500">{QUARTER_LINE}</span>
+        </div>
+      </section>
       {rescalePanel}
       {choicePanel}
     </Layout>

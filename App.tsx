@@ -16,6 +16,7 @@ const App: React.FC = () => {
         <Router>
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/import" element={<Dashboard view="import" />} />
             <Route path="/create" element={<Editor />} />
             <Route path="/edit/:id" element={<Editor />} />
             <Route path="/view/:id" element={<Preview />} />

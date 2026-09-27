@@ -312,6 +312,8 @@ export const editor = at('/edit/probe', '/edit/:id', React.createElement(Editor)
 export const create = at('/create', '/create', React.createElement(Editor));
 export const preview = at('/view/probe', '/view/:id', React.createElement(Preview));
 export const home = at('/', '/', React.createElement(Dashboard));
+export const importPage = at('/import', '/import', React.createElement(Dashboard, { view: 'import' }));
+export * as dash from './pages/Dashboard';
 export { HOME_SCREEN_NAME };
 `);
   const link = /<a[^>]*data-home-link[^>]*>[\s\S]*?<\/a>/;
@@ -331,6 +333,49 @@ export { HOME_SCREEN_NAME };
   });
   await check('ITEM 5: the wordmark still goes home', () => {
     assert(/<a[^>]*href="\/"[^>]*>[\s\S]*?ridgeSuite/.test(mod.editor), 'the wordmark no longer links home');
+  });
+
+  // ---- WORKORDER_AM_ONE_ROUTE_IN_2026-09-27 ---------------------------------
+  // What a colleague sees on a cold open, rendered: text on the page, not a
+  // tooltip (a `title` attribute is removed before looking).
+  const visible = (html) => html.replace(/ title="[^"]*"/g, '').replace(/<[^>]+>/g, ' ')
+    .replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+  const { dash } = mod;
+
+  await check('ONE ROUTE IN 1: the way to bring in an assignment is a labelled link to its own page, before the list', () => {
+    const a = mod.home.match(/<a[^>]*data-bring-in[^>]*>[\s\S]*?<\/a>/);
+    assert(a, 'no primary "bring in" action on the dashboard');
+    assert(/href="\/import"/.test(a[0]), 'the primary action does not lead to the import page');
+    assert(visible(a[0]).includes(dash.BRING_IN_LABEL), 'the primary action does not say what it does');
+    assert(mod.home.indexOf('data-bring-in') < mod.home.indexOf('data-other-ways-in'),
+      'the primary action does not come before the other ways in');
+  });
+
+  await check('ONE ROUTE IN 2: dragging a folder is stated in the page, on the dashboard and on the import page', () => {
+    assert(visible(mod.home).includes(dash.ROUTE_IN_LINE), 'the dashboard does not say dragging works');
+    assert(/drag its folder anywhere onto this page/.test(dash.ROUTE_IN_LINE), 'the line does not name dragging');
+    assert(visible(mod.importPage).includes(dash.DROP_ZONE_HEADLINE), 'the import page does not say to drop the folder');
+  });
+
+  await check('ONE ROUTE IN: the import page is a drop target with a folder button and one line on what a folder holds', () => {
+    assert(/data-drop-zone/.test(mod.importPage), 'no drop zone on the import page');
+    assert(visible(mod.importPage).includes(dash.CHOOSE_FOLDER_LABEL), 'no button to choose the folder instead');
+    assert(visible(mod.importPage).includes(dash.FOLDER_LINE), 'no line saying what the folder should hold');
+    assert(/webkitdirectory/.test(mod.importPage), 'the folder picker input is not on the import page');
+  });
+
+  await check('ONE ROUTE IN 3: every demoted route is still on the dashboard, and the generic page is apart from the imports', () => {
+    const other = mod.home.match(/<div[^>]*data-other-ways-in[^>]*>[\s\S]*?<\/div>/)[0];
+    for (const label of ['Import Markdown', 'Import JSON', 'Load Example']) {
+      assert(visible(other).includes(label), `${label} is not among the other ways in`);
+    }
+    assert(!/Generic answer page/.test(other), 'the generic answer page is still grouped with the imports');
+    const quarter = mod.home.match(/<section[^>]*data-quarter[^>]*>[\s\S]*?<\/section>/);
+    assert(quarter && visible(quarter[0]).includes('Generic answer page'), 'the generic answer page has no section of its own');
+    assert(visible(mod.home).includes('New Assignment'), 'New Assignment is gone');
+    for (const accept of ['accept=".json"', 'accept=".md,.zip,.svg,.png,.jpg,.jpeg"', 'webkitdirectory']) {
+      assert(mod.home.includes(accept), `the dashboard lost the input ${accept}`);
+    }
   });
 }
 
