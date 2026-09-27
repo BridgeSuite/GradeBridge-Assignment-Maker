@@ -1326,9 +1326,12 @@ const Editor: React.FC = () => {
                          ))}
 
                          {/* Printed-template controls: how much writing room this part gets
-                             on the QR template, and whether it is a sketch. Both only affect
-                             the printed sheet and the layout map. */}
+                             on the QR template, and whether it is a sketch. Answer lines only
+                             sizes a sheet this app prints, so it is hidden on the generic page,
+                             where it would do nothing; the stored value is kept and exported.
+                             Sketch stays everywhere: it sets answer_modality in the rubric. */}
                          <span className="text-xs text-academic-300 mx-1">|</span>
+                         {assignment.sheet !== 'generic' && (
                          <div className="flex items-center gap-1.5">
                            <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Answer lines:</span>
                            <input
@@ -1342,6 +1345,7 @@ const Editor: React.FC = () => {
                              className="w-14 text-xs border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
                            />
                          </div>
+                         )}
                          <button
                            type="button"
                            onClick={() => updateSubsection(pIndex, sIndex, { isDrawing: !sub.isDrawing })}

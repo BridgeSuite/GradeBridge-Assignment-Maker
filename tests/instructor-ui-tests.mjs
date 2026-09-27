@@ -420,6 +420,23 @@ export { extractFigures, inlineFigureBlocker, splitFigures, parseFigureRefs, res
   });
 }
 
+// ---------- WORKORDER_AM_ANSWER_LINES_ON_GENERIC_2026-09-27 ----------
+// Answer lines sizes a sheet this app prints, so it is hidden on the generic
+// page, behind the same expression the Editor already uses for that; Sketch
+// sets answer_modality in the rubric and stays on every path.
+await check('ANSWER LINES: hidden on the generic page by the existing condition; Sketch is not', () => {
+  const editor = code('pages/Editor.tsx');
+  const label = editor.indexOf('Answer lines:');
+  assert(label >= 0, 'the Answer lines control is gone altogether');
+  const before = editor.slice(Math.max(0, label - 300), label);
+  assert(/\{assignment\.sheet !== 'generic' && \(\s*<div[^>]*>\s*<span[^>]*>$/.test(before),
+    'the Answer lines field is not behind `assignment.sheet !== \'generic\'`');
+  const sketch = editor.indexOf('isDrawing: !sub.isDrawing', label);
+  assert(sketch > label, 'the Sketch toggle is gone from the handwritten row');
+  const between = editor.slice(label, sketch);
+  assert(/<\/div>\s*\)\}\s*<button\s+type="button"\s+onClick=\{\(\) => updateSubsection\(pIndex, sIndex, \{ $/.test(between), 'the guard does not close right before the Sketch button');
+});
+
 // ---------- report ----------
 for (const f of scratch) { try { rmSync(f, { force: true }); } catch { /* ignore */ } }
 console.log(results.join('\n'));

@@ -375,6 +375,24 @@ await check('.md: **Sheet:** generic is read on a handwritten file, and written 
   assertEqual(m.parseMdToAssignment(md).sheet, 'generic', 'the line did not survive a round trip');
 });
 
+// WORKORDER_AM_ANSWER_LINES_ON_GENERIC_2026-09-27: the Editor hides Answer
+// lines on the generic page, and that is a visibility change only. The value
+// is the author's: it survives the sheet switch and Export .md still writes it.
+await check('.md: a generic assignment keeps its answerLines through the sheet switch, and exports them', () => {
+  const a = generic();
+  const withLines = { ...a, problems: a.problems.map(p => ({
+    ...p, subsections: p.subsections.map((s, i) => ({ ...s, answerLines: 8 + i })) })) };
+  // The Editor's switch, both ways: it rewrites `sheet` and nothing else.
+  const { sheet: _s, ...printed } = withLines;
+  const back = { ...printed, sheet: 'generic' };
+  assertEqual(back.problems, withLines.problems, 'the sheet switch changed the parts');
+  const md = m.assignmentToMd(back);
+  assert(md.includes('> template: lines=8') && md.includes('> template: lines=9'),
+    'Export .md stopped writing answerLines on a generic assignment');
+  const again = m.parseMdToAssignment(md);
+  assertEqual(again.problems[0].subsections.map(s => s.answerLines), [8, 9], 'answerLines did not round-trip');
+});
+
 await check('.md: a sub-part with no question text imports, and the export does not refuse it', async () => {
   const a = generic();
   assertEqual(a.problems[0].subsections[1].description, '', 'the empty description was not empty');
