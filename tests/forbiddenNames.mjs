@@ -69,6 +69,20 @@
 //   none of the three was caught. That is the measurement; read the list
 //   accordingly.
 //
+//   On 2026-09-27 it happened a fourth time, and not with a fragment: a
+//   colleague's full name went into a source comment, was pushed to this public
+//   repository, and passed, because the list had never been given it. The list
+//   grew from ten to twenty-five that day. Growing it the same day found a
+//   second full name that had sat in a tracked comment for six days. **A longer
+//   list is still a list.** It closes the names somebody has thought of, and no
+//   others.
+//
+//   Two limits follow from matching tokens rather than people. A short form of
+//   a name that is also an ordinary English word cannot be listed at all: the
+//   guard would refuse the word everywhere it is used, and there is no
+//   exemption mechanism, by design. And a name spelled with a character this
+//   normalisation drops is a different token.
+//
 //   The control that works is upstream of this file: **a capture set, a
 //   fixture, a folder or a test identifier must not be named after a person in
 //   the first place.** Name it for what it is — the device class, the defect,
@@ -117,4 +131,19 @@ export const FORBIDDEN_NAME_HASHES = new Set([
   'fc053e14afa732e2',
   'fc52fabe94c0e037',
   'fdc97875a4c7d086',
+  'd0784c6b1785dcd4',
+  '1eb19ec058180da2',
+  '47798d12ae31ce5a',
+  '502913bfdd49eab5',
+  'd38681074467c0bc',
+  'e9e326d5f3b4741f',
+  '4183ac4c8fe69698',
+  'd5a5d66b94e8da0c',
+  '3f92ca33ad172a49',
+  '2e4b5e102a30bb5f',
+  '8c5d0f7c131bb8e4',
+  '2a15147c4a61fc35',
+  '5b8a515150fb9ee3',
+  '12a303c224c250d0',
+  'c5f975b35c72cfe2',
 ]);

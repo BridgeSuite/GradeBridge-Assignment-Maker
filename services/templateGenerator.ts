@@ -555,7 +555,7 @@ export const generateTemplate = async (assignment: Assignment): Promise<Generate
   // reasoning that every student-facing route converges on the spec. It does
   // not. **The printed sheet is the other student-facing artefact**, and this
   // function is what produces it -- so the QR Template button walked straight
-  // past the lock. Found on 2026-09-22 by running the workflow Anthony is
+  // past the lock. Found on 2026-09-22 by running the workflow an instructor is
   // about to run: finalize, edit one question, press QR Template, and the app
   // cheerfully emitted a sheet whose layout_id had moved from 95438EDF to
   // 18FE7635, while the banner overhead said exports were locked.
