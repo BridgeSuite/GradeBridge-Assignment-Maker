@@ -23,11 +23,12 @@ import { parseFigureRefs, referencedFigureIds } from '../services/figureRefs';
 import { figureFileProblems } from '../services/figureGuards';
 import { parseFigureFilename } from '../services/figureImport';
 import { REOPEN_WARNING, finalizeAssignment, reopenAssignment } from '../services/finalize';
-import { apportionPoints, pointsAreMarked } from '../services/pointsService';
+import { planRescale, pointsAreMarked, pointsGridProblems, sumPoints, RescalePlan } from '../services/pointsService';
+import { PointsInput } from '../components/PointsInput';
 import { Layout, Card, Button, Input, TextArea, TextAreaWithPreview, InputWithPreview } from '../components/Common';
 import { FigureMapProvider } from '../components/FigureMapContext';
 import { FigureCard, InlineFigureCards } from '../components/FigureCard';
-import { useRescaleChoice } from '../components/RescaleChoice';
+import { useRescaleChoice, RescalePreviewPanel } from '../components/RescaleChoice';
 import { useChoice } from '../components/ChoicePanel';
 import { askDelete, askModeSwitch, askReopen } from '../services/questions';
 import { HelpLink, useOpenHelp } from '../components/HelpGuide';
@@ -48,20 +49,6 @@ const AI_WORD_RANGES: Partial<Record<SubmissionType, { range: string; min: numbe
   [SubmissionType.AI_GRADED_LONG]:   { range: '150–250 words', min: 150 },
 };
 
-// Same arithmetic the export uses — imported, not copied, so what the editor
-// shows and what lands in the rubric cannot drift apart.
-const normalizePoints = (assignment: Assignment): Assignment => {
-  const allSubs = assignment.problems.flatMap(p => p.subsections);
-  const scaled = apportionPoints(allSubs.map(s => s.points), assignment.targetPoints || 100);
-  let idx = 0;
-  return {
-    ...assignment,
-    problems: assignment.problems.map(p => ({
-      ...p,
-      subsections: p.subsections.map(s => ({ ...s, points: scaled[idx++] }))
-    }))
-  };
-};
 
 // New sub-parts take the medium the assignment's input mode allows.
 const emptySubsection = (inputMode: InputMode = 'electronic'): Subsection => (
@@ -588,6 +575,15 @@ const Editor: React.FC = () => {
           throw new Error("Invalid assignment format.");
         }
 
+        // Points off the 0.25 grid are refused, part by part, rather than
+        // loaded as a value the points field could never have produced.
+        const offGrid = pointsGridProblems(loadedAssignment);
+        if (offGrid.length) {
+          alert(['This file was not loaded.', '', ...offGrid.map(p => `  • ${p}`)].join('\n'));
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          return;
+        }
+
         // Fields no longer part of `Assignment`, dropped silently — no warning:
         // they are not the author's mistake, there is nothing for them to do
         // about it, and nothing reads them.
@@ -660,15 +656,35 @@ const Editor: React.FC = () => {
     reader.readAsText(file);
   };
 
+  // RESCALE IS DECIDED BEFORE IT HAPPENS (2026-09-27). It used to apply at once,
+  // round every part to a whole number, land wherever the rounding left it
+  // (asked for 10, it gave 12) and leave no way back. Now the button only
+  // plans: the panel states every part's new value and the new total, or
+  // refuses and says why, and nothing changes until the author applies it.
+  const [rescalePlan, setRescalePlan] = useState<RescalePlan | null>(null);
+
   const handleRescale = () => {
-    setAssignment(normalizePoints(assignment));
+    setRescalePlan(planRescale(
+      assignment.problems.flatMap(p => p.subsections.map(s => s.points)),
+      assignment.targetPoints || 100));
   };
 
-  const handleSetTarget = (value: string) => {
-    const n = parseInt(value, 10);
-    if (!isNaN(n) && n > 0) {
-      setAssignment({ ...assignment, targetPoints: n });
-    }
+  const applyRescale = () => {
+    if (!rescalePlan || !rescalePlan.ok) return;
+    const after = rescalePlan.after;
+    let idx = 0;
+    setAssignment({
+      ...assignment,
+      problems: assignment.problems.map(p => ({
+        ...p,
+        subsections: p.subsections.map(s => ({ ...s, points: after[idx++] })),
+      })),
+    });
+    setRescalePlan(null);
+  };
+
+  const handleSetTarget = (n: number) => {
+    setAssignment({ ...assignment, targetPoints: n });
   };
 
   // Move Problem logic
@@ -680,7 +696,7 @@ const Editor: React.FC = () => {
       setAssignment({ ...assignment, problems: newProblems });
   };
 
-  const totalPoints = assignment.problems.flatMap(p => p.subsections).reduce((sum, s) => sum + s.points, 0);
+  const totalPoints = sumPoints(assignment.problems.flatMap(p => p.subsections).map(s => s.points));
   const targetPoints = assignment.targetPoints || 100;
   const pointsAtTarget = totalPoints === targetPoints;
   // A reader assignment is not marked: no points fields, no total, no rescale.
@@ -718,13 +734,15 @@ const Editor: React.FC = () => {
               </span>
               <div className="flex items-center gap-1">
                 <span className="text-xs text-academic-500">Target:</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={targetPoints}
-                  onChange={e => handleSetTarget(e.target.value)}
-                  className="w-16 text-xs border border-academic-300 rounded px-1 py-0.5 text-center"
-                />
+                <span className="w-16 inline-block">
+                  <PointsInput
+                    value={targetPoints}
+                    onCommit={handleSetTarget}
+                    positive
+                    title="Target total"
+                    className="text-xs !py-0.5 !px-1 text-center"
+                  />
+                </span>
                 <span className="text-xs text-academic-500">pts</span>
               </div>
               {!pointsAtTarget && (
@@ -1232,11 +1250,10 @@ const Editor: React.FC = () => {
                          </div>
                          {pointsMarked && (
                          <div className="md:col-span-2">
-                           <Input
-                              type="number"
+                           <PointsInput
                               placeholder="Pts"
                               value={sub.points}
-                              onChange={e => updateSubsection(pIndex, sIndex, { points: parseInt(e.target.value) || 0 })}
+                              onCommit={n => updateSubsection(pIndex, sIndex, { points: n })}
                               className="text-sm"
                               title="Points"
                            />
@@ -1500,6 +1517,17 @@ const Editor: React.FC = () => {
         </div>
       </div>
       {rescalePanel}
+      {rescalePlan && (
+        <RescalePreviewPanel
+          plan={rescalePlan}
+          labels={assignment.problems.flatMap((p, i) => p.subsections.map((s, j) =>
+            `${i + 1}(${String.fromCharCode(97 + j)})${s.name ? ' ' + s.name : ''}`))}
+          fromTotal={totalPoints}
+          target={targetPoints}
+          onApply={applyRescale}
+          onCancel={() => setRescalePlan(null)}
+        />
+      )}
       {choicePanel}
     </Layout>
     </FigureMapProvider>

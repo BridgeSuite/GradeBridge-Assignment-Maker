@@ -192,7 +192,8 @@ const { parseMdToAssignment } = mdParser;
 const { typeAllowedInMode, defaultTypeForMode, convertSubsectionToMode, strandedSubsectionLabels,
         assignmentKindProblem, isElectronicReader } = inputModeSvc;
 const { splitMath, toHtml, toLatexBody, toPlainUnicode, toPdfText, hasMath } = mathRender;
-const { apportionPoints, tooManyPartsForTarget } = pointsSvc;
+const { apportionPoints, tooManyPartsForTarget, planRescale, parsePoints, isValidPoints,
+        pointsGridProblems, sumPoints } = pointsSvc;
 const { splitFigures, figureSegsToSource, hasFigure, trimAroundFigures, figureLabel,
         figurePlaceholder, sanitizeSvg, namespaceSvgIds, prepareSvgForInline } = figures;
 const { estimateDescLines } = layoutSvc;
@@ -653,16 +654,19 @@ console.log('\nAssignment Maker test suite — export contract + handwritten rou
   });
 
   check('a small part is never scaled out of existence', () => {
-    // 1 point in a 400-point assignment is 0.25 of 100 — floors to zero.
-    const out = apportionPoints([1, 399], 100);
-    assertEqual(out, [1, 99], 'a 1-point part was rounded away');
+    // Since 2026-09-27 points are quarter steps. 1 point in a 4000-point
+    // assignment is 0.025 of 100, which floors to zero quarters; it keeps the
+    // smallest step instead of vanishing.
+    assertEqual(apportionPoints([1, 399], 100), [0.25, 99.75], 'an exact quarter share was disturbed');
+    const out = apportionPoints([1, 3999], 100);
+    assertEqual(out, [0.25, 99.75], 'a 1-point part was rounded away');
     const many1 = apportionPoints([1, 1, 1, 997], 100);
-    assert(many1.every(v => v >= 1), `a part hit zero: ${many1.join(',')}`);
+    assert(many1.every(v => v >= 0.25), `a part hit zero: ${many1.join(',')}`);
     assertEqual(sum(many1), 100, 'does not sum to 100');
   });
 
   check('scaling up works too, and stays exact', () => {
-    assertEqual(apportionPoints([1, 1, 1], 100), [34, 33, 33], 'wrong split scaling up');
+    assertEqual(apportionPoints([1, 1, 1], 100), [33.5, 33.25, 33.25], 'wrong split scaling up');
     assertEqual(sum(apportionPoints([3, 7], 100)), 100, 'does not sum to 100');
     assertEqual(apportionPoints([3, 7], 100), [30, 70], 'exact shares were disturbed');
   });
@@ -680,12 +684,12 @@ console.log('\nAssignment Maker test suite — export contract + handwritten rou
     assertEqual(apportionPoints([5, 5], NaN), [5, 5], 'a NaN target should change nothing');
   });
 
-  check('more graded parts than points: it gives up rather than zeroing anyone', () => {
-    // 150 parts cannot each hold >= 1 point out of 100. Every part stays worth
-    // something and the total overshoots, which the self-test then surfaces.
-    const out = apportionPoints(Array.from({ length: 150 }, () => 2), 100);
-    assert(out.every(v => v >= 1), 'a part was zeroed');
-    assert(tooManyPartsForTarget(Array.from({ length: 150 }, () => 2), 100), 'the condition was not detected');
+  check('more graded parts than quarter steps: it gives up rather than zeroing anyone', () => {
+    // 500 parts cannot each hold >= 0.25 of 100. Every part stays worth
+    // something and the total overshoots; planRescale refuses it (below).
+    const out = apportionPoints(Array.from({ length: 500 }, () => 2), 100);
+    assert(out.every(v => v >= 0.25), 'a part was zeroed');
+    assert(tooManyPartsForTarget(Array.from({ length: 500 }, () => 2), 100), 'the condition was not detected');
   });
 
   check('the whole export path survives the assignment that failed', async () => {
@@ -704,6 +708,152 @@ console.log('\nAssignment Maker test suite — export contract + handwritten rou
     assertEqual(bad.map(r => `${r.subsection_id}=${r.max_points}`), [],
       'the grading rubric still carries a non-positive max_points');
   });
+}
+
+// =====================================================
+// POINTS ARE QUARTER STEPS; RESCALE HITS ITS TARGET OR REFUSES (2026-09-27)
+// =====================================================
+// EEC130A HW1: typing 0.5 stored 0, and Rescale on twelve parts weighted
+// 4/2/4, 4/2/4, 2/5/3, 4/4/2 (total 40) to a target of 10 made every part 1
+// and the total 12, with no way back. The one case the work order names is
+// used throughout.
+{
+  const EEC130A = [4, 2, 4, 4, 2, 4, 2, 5, 3, 4, 4, 2];
+  const EEC130A_AT_10 = [1, 0.5, 1, 1, 0.5, 1, 0.5, 1.25, 0.75, 1, 1, 0.5];
+
+  check('EEC130A: rescaling 40 to 10 gives exactly 10, every weight kept exactly', () => {
+    assertEqual(sumPoints(EEC130A), 40, 'the case does not total 40');
+    const plan = planRescale(EEC130A, 10);
+    assert(plan.ok, `refused: ${plan.reason}`);
+    assertEqual(plan.after, EEC130A_AT_10, 'the weighting was not kept');
+    assertEqual(plan.total, 10, 'the total is not the target');
+    assertEqual(plan.exact, true, 'reported as rounded when every share is exact');
+    assertEqual(plan.before, EEC130A, 'the plan does not state the values before');
+  });
+
+  check('EEC130A: rescaling back to 40 restores the original exactly', () => {
+    const up = planRescale(planRescale(EEC130A, 10).after, 40);
+    assert(up.ok, 'refused');
+    assertEqual(up.after, EEC130A, 'the round trip lost the weighting');
+  });
+
+  check('a rescale that cannot land on its target is refused, not landed elsewhere', () => {
+    // Twelve graded parts cannot each keep 0.25 inside a total of 2.
+    const plan = planRescale(EEC130A, 2);
+    assertEqual(plan.ok, false, 'a rescale that must miss was offered');
+    assert(/Nothing was changed/.test(plan.reason) && /at least 3/.test(plan.reason),
+      `the reason does not say what to do: ${plan.reason}`);
+    assertEqual(planRescale(EEC130A, 0.3).ok, false, 'an off-grid target was accepted');
+    assertEqual(planRescale([0.3, 1], 10).ok, false, 'off-grid points were rescaled');
+  });
+
+  check('a rounded rescale is reported as rounded, and still hits the target', () => {
+    const plan = planRescale([1, 1, 1], 10);
+    assert(plan.ok, 'refused');
+    assertEqual(sumPoints(plan.after), 10, 'missed the target');
+    assertEqual(plan.exact, false, 'a rounded result was reported as exact');
+  });
+
+  check('the points field: 0.5 is stored as 0.5, 0.3 stores nothing, nothing is truncated', () => {
+    assertEqual(parsePoints('0.5'), 0.5, '0.5');
+    assertEqual(parsePoints('2.5'), 2.5, '2.5');
+    assertEqual(parsePoints('0.75'), 0.75, '0.75');
+    assertEqual(parsePoints('.25'), 0.25, '.25');
+    assertEqual(parsePoints('7'), 7, '7');
+    assertEqual(parsePoints(''), 0, 'an empty field');
+    for (const bad of ['0.3', '0.1', '2.33', '-1', 'abc', '1e2', '1/2', '0x4', ' 2 pts'])
+      assertEqual(parsePoints(bad), null, `"${bad}" was not refused`);
+    assert(!isValidPoints(0.1 + 0.2), '0.30000000000000004 passed as points');
+  });
+
+  check('quarter-step totals are exact: no 0.30000000000000004 can form', () => {
+    // Every value on the grid is dyadic, so sums carry no residue.
+    const many = Array.from({ length: 400 }, (_, i) => [0.25, 0.5, 0.75, 2.5][i % 4]);
+    assertEqual(many.reduce((a, b) => a + b, 0), 400, 'a plain float sum of quarter values drifted');
+    assertEqual(String(sumPoints([0.25, 0.5])), '0.75', 'printed with residue');
+  });
+
+  check('imports refuse points off the grid, naming the part', () => {
+    const a = { problems: [{ name: 'Waves', subsections: [
+      { name: 'ok', points: 2.5 }, { name: 'bad', points: 0.3 }, { name: 'neg', points: -1 }] }] };
+    const probs = pointsGridProblems(a);
+    assertEqual(probs.length, 2, 'wrong number of refusals');
+    assert(probs[0].includes('"bad"') && probs[0].includes('0.25'), `not named: ${probs[0]}`);
+  });
+
+  const eec130aMd = (pts) => [
+    '# EEC130A: Homework 1', '', '**Input:** handwritten', '',
+    ...[0, 1, 2, 3].flatMap(pi => [
+      `## Problem ${pi + 1}: P${pi + 1}`, '',
+      ...[0, 1, 2].flatMap(si => [
+        `### (${'abc'[si]}) Part ${si} [${pts[pi * 3 + si]} pts] [handwritten:human]`, 'Q.', '']),
+    ]),
+  ].join('\n');
+
+  check('md: [0.5 pts] and [1.25 pts] import as themselves, and round-trip unchanged', () => {
+    const a = parseMdToAssignment(eec130aMd(EEC130A_AT_10));
+    assertEqual(a.problems.flatMap(p => p.subsections.map(s => s.points)), EEC130A_AT_10, 'decimals were not read');
+    assertEqual(a.targetPoints, 10, 'the target is not the file total');
+    const md = assignmentToMd(a);
+    assert(md.includes('[0.5 pts]') && md.includes('[1.25 pts]'), 'decimals were not written back');
+    const again = parseMdToAssignment(md);
+    assertEqual(again.problems.flatMap(p => p.subsections.map(s => s.points)), EEC130A_AT_10,
+      'the round trip changed a value');
+    assert(!/\d\.\d{5,}/.test(md), 'a float residue reached the .md');
+  });
+
+  check('md: [2.3 pts] refuses the import and quotes the heading, rather than rounding', () => {
+    let err = null;
+    try { parseMdToAssignment(eec130aMd([...EEC130A_AT_10.slice(0, 11), 2.3])); } catch (e) { err = e; }
+    assert(err, 'an off-grid heading was imported');
+    assert(/\[2\.3 pts\]/.test(err.message) && /0\.25/.test(err.message), `message: ${err && err.message}`);
+  });
+
+  check('export: a rescale that cannot hit its target stops the export with the reason', () => {
+    const { rescaleNotice, normalizePointsConfirmed } = exportSvc;
+    const a = parseMdToAssignment(eec130aMd(EEC130A));
+    a.targetPoints = 2;
+    const notice = rescaleNotice(a);
+    assert(notice && notice.refused, 'the export offered a rescale that must miss');
+    let err = null;
+    try { normalizePointsConfirmed(a, true); } catch (e) { err = e; }
+    assert(err && /Export stopped/.test(err.message), 'the export went ahead');
+    a.targetPoints = 10;
+    const out = normalizePointsConfirmed(a, true);
+    assertEqual(out.problems.flatMap(p => p.subsections.map(s => s.points)), EEC130A_AT_10,
+      'the export rescaled differently from the editor');
+    const rubric = JSON.stringify(generateGradingRubric(out));
+    assert(!/\d\.\d{5,}/.test(rubric), 'a float residue reached the rubric');
+    assert(rubric.includes('"max_points":0.5') || rubric.includes('"max_points": 0.5'), 'the rubric lost 0.5');
+  });
+
+  // convert.py is the format's second implementation and must read and refuse
+  // what the app reads and refuses.
+  {
+    const python = ['python', 'python3', 'py'].find(exe =>
+      spawnSync(exe, ['-c', 'pass'], { encoding: 'utf8' }).status === 0);
+    const name = 'convert.py reads quarter points as the app does, and refuses [2.3 pts]';
+    if (!python) skip(name, 'no Python interpreter on PATH');
+    else check(name, () => {
+      const work = mkdtempSync(join(tmpdir(), 'gb-points-'));
+      try {
+        writeFileSync(join(work, 'Quarter.md'), eec130aMd(EEC130A_AT_10), 'utf8');
+        const ok = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), join(work, 'Quarter.md')], { encoding: 'utf8' });
+        assert(ok.status === 0, `convert.py failed: ${ok.stderr || ok.stdout}`);
+        const spec = JSON.parse(readFileSync(join(work, 'Quarter_spec.json'), 'utf8'));
+        assertEqual(spec.problems.flatMap(p => p.subsections.map(s => s.points)), EEC130A_AT_10,
+          'convert.py read different points from the app');
+        assertEqual(spec.targetPoints, 10, 'convert.py adopted a different target');
+
+        writeFileSync(join(work, 'Bad.md'), eec130aMd([...EEC130A_AT_10.slice(0, 11), 2.3]), 'utf8');
+        const bad = spawnSync(python, [resolve(REPO, 'converter', 'convert.py'), join(work, 'Bad.md')], { encoding: 'utf8' });
+        assert(bad.status !== 0, 'convert.py accepted [2.3 pts]');
+        assert(!existsSync(join(work, 'Bad_spec.json')), 'convert.py wrote a spec for a refused file');
+      } finally {
+        rmSync(work, { recursive: true, force: true });
+      }
+    });
+  }
 }
 
 // =====================================================

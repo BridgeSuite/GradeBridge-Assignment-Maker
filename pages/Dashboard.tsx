@@ -15,7 +15,7 @@ import { createExampleAssignment, EXAMPLE_LOADED_MESSAGE } from '../exampleAssig
 import { parseMdToAssignment } from '../services/mdParserService';
 import { adoptAssignmentKind, adoptSheet, stripRetiredFields } from '../services/importNotices';
 import { assignmentKindProblem } from '../services/inputModeService';
-import { pointsAreMarked } from '../services/pointsService';
+import { pointsAreMarked, pointsGridProblems } from '../services/pointsService';
 import { collectFigures, unreferencedNotice } from '../services/figureImport';
 import { hasFigureRef, referencedFigureIds } from '../services/figureRefs';
 import JSZip from 'jszip';
@@ -134,6 +134,14 @@ const Dashboard: React.FC = () => {
         // Basic validation
         if (!importedAssignment.id || !importedAssignment.title || !Array.isArray(importedAssignment.problems)) {
           throw new Error("Invalid assignment format. Missing required fields.");
+        }
+
+        // Points off the 0.25 grid are refused, part by part, rather than
+        // loaded as a value the points field could never have produced.
+        const offGrid = pointsGridProblems(importedAssignment);
+        if (offGrid.length) {
+          alert(['This file was not imported.', '', ...offGrid.map(p => `  • ${p}`)].join('\n'));
+          return;
         }
 
         // Ensure ID is string and trimmed

@@ -11,6 +11,7 @@ import { Assignment, AssignmentKind, FinalizeStamp, InputMode, Problem, Subsecti
 import { LEGACY_SPACE_LINES } from './templateLayout';
 import { FIGURE_FENCE_CLOSE_RE, FIGURE_FENCE_OPEN_RE, splitFigures } from './figureBlocks';
 import { RETIRED_TYPE_TAGS, keepPromptAsGraderNote, retiredTypeWarning } from './retiredTypes';
+import { isValidPoints, POINTS_ACCEPTED, sumPoints } from './pointsService';
 
 const TYPE_MAP: Record<string, SubmissionType> = {
   'text':                 SubmissionType.TEXT,
@@ -70,13 +71,29 @@ function parseTypeTag(typeTag: string): {
   return { submissionType: TYPE_MAP[baseType] ?? SubmissionType.TEXT, maxImages, handwrittenGradingMode };
 }
 
+/**
+ * The number inside `[N pts]`. Decimals are accepted since 2026-09-27, in
+ * steps of 0.25 (`[2.5 pts]`), and a value off that grid REFUSES the import
+ * with the line quoted: `[2.3 pts]` is not rounded to something the author
+ * did not write. Mirrored by `parse_points` in `converter/convert.py`.
+ */
+const POINTS_IN_HEADER = String.raw`(\d+(?:\.\d+)?)`;
+
+function headerPoints(raw: string, line: string): number {
+  const n = Number(raw);
+  if (!isValidPoints(n)) {
+    throw new Error(`the heading "${line.trim()}" has ${raw} points. ${POINTS_ACCEPTED}`);
+  }
+  return n;
+}
+
 function parseSubsectionHeader(line: string): SubsectionMeta | null {
-  const m = line.trim().match(/^###\s+\([a-z]+\)\s+(.+?)\s+\[(\d+)\s+pts?\]\s+\[([^\]]+)\]\s*$/i);
+  const m = line.trim().match(new RegExp(String.raw`^###\s+\([a-z]+\)\s+(.+?)\s+\[` + POINTS_IN_HEADER + String.raw`\s+pts?\]\s+\[([^\]]+)\]\s*$`, 'i'));
   if (!m) return null;
   const { submissionType, maxImages, handwrittenGradingMode } = parseTypeTag(m[3]);
   return {
     name: m[1].trim(),
-    points: parseInt(m[2]),
+    points: headerPoints(m[2], line),
     submissionType,
     maxImages,
     handwrittenGradingMode,
@@ -86,10 +103,10 @@ function parseSubsectionHeader(line: string): SubsectionMeta | null {
 
 function parseProblemHeader(line: string): ProblemHeaderMeta | null {
   // Flat format: ## Problem N: Title [N pts] [type]
-  const flatM = line.trim().match(/^##\s+Problem\s+\d+:\s+(.+?)\s+\[(\d+)\s+pts?\]\s+\[([^\]]+)\]\s*$/i);
+  const flatM = line.trim().match(new RegExp(String.raw`^##\s+Problem\s+\d+:\s+(.+?)\s+\[` + POINTS_IN_HEADER + String.raw`\s+pts?\]\s+\[([^\]]+)\]\s*$`, 'i'));
   if (flatM) {
     const { submissionType, maxImages, handwrittenGradingMode } = parseTypeTag(flatM[3]);
-    return { name: flatM[1].trim(), points: parseInt(flatM[2]), submissionType, maxImages,
+    return { name: flatM[1].trim(), points: headerPoints(flatM[2], line), submissionType, maxImages,
              handwrittenGradingMode, rawType: flatM[3].trim().toLowerCase() };
   }
   // Standard format: ## Problem N: Title
@@ -560,9 +577,7 @@ export function parseMdToAssignment(content: string, warnings?: string[]): Assig
   //
   // This does not remove rescaling: the Target box and the Rescale button are
   // unchanged. It changes who decides by default — the file, not the constant.
-  const authoredTotal = problems
-    .flatMap(p => p.subsections)
-    .reduce((sum, s) => sum + (Number.isFinite(s.points) ? s.points : 0), 0);
+  const authoredTotal = sumPoints(problems.flatMap(p => p.subsections).map(s => s.points));
 
   const now = Date.now();
   return {

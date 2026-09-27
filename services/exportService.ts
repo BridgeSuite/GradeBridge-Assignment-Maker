@@ -13,7 +13,7 @@ import { figureDataUri, referencedFigureIds, resolveAssignmentFigures } from './
 import { finalizeLockProblem } from './finalize';
 import { partIdentifiers } from './templateLayout';
 import { buildAuthoringBackup } from './authoringBackup';
-import { apportionPoints, pointsAreMarked } from './pointsService';
+import { planRescale, pointsAreMarked, sumPoints } from './pointsService';
 import { strandedSubsectionLabels, typeAllowedInMode } from './inputModeService';
 import jsPDF from 'jspdf';
 import JSZip from 'jszip';
@@ -81,9 +81,22 @@ const normalizePoints = (assignment: Assignment): Assignment => {
   // and nothing to rescale. The Editor hides the points fields on a reader
   // assignment, so a value left over from a conventional draft is not
   // something the author can see or mean.
-  const scaled = pointsAreMarked(assignment)
-    ? apportionPoints(allSubs.map(s => s.points), target)
-    : allSubs.map(() => 0);
+  //
+  // A rescale lands EXACTLY on its target or does not happen (2026-09-27): a
+  // plan that cannot, because more parts carry points than there are quarter
+  // steps in the target, stops the export with its reason rather than writing
+  // a total nobody asked for.
+  const points = allSubs.map(s => s.points);
+  let scaled: number[];
+  if (!pointsAreMarked(assignment)) {
+    scaled = allSubs.map(() => 0);
+  } else if (sumPoints(points) <= 0 || sumPoints(points) === target) {
+    scaled = points;
+  } else {
+    const plan = planRescale(points, target);
+    if (!plan.ok) throw new Error(`Export stopped: ${plan.reason}`);
+    scaled = plan.after;
+  }
 
   let idx = 0;
   return {
@@ -118,20 +131,25 @@ const normalizePoints = (assignment: Assignment): Assignment => {
 // visible before it does any damage.
 
 /** The two numbers a rescale is about to reconcile. */
-export interface RescaleNotice { authoredTotal: number; targetPoints: number; }
+export interface RescaleNotice {
+  authoredTotal: number;
+  targetPoints: number;
+  /** Set when the rescale cannot land on its target: the reason. No rescale is offered. */
+  refused?: string;
+}
 
 /** The rescale this export would perform, or null when there is nothing to do. */
 export const rescaleNotice = (assignment: Assignment): RescaleNotice | null => {
   // A reader assignment has no points to rescale; it exports without a prompt.
   if (!pointsAreMarked(assignment)) return null;
-  const authoredTotal = (assignment.problems || [])
-    .flatMap(p => p.subsections || [])
-    .reduce((sum, s) => sum + (Number.isFinite(s.points) ? s.points : 0), 0);
+  const points = (assignment.problems || []).flatMap(p => p.subsections || []).map(s => s.points);
+  const authoredTotal = sumPoints(points);
   const targetPoints = assignment.targetPoints || DEFAULT_TARGET_POINTS;
   // Nothing authored yet: an empty assignment is not a rescale to warn about,
   // and apportionPoints leaves an all-zero list alone in any case.
   if (authoredTotal <= 0 || authoredTotal === targetPoints) return null;
-  return { authoredTotal, targetPoints };
+  const plan = planRescale(points, targetPoints);
+  return plan.ok ? { authoredTotal, targetPoints } : { authoredTotal, targetPoints, refused: plan.reason };
 };
 
 /** What the instructor is asked. Both numbers, and what happens next. */
@@ -214,6 +232,9 @@ export const setRescaleConfirm = (ask: ((message: string) => boolean) | null) =>
  */
 export const normalizePointsConfirmed = (assignment: Assignment, approved?: boolean): Assignment => {
   const notice = rescaleNotice(assignment);
+  // A rescale that cannot land on its target is not offered, so there is no
+  // decision to take: the export stops with the reason.
+  if (notice?.refused) throw new Error(`Export stopped: ${notice.refused}`);
   if (notice) {
     const decision = approved ?? (askToRescale ? askToRescale(rescaleConfirmationMessage(notice)) : undefined);
     if (decision === undefined) throw new RescaleDecisionNeededError(notice);

@@ -340,6 +340,33 @@ def lines_without_figures(body):
     return out
 
 
+# Points are quarter steps since 2026-09-27: 1, 0.5, 2.5, 0.75. A value off
+# that grid is REFUSED with the heading quoted, never rounded. Mirrors
+# isValidPoints / headerPoints in services/pointsService.ts and
+# services/mdParserService.ts. Quarters are dyadic, so every value and every
+# sum is exact in binary floating point; a whole number stays an int so the
+# output for an integer assignment is unchanged byte for byte.
+POINTS_ACCEPTED = ('Points must be zero or more, in steps of 0.25 '
+                   '(for example 1, 0.5, 2.5 or 0.75).')
+
+
+def parse_points(raw, line):
+    value = float(raw)
+    if value < 0 or (value * 4) != int(value * 4):
+        raise ValueError(f'the heading "{line.strip()}" has {raw} points. {POINTS_ACCEPTED}')
+    return int(value) if value == int(value) else value
+
+
+def to_points(units):
+    """Quarter steps back to points: an int when whole, else the exact float."""
+    return units // 4 if units % 4 == 0 else units / 4
+
+
+def sum_points(values):
+    """Sum on the quarter grid; a whole total is an int, so 16 never prints as 16.0."""
+    return to_points(sum(round(v * 4) for v in values))
+
+
 def parse_subsection_header(line):
     """
     Parse a subsection header line.
@@ -348,13 +375,13 @@ def parse_subsection_header(line):
     Returns dict with keys: name, points, submissionType, maxImages,
     handwrittenGradingMode, raw_type — or None if line doesn't match.
     """
-    pattern = r'^###\s+\([a-z]+\)\s+(.+?)\s+\[(\d+)\s+pts?\]\s+\[([^\]]+)\]\s*$'
+    pattern = r'^###\s+\([a-z]+\)\s+(.+?)\s+\[(\d+(?:\.\d+)?)\s+pts?\]\s+\[([^\]]+)\]\s*$'
     m = re.match(pattern, line.strip(), re.IGNORECASE)
     if not m:
         return None
 
     name = m.group(1).strip()
-    points = int(m.group(2))
+    points = parse_points(m.group(2), line)
     type_tag = m.group(3).strip().lower()
 
     # Handle image:N, text+image:N and handwritten:human
@@ -624,13 +651,41 @@ def normalize_points(problems, target=None):
     if total == 0 or total == target:
         return False, total
 
-    scaled = [round(sub['points'] * target / total) for sub in all_subs]
-
-    # Fix rounding error — add/subtract from the largest-point subsection
-    diff = target - sum(scaled)
-    if diff != 0:
-        max_idx = scaled.index(max(scaled))
-        scaled[max_idx] += diff
+    # Largest-remainder apportionment in quarter steps, the same arithmetic as
+    # apportionPoints() in services/pointsService.ts. A rescale lands exactly
+    # on its target or is refused; it used to hand the whole rounding remainder
+    # to the largest part, which could make it negative.
+    units = [round(sub['points'] * 4) for sub in all_subs]
+    target_units = round(target * 4)
+    total_units = sum(units)
+    graded = sum(1 for u in units if u > 0)
+    if graded > target_units:
+        raise ValueError(f'{graded} parts carry points, and a total of {target} cannot give each '
+                         f'of them at least 0.25 without scaling a part to 0.')
+    exact = [u * target_units / total_units for u in units]
+    out = [max(0, int(v // 1)) for v in exact]
+    for i, u in enumerate(units):
+        if u > 0 and out[i] == 0:
+            out[i] = 1
+    order = sorted(range(len(units)), key=lambda i: (-(exact[i] % 1), -exact[i], i))
+    diff = target_units - sum(out)
+    k = 0
+    while diff > 0:
+        out[order[k % len(order)]] += 1
+        diff -= 1
+        k += 1
+    while diff < 0:
+        reclaimed = False
+        for i in reversed(order):
+            if diff >= 0:
+                break
+            if out[i] > (1 if units[i] > 0 else 0):
+                out[i] -= 1
+                diff += 1
+                reclaimed = True
+        if not reclaimed:
+            raise ValueError(f'Rescaling to {target} cannot land on {target}.')
+    scaled = [to_points(u) for u in out]
 
     for sub, new_pts in zip(all_subs, scaled):
         sub['points'] = new_pts
@@ -785,7 +840,7 @@ def parse_md(filepath):
 
     # Adopt the file's own total as the target — see normalize_points().
     was_normalized, original_total = normalize_points(problems)
-    authored_total = sum(sub['points'] for p in problems for sub in p['subsections'])
+    authored_total = sum_points(sub['points'] for p in problems for sub in p['subsections'])
 
     now_ms = int(__import__('time').time() * 1000)
 
@@ -818,7 +873,7 @@ def parse_md(filepath):
 
 
 def print_summary(assignment):
-    total_points = sum(
+    total_points = sum_points(
         sub['points']
         for p in assignment['problems']
         for sub in p['subsections']
@@ -914,7 +969,13 @@ def main():
 
     print(f"\nParsing: {md_path.name}")
 
-    assignment = parse_md(md_path)
+    try:
+        assignment = parse_md(md_path)
+    except ValueError as err:
+        # Points off the 0.25 grid, or a rescale that cannot land: refused
+        # with the reason, and nothing is written.
+        print(f"\n✗ Not converted: {err}")
+        sys.exit(1)
 
     # Refused before anything is written, so a rejected file leaves no
     # half-valid _spec.json behind for someone to pick up later.
