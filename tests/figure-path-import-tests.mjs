@@ -306,7 +306,7 @@ await check('CHECK 6: a folder holding two assignment .md files is refused, nami
 
 await check('CHECK 6: a folder whose .md files are none of them assignments is refused, naming them', async () => {
   const e = await refusal(() => mdImport.gatherImport(folder().filter(f => !/Homework1/.test(f.path))));
-  assert(/None of these .md files is an assignment/.test(e.message) && e.message.includes('master/README.md'),
+  assert(/none of these .md files is an assignment/i.test(e.message) && e.message.includes('master/README.md'),
     `the refusal does not say why: ${e.message}`);
 });
 

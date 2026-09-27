@@ -409,6 +409,19 @@ export { extractFigures, inlineFigureBlocker, splitFigures, parseFigureRefs, res
     assertEqual(m.cards('No drawing here.'), '', 'a problem with no drawing shows a card');
   });
 
+  // WORKORDER_AM_NOTHING_FAILS_SILENTLY_2026-09-27 §5. An image figure is fine
+  // as it is; its card must not carry a sentence that reads as a warning.
+  await check('SILENT §5: an image figure\'s card carries no "cannot be replaced" sentence', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABc3UBGAAAAABJRU5ErkJggg==';
+    const text = ['A circuit.', '', `![Transmission line circuit](${png})`, '', 'More.', '',
+      `![An alternative model](${png})`, '', `![A cable cut open](${png})`].join('\n');
+    const html = m.cards(text);
+    assertEqual((html.match(/data-inline-figure-card/g) || []).length, 3, 'not one card per image');
+    assert(!html.includes('cannot be replaced'), 'an image card still says it cannot be replaced');
+    assert(!html.includes('lift out'), 'an image card still carries the internal vocabulary');
+    assert(html.includes('<img src="data:image/png'), 'the image is no longer shown on its card');
+  });
+
   await check('ITEM 6: the editor renders those cards and replaces through extraction', () => {
     const editor = code('pages/Editor.tsx');
     assert(/<InlineFigureCards\s[^>]*?description=\{problem\.description \|\| ''\}/.test(editor),

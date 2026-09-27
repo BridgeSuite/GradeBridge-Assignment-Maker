@@ -88,16 +88,20 @@ export const gatherImport = async (chosen: ChosenFile[]): Promise<GatheredImport
   if (mds.length > 1) {
     const assignments = mds.filter(m => looksLikeAssignment(m.text));
     if (assignments.length > 1) {
-      throw new ImportRefusal(['This was not imported. It holds more than one assignment:', '',
-        ...assignments.map(m => `  • ${m.path}`), '',
-        'Import one at a time. Move the other into its own folder, or choose the files by hand.',
+      // The remedy second, under the first line, as in importMessages.ts: a list
+      // above it pushes it out of a dialog's view.
+      throw new ImportRefusal(['This was not imported: it holds more than one assignment.',
+        'Import one at a time. Move the others into their own folders, or choose the files by hand.',
+        '',
+        ...assignments.map(m => `  • ${m.path}`),
       ].join('\n'));
     }
     if (!assignments.length) {
-      throw new ImportRefusal(['This was not imported. None of these .md files is an assignment:', '',
-        ...mds.map(m => `  • ${m.path}`), '',
+      throw new ImportRefusal(['This was not imported: none of these .md files is an assignment.',
         'An assignment starts with a line like "# EEC130A: Homework 1" and has at least one '
-          + '"## Problem 1:" heading.',
+          + '"## Problem 1:" heading. Choose the folder that holds it.',
+        '',
+        ...mds.map(m => `  • ${m.path}`),
       ].join('\n'));
     }
     md = assignments[0];

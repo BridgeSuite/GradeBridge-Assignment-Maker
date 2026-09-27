@@ -274,7 +274,10 @@ const Editor: React.FC = () => {
     const toSave = assignment;
 
     setAssignment(toSave);
-    storageService.save(toSave);
+    // A write that fails says so and stays on this page: navigating away would
+    // leave the author believing the work was stored (storageService.ts).
+    const saved = storageService.save(toSave);
+    if (!saved.ok) { await tell(saved.notice); return; }
     navigate('/');
   };
 
@@ -440,8 +443,11 @@ const Editor: React.FC = () => {
     }
     try {
       const stamped = await finalizeAssignment(assignment);
+      // Stored first, shown second: an assignment that says "finalized" on
+      // screen and is not finalized in storage is the silent failure again.
+      const saved = storageService.save(stamped, 'was NOT finalized');
+      if (!saved.ok) { await tell(saved.notice); return; }
       setAssignment(stamped);
-      storageService.save(stamped);
       alert(`Finalized ${stamped.finalized!.date}.\n\n`
         + `Layout ${stamped.finalized!.layoutId || '(electronic — no printed layout)'}\n`
         + `Content ${stamped.finalized!.fingerprint}\n\n`
@@ -460,14 +466,16 @@ const Editor: React.FC = () => {
     if (notice) { await tell(notice); return; }
     if (!proceed) return;
     const reopened = reopenAssignment(assignment);
+    const saved = storageService.save(reopened, 'was NOT reopened');
+    if (!saved.ok) { await tell(saved.notice); return; }
     setAssignment(reopened);
-    storageService.save(reopened);
   };
 
   const handleDeleteAssignment = async () => {
     // Destructive, so it fails CLOSED: only a pressed Delete deletes.
     if (await askDelete(ask, assignment.title)) {
-      storageService.delete(assignment.id);
+      const removed = storageService.delete(assignment.id);
+      if (!removed.ok) { await tell(removed.notice); return; }
       navigate('/');
     }
   };

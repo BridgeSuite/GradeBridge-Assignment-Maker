@@ -27,7 +27,7 @@
  */
 
 import jsPDF from 'jspdf';
-import { Assignment } from '../types';
+import { Assignment, FigureFile } from '../types';
 import { renderTextToCanvas, toPdfText } from './mathRender';
 import {
   MARK_ORIGINS_MM, MARK_SIZE_MM, PAGE_H_MM, PAGE_W_MM, QR_KEEPOUT_MM, QR_MODULES,
@@ -46,7 +46,8 @@ import {
   toLayoutCsv, toLayoutRows,
   ProblemBlock,
 } from './templateLayout';
-import { splitFigures, trimAroundFigures } from './figureBlocks';
+import { figureLabel, splitFigures, trimAroundFigures } from './figureBlocks';
+import { figurePrintProblems } from './figureGuards';
 import { resolveAssignmentFigures } from './figureRefs';
 import { SelfTestReport, runInkChecks, runSelfTest } from './templateSelfTest';
 import { finalizeLockProblem } from './finalize';
@@ -548,6 +549,43 @@ const drawAnswerBox = (doc: jsPDF, r: PlacedRegion, ink: InkBox[]) => {
  * emitted". Callers that want the report on a failure can catch and read
  * `error.report`.
  */
+const DATA_IMAGE_RE = /^data:image\/(png|jpe?g|svg\+xml);base64,([A-Za-z0-9+/=\s]+)$/i;
+
+/**
+ * Every figure on an assignment's printed sheet that fails the print guards
+ * (`figurePrintProblems`: format, decoding, size, resolution at printed size,
+ * greyscale), one line each, naming the problem and the figure. Expects figure
+ * blocks already resolved, as `generateTemplate` does. An image by `http(s)`
+ * URL cannot be read here and is not judged.
+ */
+export const printedFigureProblems = async (assignment: Assignment): Promise<string[]> => {
+  const out: string[] = [];
+  for (const [pIdx, prob] of assignment.problems.entries()) {
+    const texts = [prob.description, ...prob.subsections.map(s => s.description)];
+    let n = 0;
+    for (const text of texts) {
+      for (const seg of splitFigures(text || '')) {
+        if (seg.kind !== 'figure') continue;
+        n += 1;
+        // RASTERS ONLY. An inline SVG drawing's colour is already judged by the
+        // self-test (`figureColourViolations`), which refuses it with its own
+        // message, and a drawing has no resolution to fall short of. What the
+        // self-test cannot see is a raster ("A raster figure is opaque here"),
+        // and that is the gap this closes.
+        if (seg.figure.form !== 'image') continue;
+        const m = seg.figure.url.match(DATA_IMAGE_RE);
+        if (!m || m[1].toLowerCase() === 'svg+xml') continue;
+        const format: FigureFile['format'] = m[1].toLowerCase() === 'png' ? 'png' : 'jpg';
+        const file: FigureFile = { format, base64: m[2].replace(/\s+/g, ''), filename: `figure.${format}` };
+        const label = figureLabel(seg.figure).trim();
+        const where = `Problem ${pIdx + 1}, figure ${n}${label ? ` ("${label.length > 60 ? `${label.slice(0, 57)}...` : label}")` : ''}`;
+        for (const p of await figurePrintProblems(file)) out.push(`${where}: ${p.message}`);
+      }
+    }
+  }
+  return out;
+};
+
 export const generateTemplate = async (assignment: Assignment): Promise<GeneratedTemplate> => {
   // THE FINALIZE LOCK, second of the two places that hold it.
   //
@@ -594,6 +632,25 @@ ${lockProblem}`);
   // invisible: an extracted SVG resolves to the bytes it was lifted from, so
   // every rectangle, page count and layout_id is unmoved.
   assignment = resolveAssignmentFigures(assignment);
+
+  // THE PRINT GUARDS, AT THE ONE PLACE A SHEET IS PRINTED
+  // (WORKORDER_AM_NOTHING_FAILS_SILENTLY_2026-09-27 §6). The authoring path
+  // checks only format, decoding and size, because there a figure is for the
+  // author to see. A printed sheet is scanned back, so here resolution and
+  // greyscale apply, and a sheet that would carry a colour or low-resolution
+  // figure is refused, naming each figure. `templateSelfTest.ts` cannot catch
+  // it: a raster is opaque to it.
+  const figureIssues = await printedFigureProblems(assignment);
+  if (figureIssues.length) {
+    throw new Error([
+      'The printed sheet was not generated: a figure on it would not print cleanly.',
+      'Replace each figure named below with a black-and-white image large enough to print '
+        + 'sharply, or use the generic answer page, which prints no figures.',
+      '',
+      ...figureIssues.map(i => `  • ${i}`),
+    ].join('\n'));
+  }
+
   const assignmentId = await resolvePageFormatId(assignment);
   const layout = buildLayout(assignment);
 

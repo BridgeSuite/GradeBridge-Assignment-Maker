@@ -16,7 +16,8 @@ import { parseMdToAssignment } from '../services/mdParserService';
 import { adoptAssignmentKind, adoptSheet, stripRetiredFields } from '../services/importNotices';
 import { assignmentKindProblem } from '../services/inputModeService';
 import { pointsAreMarked, pointsGridProblems } from '../services/pointsService';
-import { altTextNotice, collectFigures, resolveImagePaths, unreferencedNotice } from '../services/figureImport';
+import { altTextNotice, collectFigures, resolveImagePaths } from '../services/figureImport';
+import { figureRefusalMessage, setAsideNotice, unusedImages, unusedImagesNotice } from '../services/importMessages';
 import { ChosenFile, ImportRefusal, chosenFromDrop, chosenFromFile, gatherImport } from '../services/mdImport';
 import { hasFigureRef, referencedFigureIds } from '../services/figureRefs';
 import { degradeRetiredTypes } from '../services/retiredTypes';
@@ -48,9 +49,11 @@ const Dashboard: React.FC = () => {
     loadAssignments();
   }, []);
 
-  const handleLoadExample = () => {
+  const handleLoadExample = async () => {
     const example = createExampleAssignment();
-    storageService.save(example);
+    // Every write here reports a failure in the page and stops (storageService.ts).
+    const saved = storageService.save(example, 'was NOT added');
+    if (!saved.ok) { await tell(saved.notice); return; }
     loadAssignments();
     setStatusMessage(EXAMPLE_LOADED_MESSAGE);
     setTimeout(() => setStatusMessage(''), 5000);
@@ -65,7 +68,8 @@ const Dashboard: React.FC = () => {
     e.stopPropagation();
     // Destructive, so it fails CLOSED: only a pressed Delete deletes.
     if (await askDelete(ask, title)) {
-      storageService.delete(id);
+      const removed = storageService.delete(id);
+      if (!removed.ok) { await tell(removed.notice); return; }
       loadAssignments();
     }
   };
@@ -215,7 +219,8 @@ const Dashboard: React.FC = () => {
           }
         }
 
-        storageService.save(importedAssignment);
+        const stored = storageService.save(importedAssignment, 'was NOT imported');
+        if (!stored.ok) { await tell(stored.notice); return; }
         loadAssignments();
         const notices = [...retired, ...legacy];
         alert(notices.length
@@ -308,37 +313,29 @@ const Dashboard: React.FC = () => {
         // placeholder in place of a missing drawing.
         const figureProblems: string[] = [];
         let figureCount = 0;
-        let usedByBlocks: string[] = [];
+        let blockIds: string[] = [];
         if (hasFigureRef(assignment.problems.map(p => p.description || '').join('\n'))) {
-          const { figures, problems, unreferenced } = await collectFigures(assignment, candidates);
-          figureCount += referencedFigureIds(assignment).length;
+          const { figures, problems } = await collectFigures(assignment, candidates);
+          blockIds = referencedFigureIds(assignment);
+          figureCount += blockIds.length;
           figureProblems.push(...problems);
           assignment.figures = figures;
-          usedByBlocks = unreferenced;
         }
         const images = await resolveImagePaths(assignment, candidates, mdPath);
         figureCount += images.resolved;
         figureProblems.push(...images.problems);
         if (figureProblems.length) {
-          alert(['This was not imported.', '',
-            `It refers to ${figureCount} figure${figureCount === 1 ? '' : 's'}, and:`, '',
-            ...figureProblems.map(p => `  \u2022 ${p}`), '',
-            'Choose the folder that holds the .md and its images, or drag it onto this page.',
-          ].join('\n'));
+          alert(figureRefusalMessage(figureCount, figureProblems));
           resetImportInputs();
           return;
         }
         assignment = images.assignment;
-        // A file an image line used is not "unreferenced" merely because no
-        // figure block named it.
-        const unreferenced = usedByBlocks.filter(u => !images.usedPaths.some(p => u.includes(p)));
-        if (unreferenced.length) warnings.push(unreferencedNotice(unreferenced));
+        // Images that came with the .md and that nothing used, by either form.
+        // Named, not refused: spare drawings are normal (importMessages.ts).
+        const unused = unusedImages(candidates.map(c => c.path), images.usedPaths, blockIds);
+        if (unused.length) warnings.push(unusedImagesNotice(unused));
         if (images.usedPaths.length) warnings.push(altTextNotice(images.resolved));
-        if (setAside.length) {
-          warnings.push(`Imported ${mdPath}. ${setAside.length === 1 ? 'This .md was' : 'These .md files were'} `
-            + `set aside, because ${setAside.length === 1 ? 'it is' : 'they are'} not an assignment: `
-            + `${setAside.join(', ')}.`);
-        }
+        if (setAside.length) warnings.push(setAsideNotice(mdPath, setAside));
 
         // A reader assignment must be handwritten. Refused rather than
         // corrected: the file says two things that cannot both be true, and
@@ -376,7 +373,8 @@ const Dashboard: React.FC = () => {
           // 'copy': keep the new UUID, which saves a separate copy.
         }
 
-        storageService.save(assignment);
+        const stored = storageService.save(assignment, 'was NOT imported');
+        if (!stored.ok) { await tell(stored.notice); resetImportInputs(); return; }
         if (warnings.length) alert(warnings.join('\n'));
         navigate(`/edit/${assignment.id}`);
       } catch (error) {
@@ -412,7 +410,8 @@ const Dashboard: React.FC = () => {
       }))
     };
 
-    storageService.save(duplicated);
+    const stored = storageService.save(duplicated, 'was NOT copied');
+    if (!stored.ok) { void tell(stored.notice); return; }
     navigate(`/edit/${duplicated.id}`);
   };
 

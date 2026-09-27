@@ -223,7 +223,13 @@ export const InlineFigureCard: React.FC<{
           </div>
         </div>
         <div className="flex-1 min-w-0 text-xs text-academic-600 leading-relaxed">
-          {blocker ? (
+          {/* An IMAGE shows no sentence. Its only "blocker" is that it is
+              already an image, which is nothing the author can or needs to
+              fix, and saying it unasked read as a warning about a figure that
+              is fine (WORKORDER_AM_NOTHING_FAILS_SILENTLY_2026-09-27 §5). A
+              drawing missing its <title> or <desc> still says so: that one
+              the author can act on. */}
+          {blocker && !svg ? null : blocker ? (
             <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-900">
               This figure cannot be replaced from here because {blocker}.
               {svg && ' Add a <title> and a <desc> to the drawing in the problem text above, and the Replace button appears.'}

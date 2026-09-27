@@ -187,10 +187,12 @@ await check('WIRING: no window.confirm, globalThis.confirm or self.confirm remai
 await check('WIRING: both deletes ask in the page and delete only on a pressed Delete', () => {
   const dash = code('pages/Dashboard.tsx');
   const d1 = handlerBetween(dash, 'const handleDelete', 'const handleExport');
-  assert(/if \(await askDelete\(ask, title\)\) \{\s*storageService\.delete\(id\)/.test(d1), 'the dashboard delete is not gated by askDelete');
+  // The delete may keep its result (a write that fails says so; storageService.ts),
+  // but it must still sit directly inside the pressed-Delete branch.
+  assert(/if \(await askDelete\(ask, title\)\) \{\s*(?:const \w+ = )?storageService\.delete\(id\)/.test(d1), 'the dashboard delete is not gated by askDelete');
   const ed = code('pages/Editor.tsx');
   const d2 = handlerBetween(ed, 'const handleDeleteAssignment', 'const updateProblem');
-  assert(/if \(await askDelete\(ask, assignment\.title\)\) \{\s*storageService\.delete\(assignment\.id\)/.test(d2),
+  assert(/if \(await askDelete\(ask, assignment\.title\)\) \{\s*(?:const \w+ = )?storageService\.delete\(assignment\.id\)/.test(d2),
     'the editor delete is not gated by askDelete');
 });
 
