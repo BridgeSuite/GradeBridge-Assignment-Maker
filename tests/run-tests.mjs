@@ -521,7 +521,12 @@ console.log('\nAssignment Maker test suite — export contract + handwritten rou
     });
     check(`${label}: no CDN MathJax and no leftover raw delimiters`, () => {
       assert(!/mathjax/i.test(doc), 'a MathJax script survived');
-      assert(!doc.includes('$6\\,\\Omega$'), 'raw LaTeX was emitted instead of rendered math');
+      // What is SHOWN must be rendered. A criteria block's `data-criteria`
+      // attribute carries its source text for the one-rubric check
+      // (services/gradingCriteria.ts) and is never displayed, so it is removed
+      // before the scan rather than exempting the whole document.
+      const shown = doc.replace(/ data-criteria="[^"]*"/g, '');
+      assert(!shown.includes('$6\\,\\Omega$'), 'raw LaTeX was emitted instead of rendered math');
     });
     check(`${label}: KaTeX's stylesheet is inlined`, () =>
       assert(doc.includes('.katex{') || doc.includes('.katex {'), 'the KaTeX stylesheet is missing'));

@@ -3,6 +3,7 @@ import { Assignment, SubmissionType } from '../types';
 import { decryptJson, encryptJson } from './cryptoService';
 import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
 import { stemForGrader } from './figureText';
+import { criteriaPieces, criteriaText, gradingCriteriaFor } from './gradingCriteria';
 import { generateTemplate } from './templateGenerator';
 import { assignmentKindProblem, sheetProblem } from './inputModeService';
 import {
@@ -870,6 +871,11 @@ export const generateGradingRubric = (assignment: Assignment): object => {
         // Grader-facing only. Students still get the real drawing everywhere,
         // and the authored `.md` still carries the full `<svg>`.
         ...(prob.description ? { problem_statement: stemForGrader(prob.description) } : {}),
+        // The sub-part's own question, the parallel of `problem_statement` and
+        // reduced the same way, so a figure arrives as its words and never as
+        // SVG or base64. Without it a model marking Part 1(a) was told the part's
+        // title and not what it asks. Absent only when the author wrote no text.
+        ...(sub.description ? { subsection_statement: stemForGrader(sub.description) } : {}),
         max_points: sub.points,
         // The declared modality of the *answer*, so a consumer holding the
         // rubric alone can route without guessing at read time (OCR addendum
@@ -914,6 +920,13 @@ export const generateGradingRubric = (assignment: Assignment): object => {
         // would still differ: whatever prompt was authored is carried, under
         // either suffix. Conventional is unchanged.
         grading_prompt: (isReader || isAi || isAiHandwritten) ? (sub.aiGradingPrompt || '') : '',
+        // ONE RUBRIC FOR BOTH GRADERS (WORKORDER_AM_ONE_RUBRIC_BOTH_GRADERS_2026-09-27).
+        // Every authored criterion, grading prompt and grader note alike, on
+        // EVERY grading type: exactly the text the grader document shows the
+        // person marking the same part (`services/gradingCriteria.ts`, which
+        // also holds the check that the two files agree). `grading_prompt`
+        // above is kept as it was, so nothing that reads it breaks.
+        ...(gradingCriteriaFor(sub) !== undefined ? { grading_criteria: gradingCriteriaFor(sub) } : {}),
         ...(isAi && minWords !== undefined && { min_words: minWords }),
         // No max_images for handwritten — pages are an assignment-level pool.
         ...((isImage || isTextAndImage) && { max_images: sub.maxImages ?? 1 })
@@ -1154,26 +1167,35 @@ export const generateGraderHTML = async (assignment: Assignment): Promise<string
       const isAiHandwritten = isHandwritten && (sub.handwrittenGradingMode ?? 'ai') !== 'human';
 
       const isTextAndImageRubric = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
-      let referenceBlock = '';
-      // A reader part is not graded, so it makes no answer-key claim: no "AI
-      // Rubric", no "Expected answer", no "Human review required". Whatever the
-      // author typed is shown as their note; nothing typed is simply not marked.
-      if (!marked) {
-        const note = [sub.aiGradingPrompt, sub.graderNote].filter(Boolean).join('\n\n');
-        referenceBlock = note
-          ? `<div class="ref-block empty-ref"><span class="ref-label">Your note (not used for marking)</span><p>${toHtml(note)}</p></div>`
-          : `<div class="ref-block empty-ref"><span class="ref-label">Not marked</span><p>Reader assignment: nothing grades this part.</p></div>`;
-      } else if ((isAi || isAiHandwritten) && sub.aiGradingPrompt) {
-        referenceBlock = `<div class="ref-block ai-ref"><span class="ref-label">AI Rubric</span><p>${toHtml(sub.aiGradingPrompt)}</p></div>`;
-      } else if (sub.graderNote) {
-        const label = isImage ? 'What to look for'
-          : isTextAndImageRubric ? 'Expected answer + what to look for in image'
-          : isHandwritten ? 'Expected answer — grade from the marked region'
-          : 'Expected answer';
-        referenceBlock = `<div class="ref-block human-ref"><span class="ref-label">${label}</span><p>${toHtml(sub.graderNote)}</p></div>`;
-      } else {
-        referenceBlock = `<div class="ref-block empty-ref"><span class="ref-label">No grader note</span><p>Human review required — no reference answer provided.</p></div>`;
-      }
+      // ONE RUBRIC FOR BOTH GRADERS (WORKORDER_AM_ONE_RUBRIC_BOTH_GRADERS_2026-09-27).
+      // Every authored criterion is shown, grading prompt and grader note alike,
+      // whatever the grading type: the person marking reads exactly the text the
+      // model receives as `grading_criteria`. This used to choose between them
+      // on grading type, which guaranteed the two graders saw different
+      // material. The LABEL follows the field and the type, since a person
+      // reads headings; the TEXT does not vary. Each block carries its part and
+      // its grader-facing text so `criteriaAgreementProblems` can prove the two
+      // files agree.
+      //
+      // A reader part is not graded, so it makes no answer-key claim: no
+      // "Expected answer", no "Human review required". Whatever the author
+      // typed is shown as their note; nothing typed is simply not marked.
+      const pieces = criteriaPieces(sub);
+      const humanLabel = isImage ? 'What to look for'
+        : isTextAndImageRubric ? 'Expected answer + what to look for in image'
+        : isHandwritten ? 'Expected answer — grade from the marked region'
+        : 'Expected answer';
+      const referenceBlock = pieces.length
+        ? pieces.map(piece => {
+          const [cls, label] = !marked ? ['empty-ref', 'Your note (not used for marking)']
+            : piece.field === 'aiGradingPrompt' ? ['ai-ref', 'Grading criteria']
+            : ['human-ref', humanLabel];
+          return `<div class="ref-block ${cls}" data-criteria-for="p${pIdx}s${sIdx}" data-criteria="${escapeHtml(criteriaText(piece))}">`
+            + `<span class="ref-label">${label}</span><p>${toHtml(piece.text)}</p></div>`;
+        }).join('')
+        : !marked
+          ? `<div class="ref-block empty-ref"><span class="ref-label">Not marked</span><p>Reader assignment: nothing grades this part.</p></div>`
+          : `<div class="ref-block empty-ref"><span class="ref-label">No grader note</span><p>Human review required — no reference answer provided.</p></div>`;
 
       const typeLabel = !marked ? 'Handwritten (reader, not marked)'
         : isHandwritten

@@ -35,6 +35,7 @@ const SUITES = [
   'figure-ref-tests.mjs',
   'figure-guard-tests.mjs',
   'figure-path-import-tests.mjs',
+  'grading-criteria-tests.mjs',
   'finalize-tests.mjs',
   'figure-extract-tests.mjs',
   'figure-swap-e2e-tests.mjs',

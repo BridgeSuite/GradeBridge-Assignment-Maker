@@ -14,6 +14,14 @@
 //      hashes per fixture moved (Math 0fd3a7bd -> 3e97e11a, Handwritten
 //      67917dcf -> 46f3c573). Every other entry is still d6f4af5's, unchanged
 //      by the regeneration; the decoded specs differ by that one field only.
+//
+//      UPDATED AGAIN, 2026-09-27, for WORKORDER_AM_ONE_RUBRIC_BOTH_GRADERS: the
+//      rubric gained `subsection_statement` and `grading_criteria`, and the
+//      grader document now shows both authored fields on every part. Exactly
+//      four hashes moved, the rubric and the grader document of each fixture
+//      (Math b8f024f6 -> b302ac25, 706e9ef0 -> c014934f; Handwritten
+//      3002a63f -> a0957380, aa0b094f -> e8d6277b). Every student-facing entry,
+//      the spec, the PDFs, the sheet and the map, is still d6f4af5's.
 //   2. `tests/generic-sheet-tests.mjs` hashes the same fixtures with the code as
 //      it stands and asserts every hash is unchanged. That is the suite's proof
 //      that an ELECTRONIC export and a PRINTED-SHEET export did not move by a

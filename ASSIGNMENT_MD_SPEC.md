@@ -507,6 +507,18 @@ Attach grading guidance to a sub-part with a blockquote **immediately under** it
 | `> grading_prompt:` | the `ai-graded:*` tiers **and** `handwritten` (AI) | The rubric/prompt the AI grades against. |
 | `> grader_note:` | `text`, `image`, `text+image`, and `handwritten:human` | The human grader's reference: expected answer / what to look for. Never shown to students. |
 
+**Both keys reach both graders, whatever the grading type** (2026-09-27,
+`WORKORDER_AM_ONE_RUBRIC_BOTH_GRADERS_2026-09-27`). Every assignment is marked by a person and,
+independently, by a model, and the two must work off the same criteria. So the rubric carries
+**`grading_criteria`**, every blockquote you wrote under the part (the grading prompt first, then the
+grader note, separated by a blank line, each figure reduced to its words), and the grader document
+shows exactly that text on every part. It carries **`subsection_statement`** too, the part's own
+question, reduced the same way as `problem_statement`. `grading_prompt` is unchanged, for consumers
+that already read it. Each key is absent only when you wrote nothing for it. Which key you choose now
+changes only the heading a person sees. `criteriaAgreementProblems` in `services/gradingCriteria.ts`
+checks, part by part, that the grader document and the rubric carry the same text. *Direction, not yet
+decided: one criteria field in place of these two, since two fields invite two texts.*
+
 **Before writing a grading prompt, read §12.** It says who reads each exported artifact and what each
 one is authoritative for. Two things an author most needs to know here:
 
