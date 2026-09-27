@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import { collectNotices, noticesText } from './scripts/thirdPartyNotices.mjs';
 
 /**
  * `import font from '…/KaTeX_Main-Regular.woff2?dataurl'` → a base64 data URI.
@@ -63,10 +64,47 @@ const fontLicences = (): Plugin => {
   };
 };
 
+/**
+ * THIRD-PARTY NOTICES, from the modules this build actually bundled
+ * (`scripts/thirdPartyNotices.mjs` holds the reasoning). Every chunk counts,
+ * dynamically imported ones included: a lazily loaded library is still served.
+ *
+ * Emits `THIRD_PARTY_NOTICES.txt` beside the app and `third-party-notices.json`,
+ * which the Notices page reads. A package with no notice text FAILS the build
+ * and is named: a notices page that silently omits a library reads as complete.
+ */
+const thirdPartyNotices = (): Plugin => ({
+  name: 'gb-third-party-notices',
+  async generateBundle(_options, bundle) {
+    const ids = new Set<string>();
+    for (const out of Object.values(bundle)) {
+      if (out.type === 'chunk') for (const id of Object.keys(out.modules)) ids.add(id);
+    }
+    // CSS the build inlined or emitted (the self-hosted fonts' @font-face) is
+    // not in `modules`; the module graph still names every file it came from.
+    for (const id of this.getModuleIds()) if (/\/node_modules\/@fontsource\//.test(id.replace(/\\/g, '/'))) ids.add(id);
+
+    const { packages, problems } = collectNotices(ids);
+    if (problems.length) {
+      this.error([
+        'Third-party notices: the build was stopped, because these bundled packages have no notice text.',
+        'Every library served to a browser must carry its notice. Find the package\'s licence text (its '
+          + 'source header or repository), or remove the package; see scripts/thirdPartyNotices.mjs.',
+        '',
+        ...problems.map(p => `  - ${p}`),
+      ].join('\n'));
+    }
+    const root = dirname(fileURLToPath(import.meta.url));
+    const project = { name: 'GradeBridge Assignment Maker', licence: await readFile(join(root, 'LICENSE'), 'utf8') };
+    this.emitFile({ type: 'asset', fileName: 'THIRD_PARTY_NOTICES.txt', source: noticesText(project, packages) });
+    this.emitFile({ type: 'asset', fileName: 'third-party-notices.json', source: JSON.stringify({ project, packages }, null, 2) });
+  },
+});
+
 // https://vitejs.dev/config/
 export default defineConfig({
   base: '/GradeBridge-Assignment-Maker/',
-  plugins: [dataUriAssets(), fontLicences(), react()],
+  plugins: [dataUriAssets(), fontLicences(), thirdPartyNotices(), react()],
   server: {
     port: 3000,
   },

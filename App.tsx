@@ -3,6 +3,7 @@ import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import Editor from './pages/Editor';
 import Preview from './components/Preview';
+import NoticesPage from './components/NoticesPage';
 import { PrivacyNotice } from './components/PrivacyNotice';
 import { HelpProvider } from './components/HelpGuide';
 
@@ -20,6 +21,7 @@ const App: React.FC = () => {
             <Route path="/create" element={<Editor />} />
             <Route path="/edit/:id" element={<Editor />} />
             <Route path="/view/:id" element={<Preview />} />
+            <Route path="/notices" element={<NoticesPage />} />
           </Routes>
         </Router>
       </HelpProvider>

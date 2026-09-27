@@ -128,8 +128,18 @@ export const PrivacyNoticeBody: React.FC = () => (
       <p className="text-academic-600 text-sm">
         This software is provided "as is", without warranty of any kind, express or implied,
         including but not limited to the warranties of merchantability, fitness for a particular
-        purpose and noninfringement. Copyright © 2026 The Regents of the University of
-        California. This application is made available under the MIT License.
+        purpose and noninfringement.
+      </p>
+    </div>
+
+    {/* Attribution is not fine print about liability, so it is not under
+        "Disclaimer". It is also in the footer of every screen, with Notices. */}
+    <div className="border-t border-academic-200 pt-4">
+      <h3 className="font-bold text-academic-900 mb-2">Licence</h3>
+      <p className="text-academic-600 text-sm">
+        Copyright © 2026 The Regents of the University of California. This application is made
+        available under the MIT License. The third-party software it includes, and each package's
+        notice, are listed under Notices at the foot of every screen.
       </p>
     </div>
 

@@ -313,6 +313,16 @@ export const create = at('/create', '/create', React.createElement(Editor));
 export const preview = at('/view/probe', '/view/:id', React.createElement(Preview));
 export const home = at('/', '/', React.createElement(Dashboard));
 export const importPage = at('/import', '/import', React.createElement(Dashboard, { view: 'import' }));
+import NoticesPage, { NoticesView } from './components/NoticesPage';
+export const notices = at('/notices', '/notices', React.createElement(NoticesPage));
+export const noticesView = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(NoticesView, {
+  failed: false,
+  notices: { project: { name: 'X', licence: 'MIT License\\n\\nCopyright (c) 2026 The Regents of the University of California' },
+    packages: [
+      { name: 'jszip', version: '3.10.1', licence: '(MIT OR GPL-3.0-or-later)', licenceChosen: 'MIT', noticeSource: 'LICENSE.markdown', notice: 'JSZip notice text' },
+      { name: 'react', version: '18.3.1', licence: 'MIT', noticeSource: 'LICENSE', notice: 'React notice text' },
+    ] },
+})));
 export * as dash from './pages/Dashboard';
 export { HOME_SCREEN_NAME };
 `);
@@ -341,6 +351,35 @@ export { HOME_SCREEN_NAME };
   const visible = (html) => html.replace(/ title="[^"]*"/g, '').replace(/<[^>]+>/g, ' ')
     .replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
   const { dash } = mod;
+
+  // ---- WORKORDER_ATTRIBUTION_AND_THIRD_PARTY_NOTICES_2026-09-27, item 3 -----
+  await check('NOTICES: every screen\'s footer carries the Regents line, the MIT statement and a link to Notices', () => {
+    for (const [screen, html] of [['dashboard', mod.home], ['import page', mod.importPage], ['editor', mod.editor],
+      ['new-assignment editor', mod.create], ['preview', mod.preview], ['notices', mod.notices]]) {
+      const footer = html.match(/<footer[\s\S]*?<\/footer>/);
+      assert(footer, `the ${screen} has no footer`);
+      const text = visible(footer[0]);
+      assert(text.includes('Copyright © 2026 The Regents of the University of California'), `the ${screen} footer has no Regents line`);
+      assert(text.includes('MIT License'), `the ${screen} footer does not name the MIT License`);
+      assert(/<a[^>]*href="\/notices"[^>]*>Notices<\/a>/.test(footer[0]), `the ${screen} footer has no link to Notices`);
+      assert(!/GradeBridge AI/.test(footer[0]), `the ${screen} footer still names the wrong holder`);
+    }
+  });
+
+  await check('NOTICES: the page lists each package with its licence, the jszip choice, and each notice in full', () => {
+    const t = visible(mod.noticesView);
+    assert(/data-notices-table/.test(mod.noticesView), 'no table of packages');
+    assert(t.includes('jszip') && t.includes('(used under MIT)'), 'the jszip choice is not shown');
+    assert(t.includes('JSZip notice text') && t.includes('React notice text'), 'a notice is not shown in full');
+    assert(t.includes('The Regents of the University of California'), 'the app\'s own licence is not shown');
+  });
+
+  await check('NOTICES: the Regents line is no longer filed under "Disclaimer"', () => {
+    const src = readFileSync(join(REPO, 'components', 'PrivacyNotice.tsx'), 'utf8');
+    const disclaimer = src.slice(src.indexOf('>Disclaimer<'), src.indexOf('</div>', src.indexOf('>Disclaimer<')));
+    assert(!/Regents/.test(disclaimer), 'the copyright line is still under the warranty disclaimer');
+    assert(/>Licence<[\s\S]*Regents of the University of California/.test(src), 'the notice has no attribution section');
+  });
 
   await check('ONE ROUTE IN 1: the way to bring in an assignment is a labelled link to its own page, before the list', () => {
     const a = mod.home.match(/<a[^>]*data-bring-in[^>]*>[\s\S]*?<\/a>/);

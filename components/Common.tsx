@@ -125,8 +125,16 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
         {children}
       </main>
       <footer className="bg-academic-800 text-academic-300 py-8 border-t border-academic-700">
-        <div className="max-w-7xl mx-auto px-4 text-center text-sm">
-          <p>&copy; {new Date().getFullYear()} GradeBridge AI. Client-side Assignment Management.</p>
+        {/* ATTRIBUTION, on every screen (WORKORDER_ATTRIBUTION_AND_THIRD_PARTY_NOTICES_2026-09-27).
+            It used to read "© {current year} GradeBridge AI", which named the
+            wrong copyright holder with a year that changed by itself; the
+            Regents line sat only inside the privacy notice, under "Disclaimer". */}
+        <div className="max-w-7xl mx-auto px-4 text-center text-sm" data-attribution>
+          <p>
+            Copyright &copy; 2026 The Regents of the University of California. Made available under the MIT License.
+            {' '}
+            <Link to="/notices" className="underline underline-offset-2 hover:text-white" data-notices-link>Notices</Link>
+          </p>
         </div>
       </footer>
 
