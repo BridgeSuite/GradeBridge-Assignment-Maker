@@ -1173,6 +1173,49 @@ ${r.problem_statement}`);
         'the two parts of one problem disagree about the stem');
     });
 
+    // WORKORDER_AM_ONE_RUBRIC_2026-09-27, Part 1. The rubric carries the part's
+    // question and its authored criteria, on every grading type.
+    {
+      const oneRubric = parseMdToAssignment([
+        '# DEMO130: One Rubric', '', '**Input:** handwritten', '',
+        '## Problem 1: Waves', '',
+        '### (a) Expressions [1 pts] [handwritten:human]',
+        'Express $v_p$ in terms of $\\omega$ and $\\beta$.', '',
+        '> grader_note: SOLUTION. $v_p = \\omega/\\beta$. Full credit for the relation.', '',
+        '### (b) Bare [1 pts] [handwritten:human]', '',
+        '### (c) Gamma [1 pts] [handwritten]',
+        'Calculate $\\Gamma$.', '',
+        '> grading_prompt: Required elements: (1) the formula; (2) the value 0.5.', '',
+        '> grader_note: REFERENCE. 0.5.', '',
+      ].join('\n'));
+      const r1 = generateGradingRubric(oneRubric).rubrics;
+      const [a, , c] = oneRubric.problems[0].subsections;
+
+      check('ONE RUBRIC: a described part with a grader note carries both fields, with the authored text', () => {
+        assertEqual(r1.p0s0.subsection_statement, a.description, 'subsection_statement is not the authored question');
+        assertEqual(r1.p0s0.grading_criteria, a.graderNote, 'grading_criteria is not the authored grader note');
+      });
+
+      check('ONE RUBRIC: a part with no text and no criteria carries NEITHER key, not an empty one', () => {
+        assert(!('subsection_statement' in r1.p0s1), 'an absent question was written as a value');
+        assert(!('grading_criteria' in r1.p0s1), 'absent criteria were written as a value');
+      });
+
+      check('ONE RUBRIC: both fields are written on a human_handwritten part (not selected by grading type)', () => {
+        assertEqual(r1.p0s0.grading_type, 'human_handwritten', 'the probe part is not human-graded');
+        assert(r1.p0s0.subsection_statement && r1.p0s0.grading_criteria,
+          'a human-graded part lost its question or its criteria: the rule was selected by grading type');
+        assertEqual(r1.p0s0.grading_prompt, '', 'grading_prompt changed on a human part');
+      });
+
+      check('ONE RUBRIC: an AI part carries the unconditional join, prompt then note', () => {
+        assertEqual(r1.p0s2.grading_type, 'ai_handwritten', 'the probe part is not AI-graded');
+        assertEqual(r1.p0s2.grading_criteria, `${c.aiGradingPrompt}\n\n${c.graderNote}`,
+          'the AI part did not carry both, joined');
+        assertEqual(r1.p0s2.grading_prompt, c.aiGradingPrompt, 'grading_prompt changed on an AI part');
+      });
+    }
+
     check('rubric: the grader payload no longer scales with the drawing', () => {
       // The real property, and the one that does not depend on how big a test
       // fixture happens to be: what the grader carries is the figure's *words*,
