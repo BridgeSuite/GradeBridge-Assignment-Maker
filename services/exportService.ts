@@ -3,7 +3,7 @@ import { Assignment, SubmissionType } from '../types';
 import { decryptJson, encryptJson } from './cryptoService';
 import { escapeHtml, hasFigure, hasMath, katexStylesheet, renderTextToCanvas, toHtml, toLatexBody, toPdfText } from './mathRender';
 import { stemForGrader } from './figureText';
-import { criteriaPieces, criteriaText, gradingCriteriaFor } from './gradingCriteria';
+import { gradingCriteriaFor } from './gradingCriteria';
 import { generateTemplate } from './templateGenerator';
 import { assignmentKindProblem, sheetProblem } from './inputModeService';
 import {
@@ -1139,7 +1139,44 @@ export const assignmentToMd = (assignment: Assignment): string => {
 // CONFIDENTIAL — not distributed to students
 // =====================================================
 
-export const generateGraderHTML = async (assignment: Assignment): Promise<string> => {
+/** The rubric as the grader document reads it. Written by `generateGradingRubric`. */
+export interface GradingRubric {
+  course_code: string;
+  assignment_title: string;
+  assignment_kind?: string;
+  rubrics: Record<string, {
+    subsection_name?: string;
+    max_points: number;
+    grading_type?: string;
+    grading_criteria?: string;
+    max_images?: number;
+  }>;
+}
+
+/**
+ * The grader document: A HUMAN-FRIENDLY RENDERING OF THE RUBRIC
+ * (WORKORDER_AM_ONE_RUBRIC_2026-09-27, Part 2).
+ *
+ * Every assignment is marked by a person and, independently, by a model, and
+ * both must work off one rubric. So this takes the rubric as its input, and
+ * every grading criterion a person reads here comes from that file: the
+ * criteria, the points and the grading type. It used to read `graderNote` and
+ * `aiGradingPrompt` out of the assignment and choose between them on grading
+ * type, which guaranteed the two graders saw different material.
+ *
+ * PRESENTATION may come from the assignment, and only presentation: the
+ * question text, so a person sees the figure DRAWN where the model is given its
+ * description, and the submission type's own name on an AI part. If it guides
+ * marking, it comes from the rubric or it is not shown.
+ *
+ * `rubric` defaults to the one this assignment exports, so a caller that has
+ * not built one still gets the same document; the export passes the object it
+ * writes, so the two are one derivation.
+ */
+export const generateGraderHTML = async (
+  assignment: Assignment,
+  rubric: GradingRubric = generateGradingRubric(assignment) as GradingRubric,
+): Promise<string> => {
   // FIGURE BLOCKS ARE RESOLVED ONCE, HERE, AT THE ENTRY POINT.
   //
   // Everything below this line works on inline figures only, exactly as it did
@@ -1151,67 +1188,53 @@ export const generateGraderHTML = async (assignment: Assignment): Promise<string
 
   const katexCss = await katexStylesheet();
   // A reader assignment shows no points: no per-part label, no problem sum, no
-  // total. The conventional document is byte-identical to what it was.
-  const marked = pointsAreMarked(assignment);
-  const totalPoints = assignment.problems.reduce((sum, prob) =>
-    sum + prob.subsections.reduce((s, sub) => s + sub.points, 0), 0
-  );
+  // total. From the rubric's own statement of the kind.
+  const marked = rubric.assignment_kind !== 'reader';
+  const entryFor = (pIdx: number, sIdx: number) => rubric.rubrics[`p${pIdx}s${sIdx}`];
+  const totalPoints = Object.values(rubric.rubrics).reduce((sum, e) => sum + e.max_points, 0);
 
   const subsectionRows = assignment.problems.map((prob, pIdx) => {
-    const problemPoints = prob.subsections.reduce((s, sub) => s + sub.points, 0);
+    const problemPoints = prob.subsections.reduce((s, _sub, sIdx) => s + (entryFor(pIdx, sIdx)?.max_points ?? 0), 0);
     const subsRows = prob.subsections.map((sub, sIdx) => {
       const letter = String.fromCharCode(97 + sIdx);
-      const isAi = AI_GRADED_TYPES.has(sub.submissionType);
-      const isImage = sub.submissionType === SubmissionType.IMAGE;
-      const isHandwritten = sub.submissionType === SubmissionType.HANDWRITTEN;
-      const isAiHandwritten = isHandwritten && (sub.handwrittenGradingMode ?? 'ai') !== 'human';
+      const entry = entryFor(pIdx, sIdx);
+      const gradingType = entry?.grading_type;
+      const criteria = entry?.grading_criteria || undefined;
+      const pages = entry?.max_images ?? 1;
 
-      const isTextAndImageRubric = sub.submissionType === SubmissionType.TEXT_AND_IMAGE;
-      // ONE RUBRIC FOR BOTH GRADERS (WORKORDER_AM_ONE_RUBRIC_BOTH_GRADERS_2026-09-27).
-      // Every authored criterion is shown, grading prompt and grader note alike,
-      // whatever the grading type: the person marking reads exactly the text the
-      // model receives as `grading_criteria`. This used to choose between them
-      // on grading type, which guaranteed the two graders saw different
-      // material. The LABEL follows the field and the type, since a person
-      // reads headings; the TEXT does not vary. Each block carries its part and
-      // its grader-facing text so `criteriaAgreementProblems` can prove the two
-      // files agree.
-      //
-      // A reader part is not graded, so it makes no answer-key claim: no
-      // "Expected answer", no "Human review required". Whatever the author
-      // typed is shown as their note; nothing typed is simply not marked.
-      const pieces = criteriaPieces(sub);
-      const humanLabel = isImage ? 'What to look for'
-        : isTextAndImageRubric ? 'Expected answer + what to look for in image'
-        : isHandwritten ? 'Expected answer — grade from the marked region'
-        : 'Expected answer';
-      const referenceBlock = pieces.length
-        ? pieces.map(piece => {
-          const [cls, label] = !marked ? ['empty-ref', 'Your note (not used for marking)']
-            : piece.field === 'aiGradingPrompt' ? ['ai-ref', 'Grading criteria']
-            : ['human-ref', humanLabel];
-          return `<div class="ref-block ${cls}" data-criteria-for="p${pIdx}s${sIdx}" data-criteria="${escapeHtml(criteriaText(piece))}">`
-            + `<span class="ref-label">${label}</span><p>${toHtml(piece.text)}</p></div>`;
-        }).join('')
+      // THE CRITERIA, FROM THE RUBRIC. The label follows the grading type,
+      // since a person reads headings; the text is the rubric's, verbatim, and
+      // the block carries it for `criteriaAgreementProblems`. A reader part is
+      // not graded, so it makes no answer-key claim.
+      const [cls, label] = !marked ? ['empty-ref', 'Your note (not used for marking)']
+        : gradingType === 'ai' || gradingType === 'ai_handwritten' ? ['ai-ref', 'Grading criteria']
+        : gradingType === 'human_image' ? ['human-ref', 'What to look for']
+        : gradingType === 'human_handwritten' ? ['human-ref', 'Expected answer — grade from the marked region']
+        : entry?.max_images !== undefined ? ['human-ref', 'Expected answer + what to look for in image']
+        : ['human-ref', 'Expected answer'];
+      const referenceBlock = criteria !== undefined
+        ? `<div class="ref-block ${cls}" data-criteria-for="p${pIdx}s${sIdx}" data-criteria="${escapeHtml(criteria)}">`
+          + `<span class="ref-label">${label}</span><p>${toHtml(criteria)}</p></div>`
         : !marked
           ? `<div class="ref-block empty-ref"><span class="ref-label">Not marked</span><p>Reader assignment: nothing grades this part.</p></div>`
           : `<div class="ref-block empty-ref"><span class="ref-label">No grader note</span><p>Human review required — no reference answer provided.</p></div>`;
 
       const typeLabel = !marked ? 'Handwritten (reader, not marked)'
-        : isHandwritten
-        ? (isAiHandwritten ? 'Handwritten (AI graded)' : 'Handwritten (human review)')
-        : isAi ? sub.submissionType : isImage
-        ? `Image${sub.maxImages && sub.maxImages > 1 ? ` (${sub.maxImages} pages)` : ''} — human review`
-        : isTextAndImageRubric
-          ? `Text + Image${sub.maxImages && sub.maxImages > 1 ? ` (${sub.maxImages} image pages)` : ''} — human grading`
+        : gradingType === 'ai_handwritten' ? 'Handwritten (AI graded)'
+        : gradingType === 'human_handwritten' ? 'Handwritten (human review)'
+        // The tier's own name, which the rubric does not carry. Presentation.
+        : gradingType === 'ai' ? sub.submissionType
+        : gradingType === 'human_image' ? `Image${pages > 1 ? ` (${pages} pages)` : ''} — human review`
+        : entry?.max_images !== undefined
+          ? `Text + Image${pages > 1 ? ` (${pages} image pages)` : ''} — human grading`
           : 'Electronic text — human grading';
 
       return `
         <div class="subsection">
           <div class="sub-header">
             <span class="sub-id">(${letter})</span>
-            <span class="sub-name">${toHtml(sub.name)}</span>
-            ${marked ? `<span class="sub-pts">${sub.points} pts</span>
+            <span class="sub-name">${toHtml(entry?.subsection_name ?? sub.name)}</span>
+            ${marked ? `<span class="sub-pts">${entry?.max_points ?? sub.points} pts</span>
             ` : ''}<span class="sub-type">${escapeHtml(typeLabel)}</span>
           </div>
           ${sub.description ? `<p class="sub-desc">${toHtml(sub.description, `gp${pIdx}s${sIdx}f`)}</p>` : ''}
@@ -1234,7 +1257,7 @@ export const generateGraderHTML = async (assignment: Assignment): Promise<string
 <html>
 <head>
 <meta charset="utf-8">
-<title>GRADER DOCUMENT — ${escapeHtml(`${assignment.courseCode}: ${assignment.title}`)}</title>
+<title>GRADER DOCUMENT — ${escapeHtml(`${rubric.course_code}: ${rubric.assignment_title}`)}</title>
 <style>
 ${katexCss}
   body { font-family: Georgia, serif; max-width: 900px; margin: 40px auto; line-height: 1.6; padding: 0 24px; color: #222; }
@@ -1270,9 +1293,9 @@ ${marked ? '  .sub-pts { font-size: 0.9em; color: #555; white-space: nowrap; }\n
 </head>
 <body>
   <div class="confidential-banner">CONFIDENTIAL — INSTRUCTOR / TA USE ONLY — NOT FOR DISTRIBUTION</div>
-  <h1>${toHtml(`${assignment.courseCode}: ${assignment.title}`)} — Grader Reference</h1>
+  <h1>${toHtml(`${rubric.course_code}: ${rubric.assignment_title}`)} — Grader Reference</h1>
   <div class="meta">${marked
-    ? `Total: ${totalPoints} pts &nbsp;|&nbsp; Generated by GradeBridge Assignment Maker &nbsp;|&nbsp; Blue = AI rubric &nbsp;|&nbsp; Green = Answer key / What to look for`
+    ? `Total: ${totalPoints} pts &nbsp;|&nbsp; Generated by GradeBridge Assignment Maker &nbsp;|&nbsp; Blue = AI-graded part &nbsp;|&nbsp; Green = Answer key / What to look for &nbsp;|&nbsp; Every criterion shown is the text of the grading rubric`
     : 'Reader assignment: not marked, so there is no rubric and no answer key &nbsp;|&nbsp; Generated by GradeBridge Assignment Maker'}</div>
   ${assignment.preamble ? `<p class="prob-desc"><em>${toHtml(assignment.preamble)}</em></p>` : ''}
   ${subsectionRows}
@@ -1803,6 +1826,12 @@ export const buildExportEntries = async (
     ? GENERIC_EMBEDDED_LAYOUT
     : template ? { name: template.csvFilename, csv: template.csv } : undefined;
 
+  // THE RUBRIC FIRST, then the grader document from it
+  // (WORKORDER_AM_ONE_RUBRIC_2026-09-27). One object is written as the rubric
+  // file and rendered as the document, so the two cannot disagree about a
+  // criterion: the document is a view of the file, not a second derivation.
+  const rubric = generateGradingRubric(assignment) as GradingRubric;
+
   const entries: Record<string, Blob | string> = {
     // ---- student/ : the only files a student may receive --------------------
     // Spec JSON — encoded with AES-256-GCM so students cannot casually read or
@@ -1830,9 +1859,10 @@ export const buildExportEntries = async (
     // Editable LaTeX source, for an instructor who wants to hand-tune the paper.
     [`${INSTRUCTOR_DIR}assignment.tex`]: generateLaTeX(assignment),
     // Private — for the autograder only.
-    [`${INSTRUCTOR_DIR}${stem}_grading_rubric.json`]: JSON.stringify(generateGradingRubric(assignment), null, 2),
-    // Private — instructor/TA reference with rubrics and answer keys.
-    [`${INSTRUCTOR_DIR}${stem}_grader_document.html`]: await generateGraderHTML(assignment),
+    [`${INSTRUCTOR_DIR}${stem}_grading_rubric.json`]: JSON.stringify(rubric, null, 2),
+    // Private — instructor/TA reference: a rendering OF the rubric above, the
+    // same object, so the document cannot show criteria the file does not hold.
+    [`${INSTRUCTOR_DIR}${stem}_grader_document.html`]: await generateGraderHTML(assignment, rubric),
   };
 
   if (generic) {

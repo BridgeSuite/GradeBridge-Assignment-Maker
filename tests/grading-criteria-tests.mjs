@@ -136,21 +136,58 @@ await check('3.4: the grader document and the rubric carry the same criteria tex
   assertEqual(gc.criteriaAgreementProblems(fx.graderHtml, fx.rubric), [], 'the two files disagree');
 });
 
-await check('3.4: each block renders exactly the text it declares, so the attribute is what a person reads', () => {
+await check('3.4: each block renders exactly the rubric text it declares, so the attribute is what a person reads', () => {
   let blocks = 0;
-  for (const [p, prob] of fixture.problems.entries()) {
-    for (const [s, sub] of prob.subsections.entries()) {
-      for (const piece of gc.criteriaPieces(sub)) {
-        blocks++;
-        const open = `data-criteria-for="p${p}s${s}" data-criteria="${render.escapeHtml(gc.criteriaText(piece))}">`;
-        const at = fx.graderHtml.indexOf(open);
-        assert(at >= 0, `p${p}s${s}: no ${piece.field} block declares its text`);
-        const body = `<p>${render.toHtml(piece.text)}</p></div>`;
-        assert(fx.graderHtml.slice(at).includes(body), `p${p}s${s}: the ${piece.field} block does not render its own text`);
-      }
-    }
+  for (const [id, e] of Object.entries(fx.rubric.rubrics)) {
+    if (e.grading_criteria === undefined) continue;
+    blocks++;
+    const open = `data-criteria-for="${id}" data-criteria="${render.escapeHtml(e.grading_criteria)}">`;
+    const at = fx.graderHtml.indexOf(open);
+    assert(at >= 0, `${id}: no block declares the rubric's criteria`);
+    const body = `<p>${render.toHtml(e.grading_criteria)}</p></div>`;
+    assert(fx.graderHtml.slice(at).includes(body), `${id}: the block does not render the rubric's text`);
   }
-  assertEqual(blocks, 4, 'the fixture does not exercise four criteria blocks');
+  assertEqual(blocks, 3, 'the fixture does not exercise three parts with criteria');
+});
+
+// =====================================================
+// PART 2, CHECK 1: the grader document is a VIEW of the rubric
+// =====================================================
+// Blank one entry's criteria in the rubric and rebuild the document from it.
+// That part's criteria must be gone. This can pass only if the document reads
+// the file; a document that reads the assignment would still show the note.
+const rebuiltWithout = async (mod, id, how) => {
+  const r = JSON.parse(fx.rubricText);
+  if (how === 'delete') delete r.rubrics[id].grading_criteria; else r.rubrics[id].grading_criteria = '';
+  return mod.generateGraderHTML(fx.a, r);
+};
+
+await check('PART 2 CHECK 1: blank grading_criteria on one rubric entry, rebuild, and that part\'s criteria are gone', async () => {
+  assert(fx.graderHtml.includes('Award the point for both'), 'the probe is not in the document to begin with');
+  for (const how of ['delete', 'blank']) {
+    const html = await rebuiltWithout(m, 'p0s0', how);
+    assert(!gc.criteriaInGraderDocument(html).has('p0s0'), `${how}: the part still shows criteria`);
+    // The note's closing sentence is plain prose, so it survives rendering intact.
+    assert(!html.includes('Award the point for both'), `${how}: the grader note's text is still in the document`);
+    assert(gc.criteriaInGraderDocument(html).has('p1s0'), `${how}: another part lost its criteria too`);
+  }
+});
+
+await check('PART 2 CHECK 1: text changed in the rubric is the text the document shows', async () => {
+  const r = JSON.parse(fx.rubricText);
+  r.rubrics.p0s1.grading_criteria = 'SENTINEL criteria written only into the rubric file.';
+  const html = await m.generateGraderHTML(fx.a, r);
+  assert(html.includes('SENTINEL criteria written only into the rubric file.'), 'the document did not show the rubric\'s text');
+  assert(!html.includes('Hertz, metres'), 'the document still shows the assignment\'s own note');
+});
+
+await check('PART 2: the export builds the document from the object it writes as the rubric', async () => {
+  const src = readFileSync(join(REPO, 'services', 'exportService.ts'), 'utf8');
+  assert(/_grading_rubric\.json`\]: JSON\.stringify\(rubric, null, 2\)/.test(src), 'the rubric file is not the shared object');
+  assert(/_grader_document\.html`\]: await generateGraderHTML\(assignment, rubric\)/.test(src),
+    'the grader document is not built from that object');
+  const doc = src.slice(src.indexOf('export const generateGraderHTML'), src.indexOf('// ASSIGNMENT SPEC'));
+  assert(!/\bsub\.(graderNote|aiGradingPrompt)\b/.test(doc), 'the grader document reads criteria from the assignment');
 });
 
 // CHECK 5. Deleting the grader note from ONE file must fail by name. (Deleting
@@ -178,22 +215,22 @@ await check('CHECK 5: text that differs by one character fails', () => {
     'a one-character difference passed');
 });
 
-await check('MUTATION: the old branching (the document picks a field by grading type) fails the check', async () => {
+await check('MUTATION: a document that reads the assignment instead of the rubric fails PART 2 CHECK 1', async () => {
   const src = readFileSync(join(REPO, 'services', 'exportService.ts'), 'utf8');
-  const from = '      const pieces = criteriaPieces(sub);';
+  const from = '      const criteria = entry?.grading_criteria || undefined;';
   assert(src.includes(from), 'the mutation anchor is gone');
   // Written beside the original, so its relative imports resolve; never over it.
   const mutantPath = join(REPO, 'services', '__mutant-criteria-exportService.ts');
-  writeFileSync(mutantPath, src.replace(from, '      const pieces = criteriaPieces(sub)'
-    + ".filter(p => (isAi || isAiHandwritten) ? p.field === 'aiGradingPrompt' : p.field === 'graderNote');"));
+  writeFileSync(mutantPath, src.replace(from,
+    "      const criteria = [sub.aiGradingPrompt, sub.graderNote].filter(Boolean).join('\\n\\n') || undefined;"));
   try {
     const outfile = join(outDir, 'mutant.mjs');
     await build({ entryPoints: [mutantPath], outfile, format: 'esm', target: 'es2022', bundle: true,
       platform: 'node', absWorkingDir: REPO, logLevel: 'silent', plugins });
     const broken = await import(pathToFileURL(outfile).href);
-    const a = broken.normalizePointsConfirmed(fixture);
-    const problems = gc.criteriaAgreementProblems(await broken.generateGraderHTML(a), broken.generateGradingRubric(a));
-    assert(problems.some(x => x.includes('p1s0')), `the mutant passed the check: ${problems.join(' | ') || '(none)'}`);
+    const html = await rebuiltWithout(broken, 'p0s0', 'delete');
+    assert(gc.criteriaInGraderDocument(html).has('p0s0'),
+      'the mutant also dropped the criteria, so PART 2 CHECK 1 does not tell a view from a second derivation');
   } finally {
     rmSync(mutantPath, { force: true });
   }

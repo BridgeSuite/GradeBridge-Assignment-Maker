@@ -22,6 +22,11 @@
 //      (Math b8f024f6 -> b302ac25, 706e9ef0 -> c014934f; Handwritten
 //      3002a63f -> a0957380, aa0b094f -> e8d6277b). Every student-facing entry,
 //      the spec, the PDFs, the sheet and the map, is still d6f4af5's.
+//
+//      And once more the same day, WORKORDER_AM_ONE_RUBRIC Part 2: the grader
+//      document became a rendering of the rubric. Only the two grader
+//      documents moved (Math c014934f -> 74986665; Handwritten e8d6277b ->
+//      8346f103). The rubrics did not move, which is the point.
 //   2. `tests/generic-sheet-tests.mjs` hashes the same fixtures with the code as
 //      it stands and asserts every hash is unchanged. That is the suite's proof
 //      that an ELECTRONIC export and a PRINTED-SHEET export did not move by a
