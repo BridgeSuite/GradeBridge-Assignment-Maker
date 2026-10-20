@@ -241,26 +241,27 @@ const inkOf = (what) => {
 };
 const ptOf = (b) => (b.y1 - b.y0) / (1.2 * 25.4 / 72);
 
-await check('FINAL: the bold line says "One part per page.", one line, at y 37.0, 10 pt bold', () => {
-  const line = 'Write only inside the box. Anything outside it is not collected. One part per page.';
+await check('the bold line says "Start each problem on a new page.", one line, at y 37.0, 9 pt bold', () => {
+  const line = 'Write only inside the box. Anything outside it is not collected. Start each problem on a new page.';
   assertEqual(gp.GENERIC_OUTSIDE_BOX_TEXT, line, 'the outside-box line is not the approved text');
   assert(pdfStrings.includes(line), `the line is not printed whole on one line\n          found: ${JSON.stringify(pdfStrings)}`);
-  assert(!pdfStrings.some(t => /One answer per page/.test(t)), 'the superseded wording is still printed');
+  assert(!pdfStrings.some(t => /One answer per page|One part per page/.test(t)), 'a superseded wording is still printed');
   const b = inkOf('outside-box line');
   assertEqual([b.x0, b.y0], [12.0, 37.0], 'the line moved');
-  assert(Math.abs(ptOf(b) - 10) < 1e-6, 'the line is not 10 pt');
+  assert(Math.abs(ptOf(b) - 9) < 1e-6, 'the line is not 9 pt');
+  assert(b.x1 <= gp.GENERIC_BOX_MM.x1, `the line runs to x ${b.x1.toFixed(2)}, past the box`);
 });
 
 // The note could not go on the fields line: that line ends at x ~136 mm and the
 // QR keep-out starts at 166, leaving ~30 mm for a note that needs ~48 even at
 // 8 pt. The work order's fallback is the bold line, which "One part per page."
 // shortened. It is a note, so it is smaller and lighter than the line it follows.
-await check('FINAL: "(a long answer can run to more pages)" sits on the bold line, 8 pt, lighter, inside the box width', () => {
+await check('"(a long answer can run to more pages)" sits on the bold line, 7 pt, lighter, inside the box width', () => {
   const note = '(a long answer can run to more pages)';
   assertEqual(gp.GENERIC_MORE_PAGES_NOTE, note, 'the note is not the approved text');
   assert(pdfStrings.includes(note), `the note is not printed whole\n          found: ${JSON.stringify(pdfStrings)}`);
   const n = inkOf('more-pages note'), bold = inkOf('outside-box line');
-  assert(Math.abs(ptOf(n) - 8) < 1e-6, `the note is ${ptOf(n).toFixed(1)} pt, not 8`);
+  assert(Math.abs(ptOf(n) - 7) < 1e-6, `the note is ${ptOf(n).toFixed(1)} pt, not 7`);
   assert(n.x0 > bold.x1, 'the note does not follow the bold line');
   assert(n.y0 >= bold.y0 && n.y1 <= bold.y1, 'the note is not on the bold line\'s row');
   assert(n.x1 <= gp.GENERIC_BOX_MM.x1, `the note runs to x ${n.x1.toFixed(2)}, past the box`);

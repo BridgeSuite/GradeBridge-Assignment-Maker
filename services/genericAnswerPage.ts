@@ -108,18 +108,25 @@ export const GENERIC_TEXT_TOP_MM = {
 export const GENERIC_HEADER_TEXT = `GradeBridge   answer page   ${GENERIC_TEMPLATE_ID}`;
 export const GENERIC_FIELDS_TEXT = 'Problem __________   Part __________   Page ______ of ______';
 /**
- * FINAL WORDING, 2026-09-25 (WORKORDER_AM_PAGE_FINAL_WORDING_2026-09-25). The
- * page is frozen from this line on: it is printed in bulk and posted to
- * students, and a later change puts two versions in circulation.
+ * WORDING, revised 2026-10-12 (Andre Knoesen; step 8 of
+ * `workorders\\SUBPARTS_ROLLOUT_2026-10-07.md`). "One part per page." became
+ * "Start each problem on a new page." when sub-parts stopped needing pages of
+ * their own, so the sheet no longer contradicts rule 5 of the submission
+ * instructions spec, which the assignment sheets carry.
  *
- * "One part per page." replaced the morning's "One answer per page.", which did
- * not say whether parts (a) and (b) are one answer or two. "Part" is the word
- * the fields line, the Submission app and the instructor handouts all use.
- * Appended to this line, never a new one: a new line pushes the box down and
- * moves `5F0B10BC`. At 10 pt bold it ends at x ~147.1 mm.
+ * Earlier history: "One part per page." replaced "One answer per page." on
+ * 2026-09-25, which did not say whether parts (a) and (b) are one answer or two.
+ *
+ * **Still one line, never two.** A second line pushes the box down and moves
+ * `5F0B10BC`. The new sentence does not fit at 10 pt, so the line is 9 pt and
+ * the note that follows it is 7 pt: bold ends at x ~157.8 mm and the note at
+ * ~202.0 mm, inside the box's x1 of 203.9. Nothing moved, and the layout id is
+ * unchanged, so sheets printed before and after this change are interchangeable.
  */
 export const GENERIC_OUTSIDE_BOX_TEXT =
-  'Write only inside the box. Anything outside it is not collected. One part per page.';
+  'Write only inside the box. Anything outside it is not collected. Start each problem on a new page.';
+/** 10 pt until 2026-10-12; 9 pt so the revised sentence fits on one line. */
+export const GENERIC_OUTSIDE_BOX_PT = 9;
 /**
  * The note that "one part per page" is not "one page per part". The work order
  * asked for it on the fields line, beside `Page ___ of ___`; it does not fit
@@ -129,7 +136,8 @@ export const GENERIC_OUTSIDE_BOX_TEXT =
  * 8 pt at grey 90, baseline-aligned, ending at x ~197 mm inside the box width.
  */
 export const GENERIC_MORE_PAGES_NOTE = '(a long answer can run to more pages)';
-export const GENERIC_MORE_PAGES_NOTE_PT = 8;
+/** 8 pt until 2026-10-12; 7 pt so it still ends inside the box after the bold line grew. */
+export const GENERIC_MORE_PAGES_NOTE_PT = 7;
 export const GENERIC_MORE_PAGES_NOTE_GREY = 90;
 const PT_TO_MM = 25.4 / 72;
 /** How far below a `baseline: 'top'` anchor jsPDF puts the baseline, as a
@@ -345,7 +353,7 @@ const drawGenericSide = (doc: jsPDF, ink: InkBox[], pageK: number) => {
   drawPlain(doc, GENERIC_FIELDS_TEXT, x, T.fields, { fontPt: 12 }, ink, pageK, 'fields line');
   // The two bold lines are legible at arm's length on purpose: this page has no
   // instructions page in front of it.
-  const boldPt = 10;
+  const boldPt = GENERIC_OUTSIDE_BOX_PT;
   const boldW = drawPlain(doc, GENERIC_OUTSIDE_BOX_TEXT, x, T.outsideBox, { fontPt: boldPt, bold: true }, ink, pageK, 'outside-box line');
   // The note shares the bold line's row. Both are drawn top-anchored, so the
   // smaller one is lowered so the two share a baseline.
