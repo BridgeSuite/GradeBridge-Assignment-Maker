@@ -134,10 +134,16 @@ const PNG = Buffer.concat([
 
 // The whole pipeline, for one assignment. `frozenLayoutId` is asserted when given.
 const swapEndToEnd = async (imported, label, frozenLayoutId) => {
+    // **On the generic answer page there is no printed sheet**, so
+    // `generateTemplate` refuses and there is no layout id to hold still. Every
+    // other part of CRITERION 6 applies unchanged, and the refusal is asserted
+    // instead. ENG17 HW1 moved to the generic page after this was written.
+    const onGenericPage = imported.inputMode === 'handwritten' && imported.sheet === 'generic';
+
     // 1. Extract the assignment's inline SVGs into files.
     const { assignment: extracted, extracted: list } = extract.extractFigures(imported);
     assert(list.length > 0, `${label} produced no figure files to swap`);
-    const beforeTemplate = await gen.generateTemplate(extracted);
+    const beforeTemplate = onGenericPage ? null : await gen.generateTemplate(extracted);
 
     // 2. Replace one figure with the PNG, keeping its id, title and desc.
     const target = list[0].id;
@@ -161,10 +167,22 @@ const swapEndToEnd = async (imported, label, frozenLayoutId) => {
     assert(crypto_.isEncoded(specText), 'the student spec is not gb1-encoded');
     const spec = await crypto_.decryptJson(specText);
 
-    // --- the PNG is inlined, and no reference survived ----------------------
+    // --- what reaches the student, and what must not ------------------------
     const stems = spec.problems.map(p => p.description).join('\n');
-    assert(stems.includes(`data:image/png;base64,${PNG.toString('base64')}`),
-      'the replacement PNG is not inlined in the student spec');
+    if (onGenericPage) {
+      // **A generic-sheet student receives no question text at all.** The
+      // instructor posts their own question PDF, so the export blanks every
+      // description, and the drawing therefore never reaches the student. On
+      // this path that is the claim worth making, and it is the stronger one:
+      // the swap must leave the student with nothing rather than with a picture.
+      assertEqual(stems.replace(/\s+/g, ''), '',
+        'a generic-sheet student spec carries question text, which the instructor posts instead');
+      assert(!stems.includes(`data:image/png;base64,${PNG.toString('base64')}`),
+        'the replacement PNG reached a generic-sheet student spec');
+    } else {
+      assert(stems.includes(`data:image/png;base64,${PNG.toString('base64')}`),
+        'the replacement PNG is not inlined in the student spec');
+    }
     assert(!stems.includes('```figure'), 'a figure block reached the student spec');
     assert(!('figures' in spec), 'the figure map reached the student spec');
 
@@ -180,14 +198,21 @@ const swapEndToEnd = async (imported, label, frozenLayoutId) => {
     assert(!/data:image|<svg|<path/.test(statements),
       'the drawing itself reached the grader');
 
-    // --- layout_id unchanged ------------------------------------------------
-    const afterTemplate = await gen.generateTemplate(swapped);
-    assertEqual(afterTemplate.layoutId, beforeTemplate.layoutId,
-      `layout_id moved when the figure was swapped: ${beforeTemplate.layoutId} -> ${afterTemplate.layoutId}`);
-    if (frozenLayoutId) {
-      assertEqual(afterTemplate.layoutId, frozenLayoutId, `${label} is not at its frozen layout_id`);
+    // --- layout_id unchanged, or no printed sheet at all --------------------
+    if (onGenericPage) {
+      let refusal = null;
+      try { await gen.generateTemplate(swapped); } catch (err) { refusal = err; }
+      assert(refusal && /generic answer page/.test(refusal.message),
+        `${label} is on the generic answer page and generateTemplate did not refuse it`);
+    } else {
+      const afterTemplate = await gen.generateTemplate(swapped);
+      assertEqual(afterTemplate.layoutId, beforeTemplate.layoutId,
+        `layout_id moved when the figure was swapped: ${beforeTemplate.layoutId} -> ${afterTemplate.layoutId}`);
+      if (frozenLayoutId) {
+        assertEqual(afterTemplate.layoutId, frozenLayoutId, `${label} is not at its frozen layout_id`);
+      }
+      assertEqual(afterTemplate.pageCount, beforeTemplate.pageCount, 'the page count moved');
     }
-    assertEqual(afterTemplate.pageCount, beforeTemplate.pageCount, 'the page count moved');
 
     // --- the instructor's .md travelled with its figures --------------------
     const figureEntries = Object.keys(entries).filter(n => /instructor\/figures\//.test(n));

@@ -211,12 +211,46 @@ await check('the report names every file written and every figure left behind', 
 //   GB_ENG17_DIR=/path/to/New\ HWKs npm test
 const FROZEN = { 1: '95438EDF', 2: '8505F1E5', 3: 'B549DC53' };
 
+// **A homework on the generic answer page has no printed sheet of its own**, so
+// `generateTemplate` refuses it and there is no layout id to hold still. ENG17
+// HW1 to HW3 moved to the generic page after this was written, and the three
+// checks then failed on any machine holding the course folder while skipping on
+// CI, which has neither. The criterion itself, that the student spec does not
+// move when figures are extracted, applies to both kinds, and on the generic
+// page the embedded map travels inside that same spec, so the byte comparison
+// already covers the layout. The frozen ids stay for any homework still on a
+// printed sheet.
 for (const n of [1, 2, 3]) {
   const name = `CRITERION 2 (ENG17 HW${n}): spec byte-identical, and layout_id unmoved, after extraction`;
+  const genericName = `CRITERION 2 (ENG17 HW${n}): spec byte-identical after extraction, on the generic answer page`;
   const plan = eng17Plan(n);
   if (plan.action === 'fail') { await check(name, async () => { throw new Error(plan.why); }); continue; }
   if (plan.action === 'skip') { skip(name, plan.why); continue; }
   const path = plan.path;
+
+  const declared = mdParser.parseMdToAssignment(readFileSync(path, 'utf8'));
+  if (declared.inputMode === 'handwritten' && declared.sheet === 'generic') {
+    skip(name, `HW${n} is on the generic answer page, so it has no printed sheet and no layout_id of its own`);
+    await check(genericName, async () => {
+      const before = mdParser.parseMdToAssignment(readFileSync(path, 'utf8'));
+      const beforeText = await specTextOf(before);
+      const { assignment: after, extracted, leftInline } = extract.extractFigures(before);
+
+      assertEqual(await specTextOf(after), beforeText,
+        `THE STUDENT SPEC MOVED for HW${n} — extraction is not invisible`);
+
+      let refusal = null;
+      try { await gen.generateTemplate(after); } catch (err) { refusal = err; }
+      assert(refusal && /generic answer page/.test(refusal.message),
+        `HW${n} is on the generic answer page and generateTemplate did not refuse it`);
+
+      results.push(`        HW${n}: ${extracted.length} extracted, ${leftInline.length} left inline`);
+      for (const f of leftInline) {
+        results.push(`          left inline — Problem ${f.problemNumber}, ${f.label}: ${f.reason}`);
+      }
+    });
+    continue;
+  }
 
   await check(name, async () => {
     const before = mdParser.parseMdToAssignment(readFileSync(path, 'utf8'));

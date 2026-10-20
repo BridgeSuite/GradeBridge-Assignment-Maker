@@ -2359,18 +2359,56 @@ check('Appendix C: no exam-generator leftovers in the payload or the map', () =>
   // reported success. On their first real run they passed, unedited: 17, 10 and
   // 14 regions, 95438EDF, 8505F1E5, B549DC53.
   // Override with:  ENG17_HWK_DIR=/path/to/"New HWKs" npm test
+  // **A generic-sheet homework has no printed sheet of its own**, so the region
+  // count and the layout id below do not exist for it, and `generateTemplate`
+  // refuses it by design (`services/templateGenerator.ts`). ENG17 HW1 to HW3
+  // moved to the generic answer page after these expectations were written: on
+  // 2026-10-20 all three carried `**Sheet:** generic`. The checks then failed on
+  // any machine that has the course folder, and skipped on CI, which has neither
+  // the folder nor the failure, so a green CI run said nothing about the red
+  // gate in front of the person trying to push.
+  //
+  // **So the suite reads what the file declares and asserts what is true of that
+  // kind of assignment.** An instructor moving a homework to the generic page
+  // now changes which check runs instead of turning the gate red, and the
+  // printed-sheet expectations stay, exact, for any homework still on one.
+  //
+  // The awaits sit INSIDE `check()`, which is async-aware. Before 2026-10-20 the
+  // `joinReport` call sat outside it, so the refusal escaped as an unhandled
+  // rejection and took the rest of the suite down with it.
   for (const { n, regions, layoutId } of [
     { n: 1, regions: 17, layoutId: '95438EDF' },
     { n: 2, regions: 10, layoutId: '8505F1E5' },
     { n: 3, regions: 14, layoutId: 'B549DC53' },
   ]) {
     const name = `ENG17 HW${n}: ${regions} regions join the rubric one-to-one, layout_id ${layoutId}`;
+    const genericName = `ENG17 HW${n}: on the generic answer page, so no printed sheet, and one rubric entry per part`;
     const plan = eng17Plan(n);
     if (plan.action === 'fail') { check(name, () => { throw new Error(plan.why); }); continue; }
     if (plan.action === 'skip') { skip(name, plan.why); continue; }
-    const mdPath = plan.path;
-    const report = await joinReport(mdParserJoin.parseMdToAssignment(readFileSync(mdPath, 'utf8')));
-    check(name, () => {
+
+    const assignment = mdParserJoin.parseMdToAssignment(readFileSync(plan.path, 'utf8'));
+    if (assignment.inputMode === 'handwritten' && assignment.sheet === 'generic') {
+      skip(name, `HW${n} is on the generic answer page, so it has no printed sheet and no layout_id of its own`);
+      check(genericName, async () => {
+        let refusal = null;
+        try { await gen.generateTemplate(assignment); } catch (err) { refusal = err; }
+        assert(refusal, `HW${n} is a generic-sheet assignment and generateTemplate built a sheet for it anyway`);
+        assert(/generic answer page/.test(refusal.message),
+          `HW${n}'s refusal does not name the generic answer page: ${refusal.message}`);
+
+        // The rubric is independent of the sheet, so this half still holds: one
+        // entry per part, which is what a grader joins against.
+        const rubric = exportJoinSvc.generateGradingRubric(assignment);
+        const parts = assignment.problems.reduce((t, prob) => t + prob.subsections.length, 0);
+        assertEqual(Object.keys(rubric.rubrics).length, parts,
+          `HW${n}: the rubric does not carry exactly one entry per part`);
+      });
+      continue;
+    }
+
+    check(name, async () => {
+      const report = await joinReport(assignment);
       assertJoinsOneToOne(report, `HW${n}`);
       assertEqual(report.rows.length, regions, `HW${n} has the wrong number of regions`);
       assertEqual(report.layoutId, layoutId,
