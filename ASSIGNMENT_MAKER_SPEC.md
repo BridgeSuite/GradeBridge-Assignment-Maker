@@ -8,10 +8,10 @@ app no longer has.
 already cost this project a session's work: ENG17 kept one of `ASSIGNMENT_MD_SPEC.md`, it
 fell two thirds behind, and a session reasoned from it and reported the conclusion as fact.
 
-**Status of the tree this describes:** branch `main`, commit `6fc6c3e` of
-27 September 2026. The working tree is not clean: `services/genericAnswerPage.ts`,
-`tests/generic-sheet-tests.mjs` and `.github/workflows/tests.yml` carry uncommitted
-changes. Section 12 says what they are.
+**Status of the tree this describes:** branch `main`, commit `2294a3d` of 20 October 2026, and
+the tree is clean apart from `converter/__pycache__/`, which should be ignored. The three
+changes section 12 used to describe as uncommitted are in `8ad4611`, `8d6f5bb` and `2294a3d`,
+all pushed.
 
 ---
 
@@ -61,7 +61,8 @@ actions, and an editor for one assignment.
 
 `Assignment` holds `courseCode`, `title`, `preamble`, `problems`, `assignmentKind`
 (`conventional` or `reader`, exactly one per assignment), optional `inputMode`, optional
-`sheet`, optional `figures`, optional `targetPoints` (default 100), optional `aiFeedback`,
+`sheet`, optional `figures`, optional `targetPoints` (an imported assignment takes its own
+authored total; only a new, empty one defaults to 100, section 8), optional `aiFeedback`,
 optional `pageFormatId`, and the finalize stamps.
 
 `Problem` holds `name`, `description` and `subsections`.
@@ -178,9 +179,60 @@ finalized line from the `.md` has turned it off on purpose, and that is acceptab
 
 ## 8. Points
 
-`services/pointsService.ts` scales sub-part points to the assignment total, default 100.
-One implementation, used by both the editor's live display and the export, so the two
-cannot disagree. Values sit on a quarter grid.
+**The instructor sets the points. The app does not change an authored point value without
+being asked** (ruling, Andre Knoesen, 2 November 2026). Everything in this section exists to
+make that true, and this section was three sentences long until that date, which is how a
+lane came to propose rescaling an instructor's marks to reach a total nobody had set.
+
+Terms used here. The **authored total** is the sum of the point values the instructor wrote
+on the parts. The **target** is `assignment.targetPoints`, the total the export is asked to
+produce. A **rescale** is the act of changing authored values so they sum to the target.
+
+**The target follows the file, not a constant.** An assignment imported from a `.md` takes
+its own authored total as its target (`services/mdParserService.ts`, "THE FILE'S OWN TOTAL
+IS THE TARGET"). Authored total equals target, so the export is an identity and nothing is
+rescaled. Only a new, empty assignment created in the Editor has nothing to infer from, and
+that one starts at `DEFAULT_TARGET_POINTS`, 100, which the author can change in the Target
+box. Before 1 September 2026 an import left the target undefined and the 100 default
+applied, which silently halved ENG 17 HW1, HW2 and HW3 three times, twice in the hands of
+operators who already knew about it.
+
+**No export can rescale without a decision.** Every download entry point goes through
+`normalizePointsConfirmed` in `services/exportService.ts`, which takes the instructor's
+answer as `approved`:
+
+- `true` rescales and exports.
+- `false` raises `RescaleDeclinedError`: nothing is written, and call sites stay quiet
+  because a decision is not a failure.
+- `undefined` means nobody was asked, and raises `RescaleDecisionNeededError`: nothing is
+  written and the message says so. It should never reach an instructor. It exists so that a
+  caller added later, which forgets to ask, stops visibly instead of changing marks.
+
+**The question is asked in the page, never by a browser dialog** (`components/
+RescaleChoice.tsx`). A browser that has begun suppressing dialogs still has `confirm`, and
+it returns `false` without drawing anything, so the export looked to every layer like a
+refusal the instructor had made, and the instructor saw nothing at all.
+
+**A rescale that cannot land exactly on its target is refused, not approximated.** When
+more parts carry points than there are quarter steps in the target, `planRescale` returns
+its reason and the export stops.
+
+**How a rescale works when one is asked for.** Largest-remainder apportionment, in whole
+quarter steps: floor every exact share, then hand the leftover steps out one at a time to
+the parts with the largest remainders. The total lands exactly on target and the error is
+spread rather than concentrated. One extra rule: a part the author gave points to never
+scales to zero. The method before 27 September 2026 could produce negative values, and in a
+27-part assignment made a 20-point part worth the same as a 14-point one.
+
+**Values sit on a quarter grid**, a non-negative multiple of 0.25. A quarter is a dyadic
+fraction, so the arithmetic is exact in binary floating point. A value off the grid is
+refused at import and never rounded to fit: `0.3` is a refusal, not a `0.25`.
+
+**A reader assignment has no points.** Every export writes 0, prints none, and never asks
+about a rescale. The kind is read from the assignment, never inferred from the points.
+
+One implementation, `services/pointsService.ts`, used by both the editor's live display and
+the export, so the two cannot disagree.
 
 ## 9. Output: the export
 
@@ -266,7 +318,7 @@ working tree. By the time it was written two of them had already been committed,
 concurrent session, and the third was committed shortly after. More than one session works
 in this repository, so a reading of the working tree goes stale quickly.
 
-Two commits sit ahead of `origin/main` at `6fc6c3e`:
+Three commits since `6fc6c3e`, all pushed:
 
 - **`8ad4611`**, the printed sentence on the generic answer page. "One part per page."
   becomes "Start each problem on a new page.", following the ruling of 12 October 2026,
@@ -277,16 +329,31 @@ Two commits sit ahead of `origin/main` at `6fc6c3e`:
   matching test change.
 - **`8d6f5bb`**, pinning the CI runner image to `ubuntu-24.04` rather than `ubuntu-latest`,
   which starts meaning Ubuntu 26 on 19 October 2026.
+- **`2294a3d`**, three test suites that assumed a printed sheet. `templateTests.mjs`,
+  `figure-extract-tests.mjs` and `figure-swap-e2e-tests.mjs` asserted a region count, a layout
+  id, or an inlined figure for the live ENG17 homework, which has since moved to the generic
+  answer page where none of those exist. **They failed on any machine holding the course folder
+  and skipped on CI, which has neither the folder nor the failure**, so a green CI run said
+  nothing about the red gate in front of whoever was pushing. Each check now reads the file's own
+  `**Sheet:**` declaration and asserts what is true of that kind of assignment: that
+  `generateTemplate` refuses it, that its rubric still carries one entry per part, that the
+  student spec does not move when figures are extracted, and, on the figure swap, that a
+  generic-sheet student receives no question text at all and therefore no drawing. The
+  printed-sheet expectations stay exact for any homework still on one.
 
-**Not yet in students' hands.** The deployed app is `2ad47e6` of 27 September 2026, and the
-generated `GradeBridge_answer_page_GBGEN1.pdf` copies on disk, the newer from 2 October,
-still carry "One part per page.". Until the app is redeployed and the page regenerated and
-reposted, students print the old sentence. `predeploy` runs `scripts/check-ci-green.mjs`,
-so CI must be green before a deploy is possible.
+**Deployed 20 October 2026**, the first build since 27 September. `predeploy` runs
+`scripts/check-ci-green.mjs`, so the gate confirmed CI was green before it built.
 
-**Local `main` has no upstream**, most likely left from the history rewrite of
-27 September 2026, which also left the `backup-before-rewrite-2026-09-27` branch. Pushing
-needs `--set-upstream` once.
+**The posted answer page was already correct, which is worth recording because this document
+said otherwise.** The copy students print,
+`generic_answer_template_page_FINAL_TWO_SIDES_2026-10-12.pdf`, was generated on 12 October from
+a local build carrying the change, and at 200 dpi it is pixel-identical on both sides to the page
+today's deployed app exports. Its QR decodes to `GB1-GBGEN1-HWMSTR-1-1-5F0B10BC`, so the layout
+is unchanged and a sheet printed earlier still registers. No reprint was needed.
+
+**Local `main` now tracks `origin/main`.** The missing upstream, left from the history rewrite of
+27 September 2026 which also left the `backup-before-rewrite-2026-09-27` branch, was set when the
+two answer-page commits were pushed.
 
 ## 13. Gaps against the assignment route of 19 October 2026
 
@@ -294,13 +361,15 @@ needs `--set-upstream` once.
 app does not produce. They are the same arithmetic three times, so one generator should
 emit all three and they cannot then disagree.
 
-1. **A page allotment per sub-part**, whole pages, default two, set by the instructor.
+1. **Withdrawn 1 November 2026** (Ruling 42, Andre Knoesen, 1 November 2026): was "a page allotment per sub-part, set by the
+   instructor". Every part has two pages, always; the instructor does not set it and the
+   export carries no `allotment` field. Nothing to build.
    There is no field for it: `answerLines` is a count of writing lines on the app-printed
    sheet and is a different quantity for a different purpose, and it does not apply on the
    generic path at all.
 2. **A published slot layout** under the assignment identifier, which both the Submission
    app and the relay read. W2's done-when names both readers.
-3. **A blank answer-page template PDF**, of exactly the allotted page count, which Gradescope
+3. **A blank answer-page template PDF**, of exactly 1 + 2 x (number of parts) pages, which Gradescope
    aligns every submission to. This is the file whose absence blocks the route, and it is
    not the generic answer page: students write on the generic page, while Gradescope aligns
    to the assembled answer pages, which have different geometry.

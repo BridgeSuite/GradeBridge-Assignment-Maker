@@ -225,7 +225,13 @@ export interface Assignment {
    * removed on 2026-08-31; a spec exported before then still carries it and is
    * silently ignored on import.
    */
-  targetPoints?: number; // Target total for point scaling (default 100)
+  // The total the export is asked to produce. An imported assignment takes its
+  // own authored total (mdParserService, "THE FILE'S OWN TOTAL IS THE TARGET"),
+  // so an import never rescales; only a new, empty assignment defaults to 100.
+  // The instructor sets the points, and no export changes an authored value
+  // without a decision (Andre Knoesen, 2 November 2026; ASSIGNMENT_MAKER_SPEC
+  // section 8).
+  targetPoints?: number;
   // No submissionAddress, deliberately (removed 2026-09-22). Students are told
   // to use the Student Submission app when they receive the assignment, so the
   // printed sheet does not need to repeat it, and the field confused the first
