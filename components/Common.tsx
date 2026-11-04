@@ -171,8 +171,8 @@ export const TextAreaWithPreview: React.FC<React.TextareaHTMLAttributes<HTMLText
       {label && <label className="block text-sm font-medium text-academic-700 mb-1">{label}</label>}
       <textarea className={`w-full bg-white text-academic-900 rounded-md border-academic-300 shadow-sm focus:border-academic-500 focus:ring-academic-500 sm:text-sm py-2 px-3 border resize-y ${className}`} value={value} {...props} />
       {showPreview && (
-        <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
-          <p className="text-xs text-blue-600 mb-1 font-bold uppercase">LaTeX Preview:</p>
+        <div className="mt-1.5 pl-3 pr-2 py-1 border-l-2 border-gold-500 text-academic-900" data-latex-preview>
+          <span className="sr-only">Preview: </span>
           <div className="prose prose-sm max-w-none">
             <FormattedText text={textVal} />
           </div>
@@ -192,8 +192,8 @@ export const InputWithPreview: React.FC<React.InputHTMLAttributes<HTMLInputEleme
       {label && <label className="block text-sm font-medium text-academic-700 mb-1">{label}</label>}
       <input className={`w-full bg-white text-academic-900 rounded-md border-academic-300 shadow-sm focus:border-academic-500 focus:ring-academic-500 sm:text-sm py-2 px-3 border ${className}`} value={value} {...props} />
       {showPreview && (
-        <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
-          <p className="text-xs text-blue-600 mb-1 font-bold uppercase">LaTeX Preview:</p>
+        <div className="mt-1.5 pl-3 pr-2 py-1 border-l-2 border-gold-500 text-academic-900" data-latex-preview>
+          <span className="sr-only">Preview: </span>
           <div className="prose prose-sm max-w-none">
             <FormattedText text={textVal} />
           </div>
