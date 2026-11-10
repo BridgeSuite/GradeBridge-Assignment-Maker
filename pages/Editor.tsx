@@ -741,7 +741,7 @@ const Editor: React.FC = () => {
                 {totalPoints} pts total
               </span>
               <div className="flex items-center gap-1">
-                <span className="text-xs text-academic-500">Target:</span>
+                <span className="text-xs text-white/85">Target:</span>
                 <span className="w-16 inline-block">
                   <PointsInput
                     value={targetPoints}
@@ -751,7 +751,7 @@ const Editor: React.FC = () => {
                     className="text-xs !py-0.5 !px-1 text-center"
                   />
                 </span>
-                <span className="text-xs text-academic-500">pts</span>
+                <span className="text-xs text-white/85">pts</span>
               </div>
               {!pointsAtTarget && (
                 <Button variant="secondary" onClick={handleRescale} className="text-xs">
@@ -791,7 +791,10 @@ const Editor: React.FC = () => {
               Finalize
             </Button>
           )}
-          <HelpLink section="finalize" onOpen={openHelp} label="Help: finalizing an assignment" />
+          {/* On the blue header band the help circle is drawn in white. */}
+          <span className="[&_button]:text-white [&_button]:border-white/70">
+            <HelpLink section="finalize" onOpen={openHelp} label="Help: finalizing an assignment" />
+          </span>
           <Button variant="secondary" onClick={() => withRescaleChoice(assignment, async rescale => {
             // Async since 2026-09-21: with figure blocks this route writes a zip
             // holding the .md and its figures/ folder, because a .md handed over
@@ -825,7 +828,7 @@ const Editor: React.FC = () => {
             </Button>
           )}
           <Button variant="secondary" onClick={() => navigate('/')}>Cancel</Button>
-          <Button onClick={handleSave}>
+          <Button variant="accent" onClick={handleSave}>
             <Save className="w-4 h-4 mr-2" />
             Save Assignment
           </Button>
@@ -1158,7 +1161,7 @@ const Editor: React.FC = () => {
         {/* Problems Section */}
         <div className="space-y-6">
           <div className="flex items-center justify-between">
-            <h3 className="text-xl font-bold text-academic-800 font-serif">Problems</h3>
+            <h3 className="text-xl font-bold text-academic-800">Problems</h3>
             <Button onClick={addProblem} variant="secondary">
               <Plus className="w-4 h-4 mr-2" />
               Add Problem
@@ -1174,7 +1177,7 @@ const Editor: React.FC = () => {
                    <button onClick={() => moveProblem(pIndex, 'down')} disabled={pIndex === assignment.problems.length - 1} className="hover:text-academic-700 disabled:opacity-30"><ChevronDown className="w-5 h-5" /></button>
                  </div>
                  <div className="flex items-center justify-center w-12 shrink-0">
-                   <span className="text-lg font-bold text-academic-700 font-serif">{pIndex + 1}</span>
+                   <span className="text-lg font-bold text-academic-700">{pIndex + 1}</span>
                  </div>
                  <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-4">
                     <div className="md:col-span-4">
