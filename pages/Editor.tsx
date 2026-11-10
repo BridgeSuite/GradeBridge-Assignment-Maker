@@ -80,6 +80,16 @@ const emptyProblem = (inputMode: InputMode = 'electronic'): Problem => ({
   subsections: [emptySubsection(inputMode)]
 });
 
+/** The small label in front of a group of choices on a part. */
+const FIELD_LABEL = 'text-[11px] font-bold uppercase tracking-wide text-academic-500 mr-0.5';
+/** A choice on a part: filled when chosen. One style for every choice. */
+const pill = (on: boolean): string =>
+  `text-xs px-3 py-1 rounded-full border font-semibold transition-colors ${
+    on
+      ? 'bg-academic-800 text-white border-academic-800'
+      : 'bg-white text-academic-700 border-academic-300 hover:border-academic-500 hover:text-academic-900'
+  }`;
+
 const Editor: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -670,6 +680,8 @@ const Editor: React.FC = () => {
   // plans: the panel states every part's new value and the new total, or
   // refuses and says why, and nothing changes until the author applies it.
   const [rescalePlan, setRescalePlan] = useState<RescalePlan | null>(null);
+  // Parts whose optional TA note the author has opened (display only).
+  const [openNotes, setOpenNotes] = useState<Set<string>>(() => new Set());
 
   const handleRescale = () => {
     setRescalePlan(planRescale(
@@ -721,7 +733,19 @@ const Editor: React.FC = () => {
     <Layout
       title={isEdit ? "Edit Assignment" : "Create Assignment"}
       action={
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => navigate('/')}>Cancel</Button>
+          <Button variant="accent" onClick={handleSave}>
+            <Save className="w-4 h-4 mr-2" />
+            Save Assignment
+          </Button>
+        </div>
+      }
+    >
+      {/* THE TOOLBAR. Everything that acts on the whole assignment, in three
+          groups: its points, what it exports, and its lifecycle. Save and
+          Cancel stay in the header, where they can be reached from anywhere. */}
+      <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border border-academic-200 bg-white px-4 py-3 shadow-sm" data-editor-toolbar>
           <input
             type="file"
             accept=".json"
@@ -729,8 +753,8 @@ const Editor: React.FC = () => {
             className="hidden"
             onChange={handleFileUpload}
           />
-          {/* Total points badge + rescale control. A reader assignment is not
-              marked, so it has no total, no target and nothing to rescale. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-academic-500">Points</span>
           {pointsMarked ? (
             <>
               <span className={`text-xs font-bold px-2 py-1 rounded-full border ${
@@ -764,34 +788,9 @@ const Editor: React.FC = () => {
               Reader: not marked
             </span>
           )}
-          {!isEdit && (
-            <Button variant="secondary" onClick={handleLoadTemplate}>
-              <Upload className="w-4 h-4 mr-2" />
-              Load Template
-            </Button>
-          )}
-          {isEdit && (
-            <Button variant="danger" onClick={handleDeleteAssignment} className="mr-2">
-              <Trash2 className="w-4 h-4 mr-2" />
-              Delete
-            </Button>
-          )}
-          <Button variant="secondary" onClick={handleExtractFigures}>
-            <FileDown className="w-4 h-4 mr-2" />
-            Extract figures
-          </Button>
-          {assignment.finalized ? (
-            <Button variant="secondary" onClick={handleReopen} className="mr-2">
-              <Lock className="w-4 h-4 mr-2" />
-              Reopen
-            </Button>
-          ) : (
-            <Button variant="secondary" onClick={handleFinalize} className="mr-2">
-              <Lock className="w-4 h-4 mr-2" />
-              Finalize
-            </Button>
-          )}
-          <HelpLink section="finalize" onOpen={openHelp} label="Help: finalizing an assignment" />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-academic-500">Export</span>
           <Button variant="secondary" onClick={() => withRescaleChoice(assignment, async rescale => {
             // Async since 2026-09-21: with figure blocks this route writes a zip
             // holding the .md and its figures/ folder, because a .md handed over
@@ -824,14 +823,32 @@ const Editor: React.FC = () => {
               QR Template
             </Button>
           )}
-          <Button variant="secondary" onClick={() => navigate('/')}>Cancel</Button>
-          <Button onClick={handleSave}>
-            <Save className="w-4 h-4 mr-2" />
-            Save Assignment
+          <Button variant="secondary" onClick={handleExtractFigures}>
+            <FileDown className="w-4 h-4 mr-2" />
+            Extract figures
           </Button>
         </div>
-      }
-    >
+        <div className="flex flex-wrap items-center gap-2 ml-auto">
+          {!isEdit && (
+            <Button variant="secondary" onClick={handleLoadTemplate}>
+              <Upload className="w-4 h-4 mr-2" />
+              Load Template
+            </Button>
+          )}
+          {assignment.finalized ? (
+            <Button variant="secondary" onClick={handleReopen}>
+              <Lock className="w-4 h-4 mr-2" />
+              Reopen
+            </Button>
+          ) : (
+            <Button variant="secondary" onClick={handleFinalize}>
+              <Lock className="w-4 h-4 mr-2" />
+              Finalize
+            </Button>
+          )}
+          <HelpLink section="finalize" onOpen={openHelp} label="Help: finalizing an assignment" />
+        </div>
+      </div>
       <div className="space-y-8">
         {/* Metadata Section */}
         <Card>
@@ -1158,7 +1175,7 @@ const Editor: React.FC = () => {
         {/* Problems Section */}
         <div className="space-y-6">
           <div className="flex items-center justify-between">
-            <h3 className="text-xl font-bold text-academic-800 font-serif">Problems</h3>
+            <h3 className="text-xl font-bold text-academic-800">Problems</h3>
             <Button onClick={addProblem} variant="secondary">
               <Plus className="w-4 h-4 mr-2" />
               Add Problem
@@ -1174,7 +1191,7 @@ const Editor: React.FC = () => {
                    <button onClick={() => moveProblem(pIndex, 'down')} disabled={pIndex === assignment.problems.length - 1} className="hover:text-academic-700 disabled:opacity-30"><ChevronDown className="w-5 h-5" /></button>
                  </div>
                  <div className="flex items-center justify-center w-12 shrink-0">
-                   <span className="text-lg font-bold text-academic-700 font-serif">{pIndex + 1}</span>
+                   <span className="text-lg font-bold text-academic-700">{pIndex + 1}</span>
                  </div>
                  <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-4">
                     <div className="md:col-span-4">
@@ -1231,117 +1248,150 @@ const Editor: React.FC = () => {
                  </Button>
               </div>
 
-              {/* Subsections */}
-              <div className="p-4 space-y-4 bg-white">
-                {problem.subsections.map((sub, sIndex) => (
-                   <React.Fragment key={sub.id}>
-                   <div className="flex flex-col md:flex-row gap-4 items-start md:items-center bg-academic-50/50 p-3 rounded border border-dashed border-academic-200 ml-8 relative">
-                      <div className="absolute -left-8 top-3 font-mono font-bold text-academic-500">{pIndex + 1}{String.fromCharCode(97 + sIndex)}.</div>
-
-                      <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
-                         <div className="md:col-span-4">
-                           <InputWithPreview
-                              placeholder="Subsection Name"
-                              value={sub.name}
-                              onChange={e => updateSubsection(pIndex, sIndex, { name: e.target.value })}
-                              className="text-sm"
-                           />
-                         </div>
-                         <div className={pointsMarked ? 'md:col-span-6' : 'md:col-span-8'}>
-                           <TextAreaWithPreview
-                              placeholder="Description (LaTeX supported)"
-                              value={sub.description}
-                              onChange={e => updateSubsection(pIndex, sIndex, { description: e.target.value })}
-                              className="text-sm"
-                              rows={2}
-                           />
-                         </div>
-                         {pointsMarked && (
-                         <div className="md:col-span-2">
+              {/* Subsections: one card per part. Name, points and delete on one
+                  row; how it is answered and graded on one strip; the private
+                  grading material under it. */}
+              <div className="p-4 space-y-3 bg-white">
+                {problem.subsections.map((sub, sIndex) => {
+                  const partLabel = `${pIndex + 1}${String.fromCharCode(97 + sIndex)}`;
+                  const aiGraded = AI_GRADED_TYPES.has(sub.submissionType) || isAiHandwritten(sub);
+                  // The TA note is the grading guidance when a person grades, so it
+                  // is always open then. When the AI rubric is primary it is optional,
+                  // and stays folded until it is wanted or already has text.
+                  const noteOpen = !aiGraded || !!sub.graderNote || openNotes.has(sub.id);
+                  return (
+                   <div key={sub.id} data-subpart className="rounded-xl border border-academic-200 bg-white shadow-sm">
+                     <div className="flex items-start gap-3 p-3">
+                       <span className="mt-1 shrink-0 inline-flex items-center justify-center min-w-[2.5rem] h-8 px-2 rounded-[5px] bg-academic-800 text-white text-sm font-bold">
+                         {partLabel}
+                       </span>
+                       <div className="flex-1 min-w-0 space-y-2">
+                         <InputWithPreview
+                            placeholder="Part name"
+                            value={sub.name}
+                            onChange={e => updateSubsection(pIndex, sIndex, { name: e.target.value })}
+                            className="text-sm font-semibold"
+                         />
+                         <TextAreaWithPreview
+                            placeholder="Description (optional, LaTeX supported)"
+                            value={sub.description}
+                            onChange={e => updateSubsection(pIndex, sIndex, { description: e.target.value })}
+                            className="text-sm"
+                            rows={2}
+                         />
+                       </div>
+                       {pointsMarked && (
+                         <div className="w-24 shrink-0 flex items-center gap-1.5">
                            <PointsInput
                               placeholder="Pts"
                               value={sub.points}
                               onCommit={n => updateSubsection(pIndex, sIndex, { points: n })}
-                              className="text-sm"
+                              className="text-sm text-right"
                               title="Points"
                            />
+                           <span className="text-xs text-academic-500">pts</span>
                          </div>
-                         )}
-                      </div>
-
-                      <button
-                        onClick={() => removeSubsection(pIndex, sIndex)}
-                        className="text-academic-400 hover:text-red-500 transition-colors p-1"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                   </div>
-                   {/* Type + Grading Selector */}
-                   <div className="ml-8 mt-1 flex flex-wrap items-center gap-2">
-                     {/* Medium — gated by the assignment's input mode */}
-                     <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Type:</span>
-                     {([
-                       { label: 'Electronic text', type: SubmissionType.TEXT           },
-                       { label: 'Image',           type: SubmissionType.IMAGE          },
-                       { label: 'Text + Image',    type: SubmissionType.TEXT_AND_IMAGE },
-                       { label: 'Handwritten',     type: SubmissionType.HANDWRITTEN    },
-                     ]).filter(({ type }) => typeAllowedInMode(type, inputMode)).map(({ label, type }) => (
+                       )}
                        <button
-                         key={type}
                          type="button"
-                         onClick={() => updateSubsection(pIndex, sIndex,
-                           type === SubmissionType.HANDWRITTEN
-                             ? { submissionType: SubmissionType.HANDWRITTEN, handwrittenGradingMode: sub.handwrittenGradingMode ?? 'ai' }
-                             : { submissionType: type, imageGradingMode: 'human' as const }
-                         )}
-                         className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                           // Text is the fallback pill: active only when no other medium claims the type
-                           (type === SubmissionType.TEXT
-                             ? sub.submissionType !== SubmissionType.IMAGE
-                               && sub.submissionType !== SubmissionType.TEXT_AND_IMAGE
-                               && sub.submissionType !== SubmissionType.HANDWRITTEN
-                             : sub.submissionType === type)
-                             ? 'bg-academic-700 text-white border-academic-700'
-                             : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
-                         }`}
+                         onClick={() => removeSubsection(pIndex, sIndex)}
+                         title={`Delete part ${partLabel}`}
+                         aria-label={`Delete part ${partLabel}`}
+                         className="mt-1 p-1.5 rounded-[5px] text-academic-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                        >
-                         {label}
+                         <Trash2 className="w-4 h-4" />
                        </button>
-                     ))}
+                     </div>
 
-                     <span className="text-xs text-academic-300 mx-1">|</span>
-                     <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Grading:</span>
-
-                     {sub.submissionType === SubmissionType.HANDWRITTEN ? (
-                       /* Handwritten branch — AI (OCR + grade) or Human (TA grades the crop). No page count. */
-                       <>
+                     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-3 py-2.5 bg-academic-50 border-y border-academic-100">
+                       <div className="flex flex-wrap items-center gap-1.5">
+                         <span className={FIELD_LABEL}>Answer</span>
                          {([
-                           { label: 'AI',    mode: 'ai'    as const },
-                           { label: 'Human', mode: 'human' as const },
-                         ]).map(({ label, mode }) => (
+                           { label: 'Electronic text', type: SubmissionType.TEXT           },
+                           { label: 'Image',           type: SubmissionType.IMAGE          },
+                           { label: 'Text + Image',    type: SubmissionType.TEXT_AND_IMAGE },
+                           { label: 'Handwritten',     type: SubmissionType.HANDWRITTEN    },
+                         ]).filter(({ type }) => typeAllowedInMode(type, inputMode)).map(({ label, type }) => (
                            <button
-                             key={mode}
+                             key={type}
                              type="button"
-                             onClick={() => updateSubsection(pIndex, sIndex, { handwrittenGradingMode: mode })}
-                             className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                               (sub.handwrittenGradingMode ?? 'ai') === mode
-                                 ? 'bg-academic-700 text-white border-academic-700'
-                                 : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
-                             }`}
+                             onClick={() => updateSubsection(pIndex, sIndex,
+                               type === SubmissionType.HANDWRITTEN
+                                 ? { submissionType: SubmissionType.HANDWRITTEN, handwrittenGradingMode: sub.handwrittenGradingMode ?? 'ai' }
+                                 : { submissionType: type, imageGradingMode: 'human' as const }
+                             )}
+                             className={pill(
+                               type === SubmissionType.TEXT
+                                 ? sub.submissionType !== SubmissionType.IMAGE
+                                   && sub.submissionType !== SubmissionType.TEXT_AND_IMAGE
+                                   && sub.submissionType !== SubmissionType.HANDWRITTEN
+                                 : sub.submissionType === type)}
                            >
                              {label}
                            </button>
                          ))}
+                       </div>
 
-                         {/* Printed-template controls: how much writing room this part gets
-                             on the QR template, and whether it is a sketch. Answer lines only
-                             sizes a sheet this app prints, so it is hidden on the generic page,
-                             where it would do nothing; the stored value is kept and exported.
-                             Sketch stays everywhere: it sets answer_modality in the rubric. */}
-                         <span className="text-xs text-academic-300 mx-1">|</span>
+                       <div className="flex flex-wrap items-center gap-1.5">
+                         <span className={FIELD_LABEL}>Graded by</span>
+                         {sub.submissionType === SubmissionType.HANDWRITTEN ? (
+                           <>
+                             {([
+                               { label: 'AI',    mode: 'ai'    as const },
+                               { label: 'Human', mode: 'human' as const },
+                             ]).map(({ label, mode }) => (
+                               <button
+                                 key={mode}
+                                 type="button"
+                                 onClick={() => updateSubsection(pIndex, sIndex, { handwrittenGradingMode: mode })}
+                                 className={pill((sub.handwrittenGradingMode ?? 'ai') === mode)}
+                               >
+                                 {label}
+                               </button>
+                             ))}
+                           </>
+                         ) : sub.submissionType === SubmissionType.IMAGE ? (
+                           <span className="text-xs text-academic-600">A person reviews every image</span>
+                         ) : sub.submissionType === SubmissionType.TEXT_AND_IMAGE ? (
+                           <span className={pill(true)}>Human</span>
+                         ) : (
+                           <>
+                             <button
+                               type="button"
+                               onClick={() => updateSubsection(pIndex, sIndex, { submissionType: SubmissionType.TEXT })}
+                               className={pill(sub.submissionType === SubmissionType.TEXT)}
+                             >
+                               Human
+                             </button>
+                             <span className="text-xs text-academic-500 ml-1">AI:</span>
+                             {([
+                               { label: 'Binary',    type: SubmissionType.AI_GRADED_BINARY, defaultPts: 3  },
+                               { label: 'Short',     type: SubmissionType.AI_GRADED_SHORT,  defaultPts: 8  },
+                               { label: 'Medium',    type: SubmissionType.AI_GRADED_MEDIUM, defaultPts: 15 },
+                               { label: 'Long',      type: SubmissionType.AI_GRADED_LONG,   defaultPts: 25 },
+                             ] as { label: string; type: SubmissionType; defaultPts: number }[]).map(({ label, type, defaultPts }) => (
+                               <button
+                                 key={type}
+                                 type="button"
+                                 onClick={() => updateSubsection(pIndex, sIndex, {
+                                   submissionType: type,
+                                   points: sub.points > 0 ? sub.points : defaultPts,
+                                   minWords: AI_WORD_RANGES[type]?.min,
+                                 })}
+                                 className={pill(sub.submissionType === type)}
+                               >
+                                 {label}
+                               </button>
+                             ))}
+                           </>
+                         )}
+                       </div>
+
+                       {sub.submissionType === SubmissionType.HANDWRITTEN && (
+                         <div className="flex flex-wrap items-center gap-3">
                          {assignment.sheet !== 'generic' && (
                          <div className="flex items-center gap-1.5">
-                           <span className="text-xs text-academic-500 font-medium uppercase tracking-wide">Answer lines:</span>
+                           <span className={FIELD_LABEL}>Answer lines:</span>
                            <input
                              type="number"
                              min={1}
@@ -1350,172 +1400,113 @@ const Editor: React.FC = () => {
                                answerLines: Math.max(1, parseInt(e.target.value, 10) || DEFAULT_ANSWER_LINES),
                              })}
                              title={`Writing lines reserved for this answer on the printed sheet, drawn at exactly this size. ${DEFAULT_ANSWER_LINES} if you never set it; a part that no longer fits its page simply starts a new one.`}
-                             className="w-14 text-xs border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
+                             className="w-16 text-xs bg-white border border-academic-300 rounded-[5px] px-2 py-1 focus:outline-none focus:border-academic-500"
                            />
                          </div>
                          )}
                          <button
                            type="button"
                            onClick={() => updateSubsection(pIndex, sIndex, { isDrawing: !sub.isDrawing })}
-                           className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                             sub.isDrawing
-                               ? 'bg-academic-700 text-white border-academic-700'
-                               : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
-                           }`}
+                           className={pill(!!sub.isDrawing)}
                            title="Sketch part. The reserved space is drawn as a plain box with no rules, and flagged is_drawing in the layout map."
                          >
                            Sketch
                          </button>
-                       </>
-                     ) : sub.submissionType === SubmissionType.IMAGE ? (
-                       /* Image branch */
-                       <>
+                         </div>
+                       )}
+
+                       {(sub.submissionType === SubmissionType.IMAGE || sub.submissionType === SubmissionType.TEXT_AND_IMAGE) && (
                          <div className="flex items-center gap-1.5">
-                           <span className="text-xs text-academic-500">pages:</span>
+                           <span className={FIELD_LABEL}>{sub.submissionType === SubmissionType.IMAGE ? 'Pages' : 'Image pages'}</span>
                            <input
                              type="number"
                              min={1}
                              value={sub.maxImages || 1}
                              onChange={e => updateSubsection(pIndex, sIndex, { maxImages: parseInt(e.target.value) || 1 })}
-                             className="w-14 text-xs border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
+                             className="w-16 text-xs bg-white border border-academic-300 rounded-[5px] px-2 py-1 focus:outline-none focus:border-academic-500"
                              title="Number of image pages allowed"
                            />
                          </div>
-                        {/* No mode choice for an image part any more.
-                            "AI Inspection" set imageGradingMode: 'auto', which
-                            awarded full marks for any upload with nobody
-                            looking. A person reviews every image, so there is
-                            one behaviour and nothing to pick. */}
-                        <span className="text-xs text-academic-500">
-                          Reviewed by a person
-                        </span>
-                       </>
-                     ) : sub.submissionType === SubmissionType.TEXT_AND_IMAGE ? (
-                       /* Text + Image branch — human grading only */
-                       <>
-                         <div className="flex items-center gap-1.5">
-                           <span className="text-xs text-academic-500">image pages:</span>
-                           <input
-                             type="number"
-                             min={1}
-                             value={sub.maxImages || 1}
-                             onChange={e => updateSubsection(pIndex, sIndex, { maxImages: parseInt(e.target.value) || 1 })}
-                             className="w-14 text-xs border border-academic-300 rounded px-2 py-1 focus:outline-none focus:border-academic-500"
-                             title="Number of image pages allowed"
+                       )}
+                     </div>
+
+                     <div className="p-3 space-y-3">
+                       {aiGraded && (
+                         <div>
+                           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+                             <label className="flex items-center gap-1.5 text-sm font-semibold text-academic-800">
+                               <Lock className="w-3.5 h-3.5 text-academic-500" />
+                               AI grading rubric
+                               <span className="text-xs font-normal text-academic-500">private</span>
+                             </label>
+                             <span className="text-xs text-academic-500">
+                               {isAiHandwritten(sub)
+                                 ? 'The marked region is transcribed, then graded against this.'
+                                 : AI_WORD_RANGES[sub.submissionType]
+                                   ? `Suggested length ${AI_WORD_RANGES[sub.submissionType]?.range} · minimum ${AI_WORD_RANGES[sub.submissionType]?.min} words (guidance only)`
+                                   : ''}
+                             </span>
+                           </div>
+                           <TextArea
+                             rows={3}
+                             placeholder={
+                               isAiHandwritten(sub)
+                                 ? 'Required elements: (1) ...; (2) ... Award full marks for ... Award partial credit for ... Award no credit for ... State the expected working and result — the grader sees only the transcription.'
+                                 : 'Describe how to grade this question. Use the correct number of bands for the category (Binary: 2, Short: 3, Medium: 4, Long: 5).'
+                             }
+                             value={sub.aiGradingPrompt || ''}
+                             onChange={e => updateSubsection(pIndex, sIndex, { aiGradingPrompt: e.target.value })}
+                             className="text-sm"
                            />
                          </div>
-                         <span className="text-xs px-3 py-1 rounded-full border font-medium bg-academic-700 text-white border-academic-700">
-                           Human
-                         </span>
-                       </>
-                     ) : (
-                       /* Text branch */
-                       <>
+                       )}
+
+                       {noteOpen ? (
+                         <div>
+                           <label className="flex items-center gap-1.5 mb-1 text-sm font-semibold text-academic-800">
+                             <Lock className="w-3.5 h-3.5 text-academic-500" />
+                             {sub.submissionType === SubmissionType.IMAGE
+                               ? 'Grader note: what to look for in the submission'
+                               : sub.submissionType === SubmissionType.TEXT_AND_IMAGE
+                               ? 'Grader note: expected text answer, and what to look for in the image'
+                               : aiGraded
+                               ? 'TA note (optional; the AI rubric is primary)'
+                               : sub.submissionType === SubmissionType.HANDWRITTEN
+                               ? 'Grader note: expected answer or worked solution (a TA grades the marked region)'
+                               : 'Grader note: expected answer or worked solution'}
+                             <span className="text-xs font-normal text-academic-500">private</span>
+                           </label>
+                           <TextArea
+                             rows={aiGraded ? 2 : 3}
+                             placeholder={
+                               sub.submissionType === SubmissionType.IMAGE
+                                 ? 'List what the grader should verify: topology, labels, settings visible, etc. State full / partial / no credit thresholds.'
+                                 : aiGraded
+                                 ? 'Optional: add model answer or edge-case guidance for TAs reviewing AI-flagged submissions.'
+                                 : 'State the expected answer with key formula and numerical result. State what earns full / partial / no credit.'
+                             }
+                             value={sub.graderNote || ''}
+                             onChange={e => updateSubsection(pIndex, sIndex, { graderNote: e.target.value })}
+                             className="text-sm"
+                           />
+                         </div>
+                       ) : (
                          <button
                            type="button"
-                           onClick={() => updateSubsection(pIndex, sIndex, { submissionType: SubmissionType.TEXT })}
-                           className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                             sub.submissionType === SubmissionType.TEXT
-                               ? 'bg-academic-700 text-white border-academic-700'
-                               : 'bg-white text-academic-600 border-academic-300 hover:border-academic-500 hover:text-academic-800'
-                           }`}
+                           onClick={() => setOpenNotes(prev => new Set(prev).add(sub.id))}
+                           className="inline-flex items-center gap-1.5 text-xs font-semibold text-academic-700 hover:text-academic-900"
                          >
-                           Human
+                           <Plus className="w-3.5 h-3.5" /> Add a TA note
+                           <span className="font-normal text-academic-500">(optional, private)</span>
                          </button>
-                         <span className="text-xs text-academic-300">|</span>
-                         <span className="text-xs text-purple-500 font-medium uppercase tracking-wide">AI:</span>
-                         {([
-                           { label: 'Binary',    type: SubmissionType.AI_GRADED_BINARY, defaultPts: 3  },
-                           { label: 'Short',     type: SubmissionType.AI_GRADED_SHORT,  defaultPts: 8  },
-                           { label: 'Medium',    type: SubmissionType.AI_GRADED_MEDIUM, defaultPts: 15 },
-                           { label: 'Long',      type: SubmissionType.AI_GRADED_LONG,   defaultPts: 25 },
-                         ] as { label: string; type: SubmissionType; defaultPts: number }[]).map(({ label, type, defaultPts }) => (
-                           <button
-                             key={type}
-                             type="button"
-                             onClick={() => updateSubsection(pIndex, sIndex, {
-                               submissionType: type,
-                               points: sub.points > 0 ? sub.points : defaultPts,
-                               minWords: AI_WORD_RANGES[type]?.min,
-                             })}
-                             className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors ${
-                               sub.submissionType === type
-                                 ? 'bg-purple-700 text-white border-purple-700'
-                                 : 'bg-white text-purple-600 border-purple-300 hover:border-purple-500 hover:text-purple-800'
-                             }`}
-                           >
-                             {label}
-                           </button>
-                         ))}
-                       </>
-                     )}
-                   </div>
-                   {(AI_GRADED_TYPES.has(sub.submissionType) || isAiHandwritten(sub)) && (
-                     <div className="ml-8 mt-1 px-3 space-y-3">
-                       {isAiHandwritten(sub) && (
-                         <div className="text-xs text-purple-600 font-medium">
-                           The student's marked region is cropped and transcribed, then graded against this rubric.
-                         </div>
                        )}
-                       {AI_WORD_RANGES[sub.submissionType] && (
-                         <div className="text-xs text-purple-600 font-medium">
-                           Suggested length: {AI_WORD_RANGES[sub.submissionType]?.range} · suggested minimum: {AI_WORD_RANGES[sub.submissionType]?.min} words (guidance only — not enforced)
-                         </div>
-                       )}
-                       <TextArea
-                         label="AI Grading Rubric (private — not shown to students)"
-                         rows={4}
-                         placeholder={
-                           isAiHandwritten(sub)
-                             ? 'Required elements: (1) ...; (2) ... Award full marks for ... Award partial credit for ... Award no credit for ... State the expected working and result — the grader sees only the transcription.'
-                             : 'Describe how to grade this question. Use the correct number of bands for the category (Binary: 2, Short: 3, Medium: 4, Long: 5).'
-                         }
-                         value={sub.aiGradingPrompt || ''}
-                         onChange={e => updateSubsection(pIndex, sIndex, { aiGradingPrompt: e.target.value })}
-                         className="text-sm"
-                       />
-                     </div>
-                   )}
-                   {/* Grader note — shown for all subsection types */}
-                   <div className="ml-8 mt-1 mb-2 px-3">
-                     <div className="rounded border border-amber-200 bg-amber-50 p-3 space-y-1.5">
-                       <div className="flex items-center gap-1.5">
-                         <Lock className="w-3 h-3 text-amber-600 shrink-0" />
-                         <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
-                           {sub.submissionType === SubmissionType.IMAGE
-                             ? 'Grader note — what to look for in the submission'
-                             : sub.submissionType === SubmissionType.TEXT_AND_IMAGE
-                             ? 'Grader note — expected text answer + what to look for in the image'
-                             : (AI_GRADED_TYPES.has(sub.submissionType) || isAiHandwritten(sub))
-                             ? 'Supplementary TA note (optional — AI rubric above is primary)'
-                             : sub.submissionType === SubmissionType.HANDWRITTEN
-                             ? 'Grader note — expected answer / worked solution (TA grades the marked region)'
-                             : 'Grader note — expected answer / worked solution'}
-                         </span>
-                         <span className="text-xs text-amber-500 ml-1">· not shown to students</span>
-                       </div>
-                       <TextArea
-                         rows={3}
-                         placeholder={
-                           sub.submissionType === SubmissionType.IMAGE
-                             ? 'List what the grader should verify: topology, labels, settings visible, etc. State full / partial / no credit thresholds.'
-                             : (AI_GRADED_TYPES.has(sub.submissionType) || isAiHandwritten(sub))
-                             ? 'Optional: add model answer or edge-case guidance for TAs reviewing AI-flagged submissions.'
-                             : 'State the expected answer with key formula and numerical result. State what earns full / partial / no credit.'
-                         }
-                         value={sub.graderNote || ''}
-                         onChange={e => updateSubsection(pIndex, sIndex, { graderNote: e.target.value })}
-                         className="text-sm bg-white border-amber-200 focus:border-amber-400"
-                       />
                      </div>
                    </div>
-                   </React.Fragment>
-                ))}
-                <div className="ml-8">
-                   <Button variant="ghost" onClick={() => addSubsection(pIndex)} className="text-xs">
-                      <Plus className="w-3 h-3 mr-1" /> Add Subsection
-                   </Button>
-                </div>
+                  );
+                })}
+                <Button variant="secondary" onClick={() => addSubsection(pIndex)} className="text-xs">
+                   <Plus className="w-3.5 h-3.5 mr-1" /> Add part
+                </Button>
               </div>
             </div>
           ))}
@@ -1526,6 +1517,15 @@ const Editor: React.FC = () => {
               Add New Problem
             </Button>
           </div>
+          {isEdit && (
+            <div className="mt-10 pt-6 border-t border-academic-200 flex flex-wrap items-center justify-between gap-3" data-danger-zone>
+              <p className="text-sm text-academic-600">Delete this assignment from this browser. Exported files are not affected.</p>
+            <Button variant="danger" onClick={handleDeleteAssignment}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete
+              </Button>
+            </div>
+          )}
         </div>
       </div>
       {rescalePanel}

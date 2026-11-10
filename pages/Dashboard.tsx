@@ -604,6 +604,7 @@ const Dashboard: React.FC<{ view?: 'list' | 'import' }> = ({ view = 'list' }) =>
                   <span className="hidden sm:inline">Copy</span>
                 </Button>
                 <Button
+                  variant="accent"
                   onClick={() => handleExport(assignment)}
                   title="One download: the file to post, plus your grading material — never give the whole archive to students"
                 >

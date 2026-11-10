@@ -82,7 +82,7 @@ const Preview: React.FC = () => {
          <Card className="prose max-w-none">
             <div className="flex justify-between items-end border-b pb-4 mb-6">
                <div>
-                  <h2 className="text-3xl font-serif font-bold text-academic-900 m-0">{assignment.title}</h2>
+                  <h2 className="text-3xl font-bold text-academic-900 m-0">{assignment.title}</h2>
                   <p className="text-academic-600 m-0 font-medium">{assignment.courseCode}</p>
                </div>
                <div className="text-right text-sm text-academic-500">

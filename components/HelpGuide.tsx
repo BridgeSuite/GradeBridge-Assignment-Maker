@@ -94,7 +94,7 @@ const renderGuide = (md: string): string => {
       const text = h[2];
       const id = slugFor(text);
       const size = level === 1 ? 'text-2xl mt-2' : level === 2 ? 'text-xl mt-8' : 'text-base mt-6';
-      out.push(`<h${level} id="${id}" class="${size} font-bold font-serif text-academic-900 mb-2 scroll-mt-24">${inline(text)}</h${level}>`);
+      out.push(`<h${level} id="${id}" class="${size} font-bold text-academic-900 mb-2 scroll-mt-24">${inline(text)}</h${level}>`);
       continue;
     }
 
@@ -177,7 +177,7 @@ export const HelpGuide: React.FC<{
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-academic-200 px-4 sm:px-6 py-3">
-          <h2 className="text-base sm:text-lg font-bold font-serif text-academic-900">
+          <h2 className="text-base sm:text-lg font-bold text-academic-900">
             Using the Assignment Maker
           </h2>
           <button

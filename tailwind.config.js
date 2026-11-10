@@ -28,25 +28,43 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'sans-serif'],
-        serif: ['Merriweather', 'serif'],
+        // UC Davis sets its sites in Proxima Nova (licensed, not bundled): it
+        // is used where the computer has it, and the bundled Figtree otherwise.
+        // Headings are the same face at a heavy weight, as on ucdavis.edu, so
+        // `serif` is no longer a separate face.
+        sans: ['proxima-nova', 'Figtree', 'system-ui', 'sans-serif'],
+        serif: ['proxima-nova', 'Figtree', 'system-ui', 'sans-serif'],
       },
       colors: {
         // Load-bearing: `bg-academic-50 text-academic-900` is on <body>, and the
-        // app uses this scale throughout. The ten values are Tailwind's default
-        // `slate`, but the class names in the source say `academic` — do not
-        // "simplify" this away.
+        // app uses this scale throughout, so re-colouring it re-themes the app.
+        //
+        // THE UC DAVIS THEME (2026-11-04). The values are the brand tokens
+        // ucdavis.edu declares (`--ucd-blue` #022851, `--brand-primary-*`);
+        // steps marked (*) are not tokens there and sit between them. The
+        // light steps are the site's blue tints, the text steps are a
+        // blue-grey, 800 is Aggie Blue (the primary button), 900 near-black.
         academic: {
-          50: '#f8fafc',
-          100: '#f1f5f9',
-          200: '#e2e8f0',
-          300: '#cbd5e1',
-          400: '#94a3b8',
-          500: '#64748b',
-          600: '#475569',
-          700: '#334155',
-          800: '#1e293b',
-          900: '#0f172a',
+          50: '#f7fafd',   // brand-primary-20
+          100: '#ebf3fa',  // brand-primary-30
+          200: '#dbeaf7',  // brand-primary-40
+          300: '#b0d0ed',  // brand-primary-60
+          400: '#8796aa',  // (*)
+          500: '#5c6b80',  // (*)
+          600: '#45546a',  // (*)
+          700: '#14447a',  // brand-primary-90
+          800: '#022851',  // ucd-blue, Aggie Blue
+          900: '#011a36',  // (*)
+        },
+        // The brand blue's brighter step, for page titles as on ucdavis.edu.
+        aggie: { 500: '#13639e' },  // brand-primary-80
+        // Aggie Gold: the accent, and the one action that matters on a screen.
+        gold: {
+          50: '#fffbed',   // brand-secondary-20
+          100: '#fff4d2',  // brand-secondary-40
+          300: '#ffdf80',  // brand-secondary-70
+          400: '#ffd24c',  // brand-secondary-80
+          500: '#ffbf00',  // ucd-gold, Aggie Gold
         },
       },
     },

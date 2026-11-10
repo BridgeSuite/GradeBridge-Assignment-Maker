@@ -7,18 +7,16 @@ import 'katex/dist/katex.min.css';
 // cdn.tailwindcss.com, which shipped executable JavaScript from a third party
 // with full page privileges and no Subresource Integrity attribute.
 import './index.css';
-// The two typefaces, self-hosted for the same reason and emitted same-origin by
-// Vite. @fontsource ships Inter v20 and Merriweather v33 — the same upstream
-// versions fonts.gstatic.com was serving — with their SIL Open Font Licences.
-// Weights are exactly those the old Google Fonts <link> requested, and no more.
-import '@fontsource/inter/300.css';
-import '@fontsource/inter/400.css';
-import '@fontsource/inter/500.css';
-import '@fontsource/inter/600.css';
-import '@fontsource/inter/700.css';
-import '@fontsource/merriweather/300.css';
-import '@fontsource/merriweather/400.css';
-import '@fontsource/merriweather/700.css';
+// The typeface, self-hosted and emitted same-origin by Vite. UC Davis sets its
+// sites in Proxima Nova, which is licensed and cannot be bundled; Figtree is
+// the free (SIL Open Font Licence) face closest to it, and tailwind.config.js
+// names proxima-nova first so a computer that has it uses it.
+import '@fontsource/figtree/300.css';
+import '@fontsource/figtree/400.css';
+import '@fontsource/figtree/500.css';
+import '@fontsource/figtree/600.css';
+import '@fontsource/figtree/700.css';
+import '@fontsource/figtree/800.css';
 import App from './App';
 
 const rootElement = document.getElementById('root');

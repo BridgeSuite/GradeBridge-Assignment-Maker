@@ -40,7 +40,7 @@ export const ChoicePanel: React.FC<{
     >
       <div className="bg-white w-full max-w-lg max-h-full overflow-y-auto rounded-lg shadow-xl p-5 sm:p-6">
         <div className="flex items-start justify-between gap-3">
-          <h2 id="choice-panel-heading" className="text-lg font-bold font-serif text-academic-900">
+          <h2 id="choice-panel-heading" className="text-lg font-bold text-academic-900">
             {question.title}
           </h2>
           <button

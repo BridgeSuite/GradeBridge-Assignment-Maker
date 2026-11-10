@@ -31,7 +31,7 @@ export const RescaleChoicePanel: React.FC<{
     aria-labelledby="rescale-choice-heading"
   >
     <div className="bg-white w-full max-w-lg rounded-lg shadow-xl p-5 sm:p-6">
-      <h2 id="rescale-choice-heading" className="text-lg font-bold font-serif text-academic-900">
+      <h2 id="rescale-choice-heading" className="text-lg font-bold text-academic-900">
         Rescale the points before exporting?
       </h2>
       <p className="mt-3 text-sm text-academic-700 leading-relaxed">
@@ -95,7 +95,7 @@ export const RescalePreviewPanel: React.FC<{
     aria-labelledby="rescale-preview-heading"
   >
     <div className="bg-white w-full max-w-lg rounded-lg shadow-xl p-5 sm:p-6 max-h-[90vh] flex flex-col">
-      <h2 id="rescale-preview-heading" className="text-lg font-bold font-serif text-academic-900">
+      <h2 id="rescale-preview-heading" className="text-lg font-bold text-academic-900">
         {plan.ok ? `Rescale from ${fromTotal} to ${target} points?` : `Cannot rescale to ${target}`}
       </h2>
       {plan.ok ? (
