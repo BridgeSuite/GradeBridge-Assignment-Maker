@@ -174,7 +174,8 @@ check('Tailwind is compiled into the stylesheet, not fetched and run', () => {
   // The `academic` scale is load-bearing — <body class="bg-academic-50
   // text-academic-900"> wears it — and it exists only because
   // tailwind.config.js carries it. Lose it and the page renders unstyled.
-  assert(css.includes('#f8fafc') && css.includes('#0f172a'),
+  // Its two ends are the UC Davis tints (2026-11-04): #f7fafd and #011a36.
+  assert(css.includes('#f7fafd') && css.includes('#011a36'),
     'the academic palette is missing from the stylesheet');
   assert(/\.bg-academic-50[\s{,]/.test(css) && /\.text-academic-900[\s{,]/.test(css),
     'the two classes <body> actually wears were not generated');
@@ -185,14 +186,14 @@ check('Tailwind is compiled into the stylesheet, not fetched and run', () => {
   assert(runtime.length === 0, `a Tailwind runtime survives in: ${runtime.join(', ')}`);
 });
 
-check('both typefaces are emitted same-origin, with their OFL notices', () => {
+check('the typeface is emitted same-origin, with its OFL notice', () => {
   const woff2 = files.filter(f => /\.woff2$/.test(f));
-  for (const face of ['inter', 'merriweather']) {
+  for (const face of ['figtree']) {
     assert(woff2.some(f => f.startsWith(`${face}-latin-`)),
       `no ${face} woff2 was emitted — the face is not self-hosted`);
   }
   // OFL 1.1 requires its notice to travel with the binaries the site serves.
-  for (const notice of ['fonts/Inter-OFL.txt', 'fonts/Merriweather-OFL.txt']) {
+  for (const notice of ['fonts/Figtree-OFL.txt']) {
     const path = join(outDir, notice);
     assert(existsSync(path), `${notice} is missing from the build`);
     assert(readFileSync(path, 'utf8').includes('SIL OPEN FONT LICENSE'),
@@ -200,7 +201,7 @@ check('both typefaces are emitted same-origin, with their OFL notices', () => {
   }
   // Those files must be what the @font-face rules point at.
   const css = readFileSync(join(assets, cssFile), 'utf8');
-  for (const family of ['Inter', 'Merriweather']) {
+  for (const family of ['Figtree']) {
     assert(new RegExp(`@font-face[^}]*font-family: ?['"]?${family}`, 'i').test(css),
       `the stylesheet declares no @font-face for ${family}`);
   }

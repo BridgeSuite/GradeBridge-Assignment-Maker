@@ -444,8 +444,9 @@ staying local is a property of its design rather than a promise about a server.
 
 A test asserts it, on the built output rather than on the source: any host in a
 fetch position — in the HTML, in the stylesheet, or in any emitted script — fails
-the suite. Inter and Merriweather are served from this site under their SIL Open
-Font Licences, which the build emits alongside them.
+the suite. Figtree (the free face closest to UC Davis's licensed Proxima Nova)
+is served from this site under its SIL Open Font Licence, which the build emits
+alongside it.
 
 - **Export your JSON regularly** — data is lost if browser cache is cleared
 - **The export ZIP is instructor-only and MUST NOT be given to students.** Four files in its `instructor/` folder contain answers: `{stem}_grader_document.html`, `{stem}_grading_rubric.json`, `{stem}_authoring_backup.json` and `{stem}.md`. Students receive only `{stem}_FOR_STUDENTS.zip`, the one entry at the archive root that is not in a folder. The ZIP carries a generated `00_INSTRUCTOR_ONLY_DO_NOT_DISTRIBUTE.txt` at its root naming every file.

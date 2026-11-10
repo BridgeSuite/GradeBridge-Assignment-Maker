@@ -43,15 +43,14 @@ const dataUriAssets = (): Plugin => {
  * The SIL Open Font Licence for each self-hosted typeface, copied into the
  * build from the installed package.
  *
- * The deployed site distributes the Inter and Merriweather binaries, and OFL 1.1
+ * The deployed site distributes the Figtree binaries, and OFL 1.1
  * requires its notice to travel with them. Read from node_modules at build time
  * rather than committed as a copy, so the notice cannot drift away from the
  * version actually shipped.
  */
 const fontLicences = (): Plugin => {
   const FACES = [
-    { pkg: '@fontsource/inter', out: 'fonts/Inter-OFL.txt' },
-    { pkg: '@fontsource/merriweather', out: 'fonts/Merriweather-OFL.txt' },
+    { pkg: '@fontsource/figtree', out: 'fonts/Figtree-OFL.txt' },
   ];
   return {
     name: 'gb-font-licences',

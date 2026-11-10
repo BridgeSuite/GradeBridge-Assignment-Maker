@@ -6,13 +6,17 @@ import { hasFigure } from '../services/figureBlocks';
 import { useOpenHelp } from './HelpGuide';
 import { hasFigureRef } from '../services/figureRefs';
 
-export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' }> = ({ variant = 'primary', className = '', ...props }) => {
-  const baseStyle = "inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors";
+export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'accent' }> = ({ variant = 'primary', className = '', ...props }) => {
+  // ucdavis.edu buttons: 5px corners, bold. Navy (its btn--alt) is the
+  // ordinary action; gold (its btn--primary) is the one that finishes the job.
+  const baseStyle = "inline-flex items-center justify-center px-4 py-2 text-sm font-bold rounded-[5px] focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors";
   const variants = {
     primary: "bg-academic-800 text-white hover:bg-academic-900 focus:ring-academic-700",
     secondary: "bg-white text-academic-700 border border-academic-300 hover:bg-academic-50 focus:ring-academic-500",
     danger: "bg-red-600 text-white hover:bg-red-700 focus:ring-red-500",
-    ghost: "text-academic-600 hover:text-academic-900 hover:bg-academic-100 shadow-none"
+    ghost: "text-academic-600 hover:text-academic-900 hover:bg-academic-100 shadow-none",
+    // Aggie Gold, for the one action that finishes the job on a screen.
+    accent: "bg-gold-500 text-academic-800 hover:bg-gold-400 focus:ring-gold-500"
   };
 
   return (
@@ -44,7 +48,7 @@ export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { 
 );
 
 export const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
-  <div className={`bg-white shadow rounded-lg p-6 border border-academic-200 ${className}`}>
+  <div className={`bg-white shadow-sm rounded-xl p-6 border border-academic-200 ${className}`}>
     {children}
   </div>
 );
@@ -70,13 +74,13 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
 
   return (
     <div className="min-h-screen bg-academic-50 flex flex-col">
-      <header className="bg-white border-b border-academic-200 sticky top-0 z-10">
+      <header className="bg-aggie-500 text-white shadow sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <div className="flex items-center gap-4">
             <Link to="/" className="flex items-center gap-3" title={`Go to the ${HOME_SCREEN_NAME}`}>
               <div className="flex flex-col">
-                <h1 className="text-lg font-bold text-academic-900"><span className="text-[#00A4E4]">B</span>ridgeSuite</h1>
-                <span className="text-xs text-academic-500">Assignment Manager</span>
+                <h1 className="text-lg font-extrabold text-gold-500">BridgeSuite</h1>
+                <span className="text-xs text-white/80">Assignment Manager</span>
               </div>
             </Link>
             {/* ONE PLACE TO LOOK. This was "LaTeX Help", which is the only
@@ -85,7 +89,7 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
                 guide rather than the whole of the help. */}
             <button
               onClick={() => openHelp()}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-sm text-academic-600 hover:text-academic-900 hover:bg-academic-100 rounded-md transition-colors"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-white hover:bg-white/15 rounded-[5px] transition-colors"
               title="How to use the Assignment Maker"
             >
               <HelpCircle className="w-4 h-4" />
@@ -97,8 +101,8 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
                 data-home-link
                 aria-label={`Go to the ${HOME_SCREEN_NAME}`}
                 title={`Go to the ${HOME_SCREEN_NAME}, where assignments are exported`}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-academic-700 whitespace-nowrap
-                           border border-academic-300 rounded-md hover:bg-academic-50 hover:text-academic-900
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-white whitespace-nowrap
+                           bg-academic-800 rounded-[5px] hover:bg-academic-900
                            transition-colors"
               >
                 <Home className="w-4 h-4" />
@@ -110,7 +114,7 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
             {/* The same button on a narrow window, where the label will not fit. */}
             <button
               onClick={() => openHelp()}
-              className="sm:hidden p-2 text-academic-600 hover:text-academic-900 hover:bg-academic-100 rounded-md transition-colors"
+              className="sm:hidden p-2 text-white hover:bg-white/15 rounded-[5px] transition-colors"
               title="How to use the Assignment Maker"
               aria-label="Help"
             >
@@ -121,10 +125,17 @@ export const Layout: React.FC<{ children: React.ReactNode; title?: string; actio
         </div>
       </header>
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-        {title && <h2 className="text-2xl font-bold text-academic-900 mb-6 font-serif">{title}</h2>}
+        {title && (
+          <div className="mb-6">
+            <h2 className="text-3xl font-extrabold text-aggie-500">{title}</h2>
+            <div className="mt-2 flex gap-1.5" aria-hidden="true">
+              {[0, 1, 2, 3, 4].map(i => <span key={i} className="w-1.5 h-1.5 rounded-full bg-gold-500" />)}
+            </div>
+          </div>
+        )}
         {children}
       </main>
-      <footer className="bg-academic-800 text-academic-300 py-8 border-t border-academic-700">
+      <footer className="bg-academic-700 text-white/80 py-8">
         {/* ATTRIBUTION, on every screen (WORKORDER_ATTRIBUTION_AND_THIRD_PARTY_NOTICES_2026-09-27).
             It used to read "© {current year} GradeBridge AI", which named the
             wrong copyright holder with a year that changed by itself; the
