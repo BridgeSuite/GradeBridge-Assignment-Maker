@@ -1,0 +1,32 @@
+# Allowlist for the student-data guard (.githooks/student_data_guard.py).
+#
+# Every entry is an exception to rule S6 (no student data in any repository),
+# so every entry carries a reason after '#', and every change to this file is
+# a reviewed commit. An entry without a reason stops the guard (fail closed).
+#
+#   email <address or glob>        # reason          (G1; case-insensitive)
+#   path  <rules> <glob>           # reason          (rules: G1..G6, comma list, or *)
+#   commit <rules> <hash>          # reason          (a historical commit, 7 to 40 hex
+#                                                     digits; its own findings under the
+#                                                     named rules pass at pre-push only)
+#
+# Globs are fnmatch patterns on the repository path; '*' also crosses '/'.
+#
+# Phase B copy (11 November 2026): the address entries of the Record
+# repository's allowlist, and no path entries beyond this file itself. A path
+# entry for this repository is added only by a reviewed commit with its reason.
+
+# --- Addresses -------------------------------------------------------------
+email git@github.com                  # the SSH user of every GitHub remote URL, not a person
+email noreply@anthropic.com           # Co-Authored-By trailer on commits written with Claude Code
+email *@users.noreply.github.com      # GitHub's no-reply commit addresses
+email *@example.com                   # reserved for documentation (RFC 2606); cannot belong to a student
+email *@example.org                   # reserved for documentation (RFC 2606)
+email *@example.net                   # reserved for documentation (RFC 2606)
+email *.invalid                       # reserved TLD (RFC 2606); used for synthetic test identities
+email *.example                       # reserved TLD (RFC 2606)
+email *.test                          # reserved TLD (RFC 2606)
+email aknoesen@ucdavis.edu            # the instructor's own staff address (Andre Knoesen); named in disclosures and handoffs
+
+# --- Paths -----------------------------------------------------------------
+path G1,G2 .githooks/student_data_allowlist.txt    # this file: lists the allowed addresses themselves

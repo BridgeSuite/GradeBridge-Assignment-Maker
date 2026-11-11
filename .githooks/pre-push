@@ -41,6 +41,32 @@
 # in minutes, so it runs the two guards rather than `npm test`. That is the rule
 # being applied, not a divergence from it.
 
+# ---------------------------------------------------------------------------
+# Student-data guard (rule S6), added 11 November 2026 (Phase B). It runs
+# before `set -e` and before the suite, so a commit carrying student data is
+# refused first and its message is not cut off. It checks every commit about
+# to be pushed, which catches `git commit --no-verify`. Rules G1 to G6 and the
+# allowlist: .githooks/student_data_guard.py. Unlike the rest of this hook it
+# is enforcement on this machine, and it fails closed: no Python, or a guard
+# that cannot run, refuses the push.
+# ---------------------------------------------------------------------------
+hookdir=$(dirname "$0")
+PY=""
+if python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+  PY="python"
+elif py -3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+  PY="py -3"
+fi
+if [ -z "$PY" ]; then
+  printf '\npre-push REFUSED: Python 3 was not found (tried python, then py -3), so the student-data guard could not check this push.\n\n' >&2
+  exit 1
+fi
+$PY "$hookdir/student_data_guard.py" --pre-push "$1"
+status=$?
+if [ "$status" != "0" ]; then
+  printf '\npre-push REFUSED: the student-data guard did not pass this push (status %s; see above).\n\n' "$status" >&2
+  exit 1
+fi
 set -e
 
 printf '\n[pre-push] tsc\n'
