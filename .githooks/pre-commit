@@ -1,0 +1,33 @@
+#!/bin/sh
+# Pre-commit guard: refuse student data (rule S6). Added 31 October 2026.
+#
+# On 10 September 2026 a Gradescope export of EEC 1 Lab 8 (submissions,
+# student emails, IDs, names, scores) was committed here and pushed, and
+# nothing stopped it. This hook checks what is staged; pre-push checks every
+# commit again, so `git commit --no-verify` does not get past the push.
+# Rules G1 to G6 and the allowlist: .githooks/student_data_guard.py.
+#
+# Enable it once per clone:  git config core.hooksPath .githooks
+# Fail closed: no Python, or a guard that cannot run, refuses the commit.
+
+hookdir=$(dirname "$0")
+
+refuse() {
+  echo "" >&2
+  echo "pre-commit REFUSED: $1" >&2
+  echo "" >&2
+  exit 1
+}
+
+PY=""
+if python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+  PY="python"
+elif py -3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+  PY="py -3"
+fi
+[ -n "$PY" ] || refuse "Python 3 was not found (tried python, then py -3), so the student-data guard could not check this commit."
+
+$PY "$hookdir/student_data_guard.py" --staged
+status=$?
+[ "$status" = "0" ] || refuse "the student-data guard did not pass this commit (status $status; see above)."
+exit 0
