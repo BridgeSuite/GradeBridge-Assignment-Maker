@@ -6,6 +6,9 @@
 #
 #   email <address or glob>        # reason          (G1; case-insensitive)
 #   path  <rules> <glob>           # reason          (rules: G1..G6, comma list, or *)
+#   commit <rules> <hash>          # reason          (a historical commit, 7 to 40 hex
+#                                                     digits; its own findings under the
+#                                                     named rules pass at pre-push only)
 #
 # Globs are fnmatch patterns on the repository path; '*' also crosses '/'.
 #

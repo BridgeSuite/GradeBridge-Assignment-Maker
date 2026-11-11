@@ -124,6 +124,7 @@ class Allowlist:
     def __init__(self, path):
         self.emails = []
         self.paths = []  # (set of rules, glob)
+        self.commits = []  # (set of rules, commit hash or prefix of 7 or more)
         if not os.path.exists(path):
             raise GuardError("allowlist %s is missing" % os.path.basename(path))
         with open(path, encoding="utf-8") as fh:
@@ -143,10 +144,20 @@ class Allowlist:
                     if not rs <= set(RULES):
                         raise GuardError("allowlist line %d names an unknown rule" % n)
                     self.paths.append((rs, parts[2]))
+                elif len(parts) == 3 and parts[0] == "commit":
+                    # A historical commit, by hash: its own findings under the
+                    # named rules are allowed at pre-push. No '*': rules are
+                    # named one by one.
+                    rs = set(parts[1].upper().split(","))
+                    if not rs <= set(RULES):
+                        raise GuardError("allowlist line %d names an unknown rule" % n)
+                    if not re.fullmatch(r"[0-9a-f]{7,40}", parts[2].lower()):
+                        raise GuardError("allowlist line %d: a commit is 7 to 40 hex digits" % n)
+                    self.commits.append((rs, parts[2].lower()))
                 else:
                     raise GuardError(
-                        "allowlist line %d is not 'email <address>' or "
-                        "'path <rules> <glob>'" % n)
+                        "allowlist line %d is not 'email <address>', "
+                        "'path <rules> <glob>' or 'commit <rules> <hash>'" % n)
 
     def email_ok(self, addr):
         a = addr.lower()
@@ -154,6 +165,10 @@ class Allowlist:
 
     def path_ok(self, rule, path):
         return any(rule in rs and fnmatch.fnmatchcase(path, g) for rs, g in self.paths)
+
+    def commit_ok(self, rule, commit):
+        c = (commit or "").lower()
+        return bool(c) and any(rule in rs and c.startswith(h) for rs, h in self.commits)
 
 
 # --------------------------------------------------------------------------
@@ -262,9 +277,12 @@ class Findings:
         self.allow = allow
         self.apply_path_allow = apply_path_allow
         self.items = []  # (rule, path, where)
+        self.commit = None  # the commit being checked at pre-push, else None
 
     def add(self, rule, path, where):
         if self.apply_path_allow and self.allow.path_ok(rule, path):
+            return
+        if self.allow.commit_ok(rule, self.commit):
             return
         self.items.append((rule, path, where))
 
@@ -435,7 +453,11 @@ def run_commit(f, c):
         patch = git("diff-tree", "-r", "--no-commit-id", "--cc", "--no-color",
                     "--no-ext-diff", "--no-textconv", "-U0", c)
     before = len(f.items)
-    check_changes(f, paths, patch, blob)
+    f.commit = c
+    try:
+        check_changes(f, paths, patch, blob)
+    finally:
+        f.commit = None
     return len(f.items) - before
 
 
