@@ -22,10 +22,12 @@ refuse() {
 PY=""
 if python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
   PY="python"
+elif python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+  PY="python3"
 elif py -3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
   PY="py -3"
 fi
-[ -n "$PY" ] || refuse "Python 3 was not found (tried python, then py -3), so the student-data guard could not check this commit."
+[ -n "$PY" ] || refuse "Python 3 was not found (tried python, python3, then py -3), so the student-data guard could not check this commit."
 
 $PY "$hookdir/student_data_guard.py" --staged
 status=$?
